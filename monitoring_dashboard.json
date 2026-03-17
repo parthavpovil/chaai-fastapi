@@ -1,0 +1,265 @@
+{
+  "dashboard": {
+    "title": "ChatSaaS Backend Monitoring",
+    "description": "Comprehensive monitoring dashboard for ChatSaaS Backend application",
+    "version": "1.0.0",
+    "refresh_interval": "30s",
+    "panels": [
+      {
+        "id": "system_overview",
+        "title": "System Overview",
+        "type": "stat",
+        "position": {"x": 0, "y": 0, "w": 24, "h": 4},
+        "metrics": [
+          {
+            "name": "Application Status",
+            "query": "chatsaas_health_score",
+            "unit": "percent",
+            "thresholds": [
+              {"value": 90, "color": "green"},
+              {"value": 70, "color": "yellow"},
+              {"value": 0, "color": "red"}
+            ]
+          },
+          {
+            "name": "Total Workspaces",
+            "query": "chatsaas_workspaces_total",
+            "unit": "short"
+          },
+          {
+            "name": "Active Agents",
+            "query": "chatsaas_agents_active",
+            "unit": "short"
+          },
+          {
+            "name": "Total Channels",
+            "query": "chatsaas_channels_total",
+            "unit": "short"
+          }
+        ]
+      },
+      {
+        "id": "request_metrics",
+        "title": "HTTP Request Metrics",
+        "type": "graph",
+        "position": {"x": 0, "y": 4, "w": 12, "h": 8},
+        "metrics": [
+          {
+            "name": "Request Rate",
+            "query": "rate(http_requests_total[5m])",
+            "legend": "Requests/sec"
+          },
+          {
+            "name": "Error Rate",
+            "query": "rate(http_requests_total{status=~'5..'}[5m])",
+            "legend": "Errors/sec",
+            "color": "red"
+          }
+        ],
+        "y_axis": {
+          "unit": "reqps",
+          "min": 0
+        }
+      },
+      {
+        "id": "response_times",
+        "title": "Response Times",
+        "type": "graph",
+        "position": {"x": 12, "y": 4, "w": 12, "h": 8},
+        "metrics": [
+          {
+            "name": "Average Response Time",
+            "query": "histogram_quantile(0.50, rate(http_request_duration_seconds_bucket[5m]))",
+            "legend": "P50"
+          },
+          {
+            "name": "95th Percentile",
+            "query": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))",
+            "legend": "P95"
+          },
+          {
+            "name": "99th Percentile",
+            "query": "histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m]))",
+            "legend": "P99"
+          }
+        ],
+        "y_axis": {
+          "unit": "s",
+          "min": 0
+        }
+      },
+      {
+        "id": "business_metrics",
+        "title": "Business Metrics",
+        "type": "graph",
+        "position": {"x": 0, "y": 12, "w": 12, "h": 8},
+        "metrics": [
+          {
+            "name": "Messages Processed",
+            "query": "rate(chatsaas_messages_sent_total[5m])",
+            "legend": "Messages/sec"
+          },
+          {
+            "name": "AI Token Usage",
+            "query": "rate(chatsaas_tokens_used_total[5m])",
+            "legend": "Tokens/sec"
+          }
+        ],
+        "y_axis": {
+          "unit": "short",
+          "min": 0
+        }
+      },
+      {
+        "id": "database_metrics",
+        "title": "Database Performance",
+        "type": "graph",
+        "position": {"x": 12, "y": 12, "w": 12, "h": 8},
+        "metrics": [
+          {
+            "name": "Active Connections",
+            "query": "chatsaas_db_connections_active",
+            "legend": "Active Connections"
+          },
+          {
+            "name": "Query Duration P95",
+            "query": "histogram_quantile(0.95, rate(db_query_duration_seconds_bucket[5m]))",
+            "legend": "Query P95"
+          }
+        ],
+        "y_axis": {
+          "unit": "short",
+          "min": 0
+        }
+      },
+      {
+        "id": "conversation_metrics",
+        "title": "Conversation Status",
+        "type": "pie",
+        "position": {"x": 0, "y": 20, "w": 8, "h": 8},
+        "metrics": [
+          {
+            "name": "Active Conversations",
+            "query": "chatsaas_conversations_active{status='active'}",
+            "legend": "Active"
+          },
+          {
+            "name": "Escalated Conversations",
+            "query": "chatsaas_conversations_active{status='escalated'}",
+            "legend": "Escalated"
+          },
+          {
+            "name": "Agent Conversations",
+            "query": "chatsaas_conversations_active{status='agent'}",
+            "legend": "With Agent"
+          }
+        ]
+      },
+      {
+        "id": "error_logs",
+        "title": "Recent Errors",
+        "type": "logs",
+        "position": {"x": 8, "y": 20, "w": 16, "h": 8},
+        "query": "level='ERROR'",
+        "time_range": "1h",
+        "max_lines": 50
+      },
+      {
+        "id": "alerts_summary",
+        "title": "Active Alerts",
+        "type": "table",
+        "position": {"x": 0, "y": 28, "w": 24, "h": 6},
+        "columns": [
+          {"field": "severity", "title": "Severity"},
+          {"field": "type", "title": "Alert Type"},
+          {"field": "message", "title": "Message"},
+          {"field": "timestamp", "title": "Time"}
+        ],
+        "data_source": "/api/metrics/alerts/status"
+      }
+    ],
+    "alerts": [
+      {
+        "name": "High Error Rate",
+        "condition": "rate(http_requests_total{status=~'5..'}[5m]) > 0.1",
+        "duration": "5m",
+        "severity": "critical",
+        "message": "HTTP error rate is above 10%"
+      },
+      {
+        "name": "High Response Time",
+        "condition": "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2",
+        "duration": "10m",
+        "severity": "warning",
+        "message": "95th percentile response time is above 2 seconds"
+      },
+      {
+        "name": "Database Connection Issues",
+        "condition": "chatsaas_db_connections_active > 50",
+        "duration": "5m",
+        "severity": "warning",
+        "message": "High number of database connections"
+      },
+      {
+        "name": "Low Health Score",
+        "condition": "chatsaas_health_score < 80",
+        "duration": "5m",
+        "severity": "warning",
+        "message": "Application health score is below 80%"
+      },
+      {
+        "name": "Stale Conversations",
+        "condition": "chatsaas_conversations_stale > 10",
+        "duration": "15m",
+        "severity": "warning",
+        "message": "High number of stale escalated conversations"
+      }
+    ],
+    "notification_channels": [
+      {
+        "name": "email",
+        "type": "email",
+        "settings": {
+          "addresses": ["admin@your-domain.com", "devops@your-domain.com"]
+        }
+      },
+      {
+        "name": "slack",
+        "type": "slack",
+        "settings": {
+          "webhook_url": "${SLACK_WEBHOOK_URL}",
+          "channel": "#alerts"
+        }
+      }
+    ]
+  },
+  "data_sources": [
+    {
+      "name": "prometheus",
+      "type": "prometheus",
+      "url": "http://localhost:9090",
+      "access": "proxy"
+    },
+    {
+      "name": "chatsaas_api",
+      "type": "json",
+      "url": "http://localhost:8000/api/metrics",
+      "access": "proxy"
+    }
+  ],
+  "variables": [
+    {
+      "name": "workspace",
+      "type": "query",
+      "query": "label_values(chatsaas_messages_sent_total, workspace_id)",
+      "multi": true,
+      "include_all": true
+    },
+    {
+      "name": "time_range",
+      "type": "interval",
+      "options": ["5m", "15m", "1h", "6h", "24h", "7d"],
+      "default": "1h"
+    }
+  ]
+}

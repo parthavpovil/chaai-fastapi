@@ -1,0 +1,510 @@
+"""
+Channel Management Router
+Handles channel creation, listing, and management with tier limit checking
+"""
+from typing import List, Dict, Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from app.database import get_db
+from app.middleware.auth_middleware import get_current_user, get_current_workspace
+from app.models.user import User
+from app.models.workspace import Workspace
+from app.models.channel import Channel
+from app.services.channel_validator import ChannelValidator, ChannelValidationError
+from app.services.tier_manager import TierManager, TierLimitError
+from app.services.encryption import encrypt_credential
+
+
+router = APIRouter(prefix="/api/channels", tags=["channels"])
+
+
+# ─── Request/Response Models ──────────────────────────────────────────────────
+
+class ChannelCreateRequest(BaseModel):
+    """Request model for creating a channel"""
+    channel_type: str = Field(..., description="Channel type: telegram, whatsapp, instagram, webchat")
+    name: str = Field(..., min_length=1, max_length=100, description="Channel display name")
+    credentials: Dict[str, Any] = Field(..., description="Channel credentials")
+    is_active: bool = Field(default=True, description="Whether channel is active")
+
+
+class WebChatConfigRequest(BaseModel):
+    """Request model for WebChat configuration"""
+    business_name: str = Field(..., min_length=1, max_length=100)
+    primary_color: str = Field(..., pattern=r"^#[0-9A-Fa-f]{6}$")
+    position: str = Field(..., pattern=r"^(bottom-right|bottom-left|top-right|top-left)$")
+    welcome_message: str = Field(..., min_length=1, max_length=500)
+
+
+class TelegramConfigRequest(BaseModel):
+    """Request model for Telegram configuration"""
+    bot_token: str = Field(..., min_length=1)
+
+
+class WhatsAppConfigRequest(BaseModel):
+    """Request model for WhatsApp configuration"""
+    phone_number_id: str = Field(..., min_length=1)
+    access_token: str = Field(..., min_length=1)
+
+
+class InstagramConfigRequest(BaseModel):
+    """Request model for Instagram configuration"""
+    page_id: str = Field(..., min_length=1)
+    access_token: str = Field(..., min_length=1)
+
+
+class ChannelResponse(BaseModel):
+    """Response model for channel information"""
+    id: str
+    channel_type: str
+    name: str
+    is_active: bool
+    widget_id: Optional[str] = None
+    platform_info: Dict[str, Any]
+    created_at: str
+    updated_at: str
+
+
+class ChannelUpdateRequest(BaseModel):
+    """Request model for updating a channel"""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    is_active: Optional[bool] = None
+
+
+# ─── Channel Management Endpoints ─────────────────────────────────────────────
+
+@router.post("/", response_model=ChannelResponse)
+async def create_channel(
+    request: ChannelCreateRequest,
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Create a new channel for the workspace
+    
+    Args:
+        request: Channel creation request
+        current_user: Current authenticated user
+        current_workspace: Current workspace
+        db: Database session
+    
+    Returns:
+        Created channel information
+    
+    Raises:
+        HTTPException: If validation fails or tier limits exceeded
+    """
+    try:
+        # Check tier limits
+        tier_manager = TierManager(db)
+        await tier_manager.check_channel_limit(current_workspace.id)
+        
+        # Validate channel credentials
+        validator = ChannelValidator()
+        validation_result = await validator.validate_channel_credentials(
+            request.channel_type, 
+            request.credentials
+        )
+        
+        # Encrypt credentials for storage
+        encrypted_credentials = {}
+        for key, value in request.credentials.items():
+            if isinstance(value, str) and value:
+                encrypted_credentials[key] = encrypt_credential(value)
+            else:
+                encrypted_credentials[key] = value
+        
+        # Create channel record
+        channel = Channel(
+            workspace_id=current_workspace.id,
+            channel_type=request.channel_type,
+            name=request.name,
+            encrypted_config=encrypted_credentials,
+            widget_id=validation_result.get("widget_id"),
+            platform_data=validation_result,
+            is_active=request.is_active
+        )
+        
+        db.add(channel)
+        await db.commit()
+        await db.refresh(channel)
+        
+        return ChannelResponse(
+            id=channel.id,
+            channel_type=channel.channel_type,
+            name=channel.name,
+            is_active=channel.is_active,
+            widget_id=channel.widget_id,
+            platform_info=channel.platform_data or {},
+            created_at=channel.created_at.isoformat(),
+            updated_at=channel.updated_at.isoformat()
+        )
+        
+    except TierLimitError as e:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=str(e)
+        )
+    except ChannelValidationError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Channel validation failed: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create channel: {str(e)}"
+        )
+
+
+@router.get("/", response_model=List[ChannelResponse])
+async def list_channels(
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    List all channels for the workspace
+    
+    Args:
+        current_user: Current authenticated user
+        current_workspace: Current workspace
+        db: Database session
+    
+    Returns:
+        List of channels
+    """
+    try:
+        result = await db.execute(
+            select(Channel)
+            .where(Channel.workspace_id == current_workspace.id)
+            .order_by(Channel.created_at.desc())
+        )
+        channels = result.scalars().all()
+        
+        channel_list = []
+        for channel in channels:
+            channel_list.append(ChannelResponse(
+                id=channel.id,
+                channel_type=channel.channel_type,
+                name=channel.name,
+                is_active=channel.is_active,
+                widget_id=channel.widget_id,
+                platform_info=channel.platform_data or {},
+                created_at=channel.created_at.isoformat(),
+                updated_at=channel.updated_at.isoformat()
+            ))
+        
+        return channel_list
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to list channels: {str(e)}"
+        )
+
+
+@router.get("/{channel_id}", response_model=ChannelResponse)
+async def get_channel(
+    channel_id: str,
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get channel by ID
+    
+    Args:
+        channel_id: Channel ID
+        current_user: Current authenticated user
+        current_workspace: Current workspace
+        db: Database session
+    
+    Returns:
+        Channel information
+    
+    Raises:
+        HTTPException: If channel not found
+    """
+    try:
+        result = await db.execute(
+            select(Channel)
+            .where(Channel.id == channel_id)
+            .where(Channel.workspace_id == current_workspace.id)
+        )
+        channel = result.scalar_one_or_none()
+        
+        if not channel:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Channel not found"
+            )
+        
+        return ChannelResponse(
+            id=channel.id,
+            channel_type=channel.channel_type,
+            name=channel.name,
+            is_active=channel.is_active,
+            widget_id=channel.widget_id,
+            platform_info=channel.platform_data or {},
+            created_at=channel.created_at.isoformat(),
+            updated_at=channel.updated_at.isoformat()
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get channel: {str(e)}"
+        )
+
+
+@router.put("/{channel_id}", response_model=ChannelResponse)
+async def update_channel(
+    channel_id: str,
+    request: ChannelUpdateRequest,
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Update channel information
+    
+    Args:
+        channel_id: Channel ID
+        request: Update request
+        current_user: Current authenticated user
+        current_workspace: Current workspace
+        db: Database session
+    
+    Returns:
+        Updated channel information
+    
+    Raises:
+        HTTPException: If channel not found
+    """
+    try:
+        result = await db.execute(
+            select(Channel)
+            .where(Channel.id == channel_id)
+            .where(Channel.workspace_id == current_workspace.id)
+        )
+        channel = result.scalar_one_or_none()
+        
+        if not channel:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Channel not found"
+            )
+        
+        # Update fields
+        if request.name is not None:
+            channel.name = request.name
+        if request.is_active is not None:
+            channel.is_active = request.is_active
+        
+        await db.commit()
+        await db.refresh(channel)
+        
+        return ChannelResponse(
+            id=channel.id,
+            channel_type=channel.channel_type,
+            name=channel.name,
+            is_active=channel.is_active,
+            widget_id=channel.widget_id,
+            platform_info=channel.platform_data or {},
+            created_at=channel.created_at.isoformat(),
+            updated_at=channel.updated_at.isoformat()
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update channel: {str(e)}"
+        )
+
+
+@router.delete("/{channel_id}")
+async def delete_channel(
+    channel_id: str,
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Delete a channel
+    
+    Args:
+        channel_id: Channel ID
+        current_user: Current authenticated user
+        current_workspace: Current workspace
+        db: Database session
+    
+    Returns:
+        Success message
+    
+    Raises:
+        HTTPException: If channel not found
+    """
+    try:
+        result = await db.execute(
+            select(Channel)
+            .where(Channel.id == channel_id)
+            .where(Channel.workspace_id == current_workspace.id)
+        )
+        channel = result.scalar_one_or_none()
+        
+        if not channel:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Channel not found"
+            )
+        
+        await db.delete(channel)
+        await db.commit()
+        
+        return {"message": "Channel deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete channel: {str(e)}"
+        )
+
+
+# ─── Channel Validation Endpoints ─────────────────────────────────────────────
+
+@router.post("/validate/{channel_type}")
+async def validate_channel_credentials(
+    channel_type: str,
+    credentials: Dict[str, Any],
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace)
+):
+    """
+    Validate channel credentials without creating a channel
+    
+    Args:
+        channel_type: Channel type
+        credentials: Channel credentials
+        current_user: Current authenticated user
+        current_workspace: Current workspace
+    
+    Returns:
+        Validation result
+    
+    Raises:
+        HTTPException: If validation fails
+    """
+    try:
+        validator = ChannelValidator()
+        validation_result = await validator.validate_channel_credentials(
+            channel_type, 
+            credentials
+        )
+        
+        return {
+            "valid": True,
+            "channel_type": channel_type,
+            "validation_result": validation_result
+        }
+        
+    except ChannelValidationError as e:
+        return {
+            "valid": False,
+            "channel_type": channel_type,
+            "error": str(e)
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Validation error: {str(e)}"
+        )
+
+
+# ─── Channel Statistics Endpoint ──────────────────────────────────────────────
+
+@router.get("/stats/summary")
+async def get_channel_statistics(
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Get channel statistics for the workspace
+    
+    Args:
+        current_user: Current authenticated user
+        current_workspace: Current workspace
+        db: Database session
+    
+    Returns:
+        Channel statistics
+    """
+    try:
+        from sqlalchemy import func
+        
+        # Get channel counts by type and status
+        result = await db.execute(
+            select(
+                Channel.channel_type,
+                Channel.is_active,
+                func.count(Channel.id).label('count')
+            )
+            .where(Channel.workspace_id == current_workspace.id)
+            .group_by(Channel.channel_type, Channel.is_active)
+        )
+        
+        stats = {
+            "total_channels": 0,
+            "active_channels": 0,
+            "inactive_channels": 0,
+            "by_type": {}
+        }
+        
+        for row in result:
+            channel_type = row.channel_type
+            is_active = row.is_active
+            count = row.count
+            
+            stats["total_channels"] += count
+            
+            if is_active:
+                stats["active_channels"] += count
+            else:
+                stats["inactive_channels"] += count
+            
+            if channel_type not in stats["by_type"]:
+                stats["by_type"][channel_type] = {"active": 0, "inactive": 0}
+            
+            if is_active:
+                stats["by_type"][channel_type]["active"] += count
+            else:
+                stats["by_type"][channel_type]["inactive"] += count
+        
+        # Get tier information
+        tier_manager = TierManager(db)
+        tier_info = await tier_manager.get_workspace_tier_info(current_workspace.id)
+        
+        stats["tier_info"] = {
+            "current_tier": tier_info["tier"],
+            "channel_limit": tier_info["limits"]["channels"],
+            "channels_remaining": tier_info["remaining"]["channels"]
+        }
+        
+        return stats
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get channel statistics: {str(e)}"
+        )
