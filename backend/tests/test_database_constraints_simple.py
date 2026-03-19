@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 # Import application modules
+from app.database import Base
 from app.models import User, Workspace, Channel, Contact, Conversation, Message, Document, DocumentChunk, Agent
 from app.config import settings
 
@@ -45,7 +46,16 @@ class TestDatabaseConstraintProperties:
         # Create database session for this test
         engine = create_async_engine(settings.DATABASE_URL, echo=False)
         async_session = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-        
+
+        # Ensure all tables exist (idempotent — skips tables that already exist)
+        from app.models import (  # noqa: F401
+            user, workspace, channel, contact, conversation, message,
+            agent, document, document_chunk, usage_counter,
+            platform_setting, tier_change, rate_limit
+        )
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
         async with async_session() as db:
             try:
                 # Test 1: Foreign Key Constraints
