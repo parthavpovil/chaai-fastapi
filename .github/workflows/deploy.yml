@@ -134,6 +134,8 @@ jobs:
           
           # Move deployment files
           sudo cp /tmp/docker-compose.prod.yml ${DEPLOY_PATH}/
+          # Remove stale directory if Docker previously created it in place of the file
+          [ -d "${DEPLOY_PATH}/init-db.sql" ] && sudo rm -rf "${DEPLOY_PATH}/init-db.sql"
           sudo cp /tmp/init-db.sql ${DEPLOY_PATH}/
           sudo cp /tmp/nginx.conf /etc/nginx/sites-available/chatsaas
           sudo cp /tmp/chatsaas-backend.service /etc/systemd/system/
