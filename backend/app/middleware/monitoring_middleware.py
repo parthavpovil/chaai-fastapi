@@ -233,7 +233,6 @@ monitoring_middleware = None
 
 def get_monitoring_middleware() -> MonitoringMiddleware:
     """Get the global monitoring middleware instance"""
-    global monitoring_middleware
     if monitoring_middleware is None:
         raise RuntimeError("Monitoring middleware not initialized")
     return monitoring_middleware

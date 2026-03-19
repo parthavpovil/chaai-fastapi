@@ -320,7 +320,7 @@ class MessageProcessor:
             conversation_id=str(conversation.id),
             content=content,
             role="customer",
-            channel_type=channel.type if hasattr(channel, 'type') else "unknown",
+            channel_type="unknown",
             external_message_id=external_message_id,
             metadata=message_metadata
         )
