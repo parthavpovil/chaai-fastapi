@@ -3,7 +3,7 @@ Database Configuration and Session Management
 PostgreSQL with asyncpg driver and SQLAlchemy 2.0 async support
 """
 from typing import AsyncGenerator
-from sqlalchemy import MetaData
+from sqlalchemy import MetaData, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.pool import NullPool
@@ -63,6 +63,9 @@ async def init_db() -> None:
     Used during application startup
     """
     async with engine.begin() as conn:
+        # Enable pgvector extension (required for VECTOR columns)
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+
         # Import all models to ensure they are registered with Base
         from app.models import (
             user, workspace, channel, contact, conversation, message,
