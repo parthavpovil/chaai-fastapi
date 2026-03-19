@@ -11,7 +11,7 @@ from typing import Optional
 import os
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.database import get_async_session
+from app.database import AsyncSessionLocal
 from app.services.alerting_service import AlertingService
 from app.services.email_service import EmailService
 from app.services.metrics_service import MetricsService
@@ -100,7 +100,7 @@ class MonitoringTaskManager:
     async def _run_health_check(self):
         """Run health check and process alerts"""
         try:
-            async with get_async_session() as db:
+            async with AsyncSessionLocal() as db:
                 # Initialize services
                 email_service = EmailService()
                 alerting_service = AlertingService(db, email_service)
@@ -121,7 +121,7 @@ class MonitoringTaskManager:
     async def _collect_metrics(self):
         """Collect and cache metrics"""
         try:
-            async with get_async_session() as db:
+            async with AsyncSessionLocal() as db:
                 metrics_service = MetricsService(db)
                 
                 # Collect system metrics (this will update the cache)
@@ -155,7 +155,7 @@ async def stop_monitoring_tasks():
 async def run_manual_health_check() -> dict:
     """Run a manual health check and return results"""
     try:
-        async with get_async_session() as db:
+        async with AsyncSessionLocal() as db:
             email_service = EmailService()
             alerting_service = AlertingService(db, email_service)
             
@@ -190,7 +190,7 @@ async def run_manual_health_check() -> dict:
 async def collect_manual_metrics() -> dict:
     """Collect metrics manually and return results"""
     try:
-        async with get_async_session() as db:
+        async with AsyncSessionLocal() as db:
             metrics_service = MetricsService(db)
             metrics = await metrics_service.get_system_metrics()
             return metrics
