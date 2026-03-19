@@ -100,6 +100,7 @@ jobs:
             backend/docker-compose.prod.yml \
             backend/nginx.conf \
             backend/chatsaas-backend.service \
+            backend/init-db.sql \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
 
       - name: Create deployment script
@@ -133,6 +134,7 @@ jobs:
           
           # Move deployment files
           sudo cp /tmp/docker-compose.prod.yml ${DEPLOY_PATH}/
+          sudo cp /tmp/init-db.sql ${DEPLOY_PATH}/
           sudo cp /tmp/nginx.conf /etc/nginx/sites-available/chatsaas
           sudo cp /tmp/chatsaas-backend.service /etc/systemd/system/
           
@@ -242,6 +244,7 @@ jobs:
           # Clean up
           rm -f /tmp/docker-image.tar.gz
           rm -f /tmp/docker-compose.prod.yml
+          rm -f /tmp/init-db.sql
           rm -f /tmp/nginx.conf
           rm -f /tmp/chatsaas-backend.service
           
