@@ -193,11 +193,13 @@ class ConversationManager:
             return None
         
         # Update status and escalation reason
+        # Strip null bytes — PostgreSQL UTF-8 rejects \x00
+        safe_reason = escalation_reason.replace("\x00", "") if escalation_reason else escalation_reason
         stmt = update(Conversation).where(
             Conversation.id == conversation_id
         ).values(
             status="escalated",
-            escalation_reason=escalation_reason,
+            escalation_reason=safe_reason,
             updated_at=datetime.now(timezone.utc)
         ).returning(Conversation)
         
