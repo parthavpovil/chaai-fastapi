@@ -283,13 +283,12 @@ class TestAuthenticationProperties:
         assert len(long_slug) <= 50, f"Long slug '{long_slug}' exceeds maximum length"
 
     @given(
-        email=valid_email(),
         password=valid_password(),
         business_name=business_name()
     )
     @settings(max_examples=10, deadline=None)
     @pytest.mark.asyncio
-    async def test_property_3_access_control_enforcement(self, email, password, business_name):
+    async def test_property_3_access_control_enforcement(self, password, business_name):
         """
         Property 3: Access Control Enforcement
         For any inactive user account, login attempts should be rejected with appropriate 
@@ -310,6 +309,9 @@ class TestAuthenticationProperties:
         db = await anext(db_gen)
         
         try:
+            # Generate unique email for this test run to avoid conflicts
+            email = f"test-{uuid4().hex[:12]}@example.com"
+            
             # Setup: Create active user and workspace
             hashed_password = auth_service.hash_password(password)
             
@@ -484,33 +486,11 @@ class TestAuthenticationProperties:
 class TestChannelProperties:
     """Property tests for channel management and integration"""
     
-    @given(credentials=channel_credentials())
-    @settings(max_examples=100)
-    async def test_property_4_channel_connection_validation(self, credentials):
-        """
-        Property 4: Channel Connection Validation
-        For any channel type, connecting with valid credentials should result in successful 
-        validation and webhook configuration, while invalid credentials should be rejected.
-        
-        Validates: Requirements 2.1, 2.2, 2.3, 2.4
-        """
-        # This test would require mocking external APIs
-        # Implementation depends on channel validation service
-        pass
-
-    @given(credentials=channel_credentials())
-    @settings(max_examples=100)
-    async def test_property_5_credential_encryption_round_trip(self, credentials):
-        """
-        Property 5: Credential Encryption Round Trip
-        For any channel credentials, encrypting with AES-256-CBC then decrypting 
-        should produce the original credentials.
-        
-        Validates: Requirements 2.5, 12.3
-        """
-        # This test requires EncryptionService implementation
-        # Skipping for now to focus on database constraints
-        pass
+    # Removed: test_property_4_channel_connection_validation
+    # Reason: Stub test with no implementation, causing async executor errors
+    
+    # Removed: test_property_5_credential_encryption_round_trip
+    # Reason: Stub test with no implementation, causing async executor errors
 
 
 class TestTierProperties:
@@ -842,7 +822,8 @@ class TestDatabaseConstraintProperties:
         contact_count=st.integers(min_value=1, max_value=5),
         vector_dimension=st.sampled_from([1536, 3072])  # OpenAI vs Google dimensions
     )
-    @settings(max_examples=1)  # Keep minimal for speed as requested
+    @settings(max_examples=1, deadline=None)  # Keep minimal for speed as requested
+    @pytest.mark.asyncio
     async def test_property_31_database_constraint_enforcement(self, workspace_count, contact_count, vector_dimension):
         """
         Property 31: Database Constraint Enforcement
@@ -857,13 +838,20 @@ class TestDatabaseConstraintProperties:
         import numpy as np
         from datetime import timezone
 
-        async with get_db() as db:
+        # Get database session
+        db_gen = get_db()
+        db = await anext(db_gen)
+        
+        try:
+            # Generate unique identifiers for this test run to avoid conflicts
+            unique_suffix = uuid4().hex[:12]
+            
             # Test 1: Foreign Key Constraints
             # Create valid workspace first
             workspace = Workspace(
                 id=uuid4(),
                 business_name="Test Business",
-                slug=f"test-{secrets.token_hex(8)}",
+                slug=f"test-{unique_suffix}",
                 tier="free",
                 owner_id=uuid4()  # This should reference a valid user, but we'll test FK constraint
             )
@@ -878,7 +866,7 @@ class TestDatabaseConstraintProperties:
             # Create valid user first, then workspace
             user = User(
                 id=uuid4(),
-                email=f"test-{secrets.token_hex(8)}@example.com",
+                email=f"test-{unique_suffix}@example.com",
                 password_hash="$2b$12$test_hash",
                 is_active=True
             )
@@ -1109,7 +1097,7 @@ class TestDatabaseConstraintProperties:
             workspace2 = Workspace(
                 id=uuid4(),
                 business_name="Another Business",
-                slug=f"another-{secrets.token_hex(8)}",
+                slug=f"another-{unique_suffix}",
                 tier="free",
                 owner_id=user.id
             )
@@ -1125,6 +1113,11 @@ class TestDatabaseConstraintProperties:
             )
             db.add(agent3)
             await db.commit()  # Should succeed
+            
+        finally:
+            # Cleanup
+            await db.rollback()
+            await db.close()
 
 
 if __name__ == "__main__":
