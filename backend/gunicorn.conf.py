@@ -31,7 +31,7 @@ proc_name = "chatsaas-backend"
 
 # Server mechanics
 daemon = False
-pidfile = "/var/run/chatsaas/gunicorn.pid"
+pidfile = None
 user = None
 group = None
 tmp_upload_dir = None

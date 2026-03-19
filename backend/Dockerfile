@@ -41,11 +41,10 @@ COPY . .
 
 # Create necessary directories
 RUN mkdir -p /var/chatsaas/storage/documents && \
-    mkdir -p /var/run/chatsaas && \
     mkdir -p /var/log/chatsaas
 
 # Set ownership
-RUN chown -R chatsaas:chatsaas /app /var/chatsaas /var/run/chatsaas /var/log/chatsaas
+RUN chown -R chatsaas:chatsaas /app /var/chatsaas /var/log/chatsaas
 
 # Switch to non-root user
 USER chatsaas
