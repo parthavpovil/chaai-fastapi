@@ -214,7 +214,7 @@ jobs:
             fi
             if [ $i -eq 30 ]; then
               echo "Container failed to become healthy. Rolling back..."
-              docker compose -f docker-compose.prod.yml down
+              docker compose -f docker-compose.prod.yml stop backend
               exit 1
             fi
             echo "Waiting... ($i/30)"
@@ -224,13 +224,13 @@ jobs:
           # Health check
           echo "Performing health check..."
           for i in {1..3}; do
-            if curl -f http://localhost:8000/api/metrics/health/detailed > /dev/null 2>&1; then
+            if curl -f http://localhost:8000/health > /dev/null 2>&1; then
               echo "Health check passed!"
               break
             fi
             if [ $i -eq 3 ]; then
               echo "Health check failed after 3 attempts. Rolling back..."
-              docker compose -f docker-compose.prod.yml down
+              docker compose -f docker-compose.prod.yml stop backend
               exit 1
             fi
             echo "Health check attempt $i failed, retrying..."
