@@ -462,26 +462,31 @@ class TestWebChatAPIProperties:
         webchat_service = WebChatService()
         
         async with get_db() as db:
+            # Create owner user first
+            owner = User(
+                id=uuid4(),
+                email=f"owner-{uuid4().hex[:8]}@test.com",
+                hashed_password="hashed_password",
+                is_active=True
+            )
+            db.add(owner)
+            await db.commit()
+            
             # Create workspace with webchat channel
             workspace = Workspace(
                 id=uuid4(),
-                business_name=widget_config_data['business_name'],
+                name=widget_config_data['business_name'],
                 slug=workspace_slug,
                 tier='pro',
-                owner_id=uuid4()
+                owner_id=owner.id
             )
             
-            # Create webchat channel with encrypted config
-            from app.services.encryption_service import EncryptionService
-            encryption_service = EncryptionService()
-            encrypted_config = encryption_service.encrypt(json.dumps(widget_config_data))
-            
+            # Create webchat channel with config
             webchat_channel = Channel(
                 id=uuid4(),
                 workspace_id=workspace.id,
                 type='webchat',
-                name='WebChat',
-                credentials=encrypted_config,
+                config=widget_config_data,  # Store as JSONB
                 is_active=True
             )
             
@@ -528,18 +533,27 @@ class TestWebChatAPIProperties:
         webchat_service = WebChatService()
         
         async with get_db() as db:
+            # Create owner user first
+            owner = User(
+                id=uuid4(),
+                email=f"owner-{uuid4().hex[:8]}@test.com",
+                hashed_password="hashed_password",
+                is_active=True
+            )
+            db.add(owner)
+            await db.commit()
+            
             # Test non-existent workspace
             config = await webchat_service.get_widget_config(db, invalid_workspace_slug)
             assert config is None, "Should return None for non-existent workspace"
             
-            # Create inactive workspace
+            # Create workspace with inactive channel
             inactive_workspace = Workspace(
                 id=uuid4(),
-                business_name="Inactive Business",
+                name="Inactive Business",
                 slug=inactive_workspace_slug,
                 tier='pro',
-                owner_id=uuid4(),
-                is_active=False
+                owner_id=owner.id
             )
             
             # Create inactive webchat channel
@@ -547,8 +561,7 @@ class TestWebChatAPIProperties:
                 id=uuid4(),
                 workspace_id=inactive_workspace.id,
                 type='webchat',
-                name='Inactive WebChat',
-                credentials='{"test": "config"}',
+                config={"test": "config"},
                 is_active=False
             )
             
@@ -559,13 +572,6 @@ class TestWebChatAPIProperties:
             # Test inactive channel
             config = await webchat_service.get_widget_config(db, inactive_workspace_slug)
             assert config is None, "Should return None for inactive webchat channel"
-            
-            # Test with active workspace but inactive channel
-            inactive_workspace.is_active = True
-            await db.commit()
-            
-            config = await webchat_service.get_widget_config(db, inactive_workspace_slug)
-            assert config is None, "Should return None when webchat channel is inactive"
 
 
 if __name__ == "__main__":

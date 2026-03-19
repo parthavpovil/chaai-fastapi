@@ -114,9 +114,11 @@ class TestDatabaseConstraintProperties:
                 await db.rollback()
 
                 # Unique constraint — user email
+                # Store email before rollback to avoid lazy-loading issues
+                user_email = user.email
                 duplicate_user = User(
                     id=uuid4(),
-                    email=user.email,  # same email → unique violation
+                    email=user_email,  # same email → unique violation
                     hashed_password="$2b$12$another_hash",
                     is_active=True,
                 )
