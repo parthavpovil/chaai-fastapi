@@ -281,19 +281,20 @@ jobs:
       - name: Verify deployment
         run: |
           echo "Verifying deployment..."
-          HEALTH_URL="https://${{ secrets.VPS_HOST }}/api/metrics/health/detailed"
-          
-          for i in {1..5}; do
-            if curl -f -k ${HEALTH_URL} > /dev/null 2>&1; then
-              echo "✅ Deployment verified successfully!"
-              exit 0
-            fi
-            echo "Verification attempt $i failed, retrying..."
-            sleep 10
-          done
-          
-          echo "❌ Deployment verification failed"
-          exit 1
+
+          sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh \
+            -o StrictHostKeyChecking=no \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            'for i in {1..5}; do
+              if curl -f http://localhost:8000/health > /dev/null 2>&1; then
+                echo "✅ Deployment verified successfully!"
+                exit 0
+              fi
+              echo "Verification attempt $i failed, retrying..."
+              sleep 5
+            done
+            echo "❌ Deployment verification failed"
+            exit 1'
 
       - name: Cleanup
         if: always()
