@@ -205,10 +205,11 @@ jobs:
           echo "Starting new container..."
           docker compose -f docker-compose.prod.yml up -d --no-deps backend
 
-          # Wait for container to be healthy
+          # Wait for backend container to be healthy
           echo "Waiting for container to be healthy..."
           for i in {1..30}; do
-            if docker compose -f docker-compose.prod.yml ps | grep -q "healthy"; then
+            HEALTH=$(docker inspect chatsaas-backend --format='{{.State.Health.Status}}' 2>/dev/null || echo "unknown")
+            if [ "$HEALTH" = "healthy" ]; then
               echo "Container is healthy!"
               break
             fi
@@ -217,7 +218,7 @@ jobs:
               docker compose -f docker-compose.prod.yml stop backend
               exit 1
             fi
-            echo "Waiting... ($i/30)"
+            echo "Waiting... ($i/30) [status: $HEALTH]"
             sleep 2
           done
           
