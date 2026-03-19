@@ -93,6 +93,10 @@ class TestDatabaseConstraintProperties:
                 )
                 db.add(user)
                 await db.commit()
+                
+                # Store email immediately after commit to avoid lazy-loading issues
+                user_email = user.email
+                workspace_slug = workspace.slug
 
                 workspace.owner_id = user.id
                 db.add(workspace)
@@ -104,7 +108,7 @@ class TestDatabaseConstraintProperties:
                 duplicate_workspace = Workspace(
                     id=uuid4(),
                     name="Another Business",
-                    slug=workspace.slug,  # same slug → unique violation
+                    slug=workspace_slug,  # same slug → unique violation
                     tier="free",
                     owner_id=user.id,
                 )
@@ -114,8 +118,6 @@ class TestDatabaseConstraintProperties:
                 await db.rollback()
 
                 # Unique constraint — user email
-                # Store email before rollback to avoid lazy-loading issues
-                user_email = user.email
                 duplicate_user = User(
                     id=uuid4(),
                     email=user_email,  # same email → unique violation
