@@ -186,25 +186,25 @@ jobs:
           
           # Run database migrations
           echo "Running database migrations..."
-          docker-compose -f docker-compose.prod.yml run --rm backend alembic upgrade head || {
+          docker compose -f docker-compose.prod.yml run --rm backend alembic upgrade head || {
             echo "Migration failed! Aborting deployment."
             exit 1
           }
-          
+
           # Deploy with zero-downtime strategy
           echo "Starting new container..."
-          docker-compose -f docker-compose.prod.yml up -d --no-deps --build backend
-          
+          docker compose -f docker-compose.prod.yml up -d --no-deps --build backend
+
           # Wait for container to be healthy
           echo "Waiting for container to be healthy..."
           for i in {1..30}; do
-            if docker-compose -f docker-compose.prod.yml ps | grep -q "healthy"; then
+            if docker compose -f docker-compose.prod.yml ps | grep -q "healthy"; then
               echo "Container is healthy!"
               break
             fi
             if [ $i -eq 30 ]; then
               echo "Container failed to become healthy. Rolling back..."
-              docker-compose -f docker-compose.prod.yml down
+              docker compose -f docker-compose.prod.yml down
               exit 1
             fi
             echo "Waiting... ($i/30)"
@@ -220,7 +220,7 @@ jobs:
             fi
             if [ $i -eq 3 ]; then
               echo "Health check failed after 3 attempts. Rolling back..."
-              docker-compose -f docker-compose.prod.yml down
+              docker compose -f docker-compose.prod.yml down
               exit 1
             fi
             echo "Health check attempt $i failed, retrying..."
