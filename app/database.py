@@ -4,6 +4,7 @@ PostgreSQL with asyncpg driver and SQLAlchemy 2.0 async support
 """
 from typing import AsyncGenerator
 from sqlalchemy import MetaData
+from sqlalchemy.exc import IllegalStateChangeError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.pool import NullPool
@@ -47,12 +48,17 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     Dependency to get database session
     Used with FastAPI's Depends() for dependency injection
     """
-    async with AsyncSessionLocal() as session:
+    session = AsyncSessionLocal()
+    try:
+        yield session
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
         try:
-            yield session
-        except Exception:
-            await session.rollback()
-            raise
+            await session.close()
+        except IllegalStateChangeError:
+            pass
 
 
 async def init_db() -> None:
