@@ -12,6 +12,20 @@ from sqlalchemy.pool import StaticPool
 from app.database import Base
 from app.config import settings
 
+# ---------------------------------------------------------------------------
+# SQLite compatibility patches
+# SQLAlchemy raises CompileError for PostgreSQL-specific types (JSONB, VECTOR)
+# when the target dialect is SQLite.  Monkey-patch the SQLite type compiler so
+# that these types fall back to TEXT, keeping in-memory test sessions working.
+# ---------------------------------------------------------------------------
+from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler  # noqa: E402
+
+if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
+    SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"
+
+if not hasattr(SQLiteTypeCompiler, "visit_VECTOR"):
+    SQLiteTypeCompiler.visit_VECTOR = lambda self, type_, **kw: "TEXT"
+
 
 @pytest.fixture(scope="session")
 def event_loop():
