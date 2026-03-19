@@ -119,7 +119,7 @@ jobs:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     environment:
       name: production
-      url: https://${{ secrets.VPS_HOST }}
+      url: https://api.parthavpovil.in
     
     steps:
       - name: Checkout code
