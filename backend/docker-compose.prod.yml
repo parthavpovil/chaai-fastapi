@@ -44,9 +44,7 @@ services:
 
   # ChatSaaS Backend Application
   backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: chatsaas-backend:latest
     container_name: chatsaas-backend
     environment:
       - DEBUG=false
