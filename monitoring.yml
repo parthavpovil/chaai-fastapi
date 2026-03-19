@@ -1,0 +1,284 @@
+# Monitoring Configuration for ChatSaaS Backend
+# This file can be used with monitoring tools like Prometheus, Grafana, etc.
+
+# Application Metrics
+application:
+  name: "chatsaas-backend"
+  version: "1.0.0"
+  environment: "production"
+  
+  # Health check endpoints
+  health_checks:
+    - name: "application"
+      url: "http://localhost:8000/health"
+      interval: 30
+      timeout: 10
+      expected_status: 200
+    
+    - name: "database"
+      type: "postgresql"
+      connection_string: "${DATABASE_URL}"
+      interval: 60
+      timeout: 15
+    
+    - name: "storage"
+      type: "filesystem"
+      path: "/var/chatsaas/storage"
+      interval: 300
+      check_free_space: true
+      min_free_space_gb: 5
+
+# Performance Metrics
+metrics:
+  # HTTP Request Metrics
+  http:
+    - name: "request_duration"
+      type: "histogram"
+      description: "HTTP request duration in seconds"
+      buckets: [0.1, 0.5, 1.0, 2.5, 5.0, 10.0]
+    
+    - name: "request_count"
+      type: "counter"
+      description: "Total HTTP requests"
+      labels: ["method", "endpoint", "status_code"]
+    
+    - name: "active_connections"
+      type: "gauge"
+      description: "Number of active HTTP connections"
+  
+  # WebSocket Metrics
+  websocket:
+    - name: "websocket_connections"
+      type: "gauge"
+      description: "Number of active WebSocket connections"
+      labels: ["workspace_id"]
+    
+    - name: "websocket_messages"
+      type: "counter"
+      description: "Total WebSocket messages sent"
+      labels: ["event_type", "workspace_id"]
+  
+  # Database Metrics
+  database:
+    - name: "db_connections"
+      type: "gauge"
+      description: "Number of active database connections"
+    
+    - name: "db_query_duration"
+      type: "histogram"
+      description: "Database query duration in seconds"
+      buckets: [0.01, 0.05, 0.1, 0.5, 1.0, 5.0]
+    
+    - name: "db_query_count"
+      type: "counter"
+      description: "Total database queries"
+      labels: ["operation", "table"]
+  
+  # AI Provider Metrics
+  ai_providers:
+    - name: "ai_request_duration"
+      type: "histogram"
+      description: "AI provider request duration in seconds"
+      buckets: [0.5, 1.0, 2.0, 5.0, 10.0, 30.0]
+      labels: ["provider", "operation"]
+    
+    - name: "ai_request_count"
+      type: "counter"
+      description: "Total AI provider requests"
+      labels: ["provider", "operation", "status"]
+    
+    - name: "ai_token_usage"
+      type: "counter"
+      description: "Total AI tokens consumed"
+      labels: ["provider", "type"]
+  
+  # Business Metrics
+  business:
+    - name: "messages_processed"
+      type: "counter"
+      description: "Total messages processed"
+      labels: ["channel_type", "workspace_id"]
+    
+    - name: "conversations_active"
+      type: "gauge"
+      description: "Number of active conversations"
+      labels: ["status", "workspace_id"]
+    
+    - name: "escalations_count"
+      type: "counter"
+      description: "Total escalations triggered"
+      labels: ["reason", "workspace_id"]
+    
+    - name: "documents_processed"
+      type: "counter"
+      description: "Total documents processed"
+      labels: ["status", "workspace_id"]
+
+# Alerting Rules
+alerts:
+  # Critical Alerts
+  critical:
+    - name: "service_down"
+      condition: "up == 0"
+      duration: "1m"
+      description: "ChatSaaS Backend service is down"
+      severity: "critical"
+    
+    - name: "high_error_rate"
+      condition: "rate(http_requests_total{status=~'5..'}[5m]) > 0.1"
+      duration: "5m"
+      description: "High error rate detected"
+      severity: "critical"
+    
+    - name: "database_connection_failed"
+      condition: "db_connections == 0"
+      duration: "2m"
+      description: "Database connection failed"
+      severity: "critical"
+  
+  # Warning Alerts
+  warning:
+    - name: "high_response_time"
+      condition: "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2"
+      duration: "10m"
+      description: "High response time detected"
+      severity: "warning"
+    
+    - name: "high_memory_usage"
+      condition: "process_resident_memory_bytes / 1024 / 1024 > 1024"
+      duration: "15m"
+      description: "High memory usage"
+      severity: "warning"
+    
+    - name: "disk_space_low"
+      condition: "node_filesystem_free_bytes{mountpoint='/var/chatsaas/storage'} / 1024 / 1024 / 1024 < 5"
+      duration: "5m"
+      description: "Low disk space on storage volume"
+      severity: "warning"
+    
+    - name: "ai_provider_errors"
+      condition: "rate(ai_request_count{status='error'}[10m]) > 0.05"
+      duration: "10m"
+      description: "High AI provider error rate"
+      severity: "warning"
+
+# Log Monitoring
+logs:
+  # Application Logs
+  application:
+    path: "/var/log/chatsaas/"
+    patterns:
+      - name: "error"
+        pattern: "ERROR"
+        severity: "error"
+      
+      - name: "warning"
+        pattern: "WARNING"
+        severity: "warning"
+      
+      - name: "ai_provider_error"
+        pattern: "AI provider.*error"
+        severity: "warning"
+      
+      - name: "database_error"
+        pattern: "database.*error|connection.*failed"
+        severity: "critical"
+  
+  # Nginx Logs
+  nginx:
+    access_log: "/var/log/nginx/access.log"
+    error_log: "/var/log/nginx/error.log"
+    patterns:
+      - name: "4xx_errors"
+        pattern: '" 4[0-9][0-9] '
+        severity: "warning"
+      
+      - name: "5xx_errors"
+        pattern: '" 5[0-9][0-9] '
+        severity: "error"
+      
+      - name: "rate_limit"
+        pattern: "limiting requests"
+        severity: "info"
+
+# Dashboard Configuration
+dashboards:
+  # System Overview Dashboard
+  system_overview:
+    title: "ChatSaaS Backend - System Overview"
+    panels:
+      - title: "Request Rate"
+        type: "graph"
+        metric: "rate(http_requests_total[5m])"
+        
+      - title: "Response Time"
+        type: "graph"
+        metric: "histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m]))"
+        
+      - title: "Error Rate"
+        type: "graph"
+        metric: "rate(http_requests_total{status=~'5..'}[5m])"
+        
+      - title: "Active Connections"
+        type: "stat"
+        metric: "active_connections"
+  
+  # Business Metrics Dashboard
+  business_metrics:
+    title: "ChatSaaS Backend - Business Metrics"
+    panels:
+      - title: "Messages Processed"
+        type: "graph"
+        metric: "rate(messages_processed[5m])"
+        
+      - title: "Active Conversations"
+        type: "stat"
+        metric: "conversations_active"
+        
+      - title: "Escalation Rate"
+        type: "graph"
+        metric: "rate(escalations_count[5m])"
+        
+      - title: "AI Token Usage"
+        type: "graph"
+        metric: "rate(ai_token_usage[5m])"
+  
+  # Infrastructure Dashboard
+  infrastructure:
+    title: "ChatSaaS Backend - Infrastructure"
+    panels:
+      - title: "CPU Usage"
+        type: "graph"
+        metric: "rate(process_cpu_seconds_total[5m]) * 100"
+        
+      - title: "Memory Usage"
+        type: "graph"
+        metric: "process_resident_memory_bytes / 1024 / 1024"
+        
+      - title: "Database Connections"
+        type: "stat"
+        metric: "db_connections"
+        
+      - title: "Disk Usage"
+        type: "graph"
+        metric: "node_filesystem_free_bytes{mountpoint='/var/chatsaas/storage'} / 1024 / 1024 / 1024"
+
+# Notification Channels
+notifications:
+  email:
+    enabled: true
+    smtp_server: "smtp.your-domain.com"
+    smtp_port: 587
+    username: "alerts@your-domain.com"
+    recipients:
+      - "admin@your-domain.com"
+      - "devops@your-domain.com"
+  
+  slack:
+    enabled: false
+    webhook_url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+    channel: "#alerts"
+  
+  pagerduty:
+    enabled: false
+    integration_key: "YOUR_PAGERDUTY_INTEGRATION_KEY"
