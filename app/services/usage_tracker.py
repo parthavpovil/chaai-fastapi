@@ -111,7 +111,10 @@ class UsageTracker:
         
         result = await self.db.execute(stmt)
         await self.db.commit()
-        
+        # expire_on_commit=False means stale identity map entries persist after commit.
+        # Expire manually so scalar_one() loads fresh values from the RETURNING buffer.
+        self.db.expire_all()
+
         return result.scalar_one()
     
     async def get_monthly_usage(self, workspace_id: str, month: Optional[str] = None) -> Dict[str, int]:
