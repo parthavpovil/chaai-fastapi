@@ -152,11 +152,17 @@ jobs:
           
           # Security
           ENCRYPTION_KEY=${{ secrets.ENCRYPTION_KEY }}
-          
+          PROCESS_SECRET=${{ secrets.PROCESS_SECRET }}
+
           # AI Providers
           OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
+          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
           DEFAULT_AI_PROVIDER=openai
+
+          # Redis
+          REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
           
           # Email
           RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
