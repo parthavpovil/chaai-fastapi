@@ -85,18 +85,15 @@ class TestSessionLifecycle:
         """Test session rollback when exception occurs"""
         session_generator = get_db()
         session = await session_generator.__anext__()
-        
-        try:
-            # Simulate an exception during operation
-            await session.execute(text("SELECT 1"))
-            raise Exception("Test error")
-        except Exception:
-            # Exception should trigger rollback in get_db
-            pass
-        finally:
-            await session_generator.aclose()
-        
-        # Session should be closed after exception
+
+        # Execute something to establish a transaction
+        await session.execute(text("SELECT 1"))
+
+        # Throw the exception into the generator so get_db's except/rollback path runs
+        with pytest.raises(Exception, match="Test error"):
+            await session_generator.athrow(Exception("Test error"))
+
+        # Session should be closed/inactive after exception propagated through generator
         assert not session.is_active
     
     async def test_session_expire_on_commit_disabled(self):

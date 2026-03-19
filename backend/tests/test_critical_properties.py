@@ -160,7 +160,7 @@ class TestCriticalProperties:
         requested_count=st.integers(min_value=1, max_value=5)
     )
     @settings(max_examples=100)
-    async def test_property_tier_limit_enforcement(self, tier, current_count, requested_count):
+    def test_property_tier_limit_enforcement(self, tier, current_count, requested_count):
         """
         Property: Tier Limit Enforcement
         For any workspace tier, the system should correctly enforce limits
@@ -193,19 +193,26 @@ class TestCriticalProperties:
         request_count=st.integers(min_value=1, max_value=15)
     )
     @settings(max_examples=100)
-    async def test_property_rate_limiting_enforcement(self, session_token, request_count):
+    def test_property_rate_limiting_enforcement(self, session_token, request_count):
         """
         Property: Rate Limiting Enforcement
         For any session, the rate limiter should enforce the 10 messages per minute limit
         and reject requests that exceed this limit.
-        
+
         Validates: Requirements 12.1, 16.3 (rate limiting)
         """
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(self._async_rate_limiting(session_token, request_count))
+        finally:
+            loop.close()
+
+    async def _async_rate_limiting(self, session_token, request_count):
         rate_limiter = RateLimiter()
-        
+
         # Test rate limiting with in-memory tracking for this test
         allowed_requests = 0
-        
+
         for i in range(request_count):
             # Check if request is allowed (10 per minute limit)
             is_allowed = await rate_limiter.is_allowed(
@@ -213,12 +220,12 @@ class TestCriticalProperties:
                 limit=10,
                 window_seconds=60
             )
-            
+
             if is_allowed:
                 allowed_requests += 1
                 # Simulate processing the request
                 await rate_limiter.record_request(session_token)
-        
+
         # Should allow up to 10 requests
         if request_count <= 10:
             assert allowed_requests == request_count, f"Should allow all {request_count} requests when under limit"
@@ -243,23 +250,23 @@ class TestCriticalProperties:
         
         # Generate valid HMAC signature
         valid_signature = hmac.new(
-            secret.encode(), 
-            payload.encode(), 
+            secret.encode(),
+            payload.encode(),
             hashlib.sha256
         ).hexdigest()
-        
+
         # Test valid signature
-        is_valid = webhook_security.verify_signature(payload, valid_signature, secret)
+        is_valid = webhook_security.verify_meta_signature(payload.encode(), valid_signature, secret)
         assert is_valid, "Valid signature should be accepted"
-        
+
         # Test invalid signature with tampered payload (if different)
         if tampered_payload != payload:
-            is_invalid = webhook_security.verify_signature(tampered_payload, valid_signature, secret)
+            is_invalid = webhook_security.verify_meta_signature(tampered_payload.encode(), valid_signature, secret)
             assert not is_invalid, "Tampered payload should be rejected"
-        
+
         # Test completely wrong signature
         wrong_signature = "wrong_signature_" + secrets.token_hex(32)
-        is_wrong = webhook_security.verify_signature(payload, wrong_signature, secret)
+        is_wrong = webhook_security.verify_meta_signature(payload.encode(), wrong_signature, secret)
         assert not is_wrong, "Wrong signature should be rejected"
 
     @given(
@@ -268,7 +275,7 @@ class TestCriticalProperties:
         additional_usage=st.integers(min_value=1, max_value=500)
     )
     @settings(max_examples=100)
-    async def test_property_usage_tracking_consistency(self, workspace_id, initial_usage, additional_usage):
+    def test_property_usage_tracking_consistency(self, workspace_id, initial_usage, additional_usage):
         """
         Property: Usage Tracking Consistency
         For any workspace usage tracking, incrementing usage should result in
