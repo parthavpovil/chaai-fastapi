@@ -17,7 +17,7 @@ from uuid import uuid4
 from datetime import datetime, timezone
 import secrets
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 # Import application modules
@@ -54,6 +54,11 @@ class TestDatabaseConstraintProperties:
             platform_setting, tier_change, rate_limit
         )
         async with engine.begin() as conn:
+            try:
+                await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+            except Exception:
+                await engine.dispose()
+                pytest.skip("pgvector extension not available in test database")
             await conn.run_sync(Base.metadata.create_all)
 
         async with async_session() as db:

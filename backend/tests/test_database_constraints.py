@@ -53,7 +53,7 @@ class TestDatabaseConstraintProperties:
         # Create valid workspace first
         workspace = Workspace(
             id=uuid4(),
-            business_name="Test Business",
+            name="Test Business",
             slug=f"test-{secrets.token_hex(8)}",
             tier="free",
             owner_id=uuid4()  # This should reference a valid user, but we'll test FK constraint
@@ -84,7 +84,7 @@ class TestDatabaseConstraintProperties:
         # Test workspace slug uniqueness
         duplicate_workspace = Workspace(
             id=uuid4(),
-            business_name="Another Business",
+            name="Another Business",
             slug=workspace.slug,  # Same slug should fail
             tier="free",
             owner_id=user.id
@@ -302,7 +302,7 @@ class TestDatabaseConstraintProperties:
         # But same email in different workspace should be allowed
         workspace2 = Workspace(
             id=uuid4(),
-            business_name="Another Business",
+            name="Another Business",
             slug=f"another-{secrets.token_hex(8)}",
             tier="free",
             owner_id=user.id
