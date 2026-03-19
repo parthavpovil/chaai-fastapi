@@ -102,6 +102,10 @@ class TestDatabaseConstraintProperties:
                 db.add(workspace)
                 await db.commit()
 
+                # Store IDs before any rollback expires these objects
+                workspace_id_val = workspace.id
+                user_id_val = user.id
+
                 # ------------------------------------------------------------------
                 # Test 2: Unique Constraints — workspace slug
                 # ------------------------------------------------------------------
@@ -110,7 +114,7 @@ class TestDatabaseConstraintProperties:
                     name="Another Business",
                     slug=workspace_slug,  # same slug → unique violation
                     tier="free",
-                    owner_id=user.id,
+                    owner_id=user_id_val,
                 )
                 db.add(duplicate_workspace)
                 with pytest.raises(IntegrityError):
@@ -134,27 +138,29 @@ class TestDatabaseConstraintProperties:
                 # ------------------------------------------------------------------
                 channel = Channel(
                     id=uuid4(),
-                    workspace_id=workspace.id,
+                    workspace_id=workspace_id_val,
                     type="webchat",
                     is_active=True,
                 )
                 db.add(channel)
                 await db.commit()
+                channel_id_val = channel.id
 
                 contact1 = Contact(
                     id=uuid4(),
-                    workspace_id=workspace.id,
-                    channel_id=channel.id,
+                    workspace_id=workspace_id_val,
+                    channel_id=channel_id_val,
                     external_id="user123",
                     name="Test User",
                 )
                 db.add(contact1)
                 await db.commit()
+                contact_id_val = contact1.id
 
                 contact2 = Contact(
                     id=uuid4(),
-                    workspace_id=workspace.id,
-                    channel_id=channel.id,
+                    workspace_id=workspace_id_val,
+                    channel_id=channel_id_val,
                     external_id="user123",  # same → unique violation
                     name="Another User",
                 )
@@ -170,19 +176,20 @@ class TestDatabaseConstraintProperties:
                 # ------------------------------------------------------------------
                 document = Document(
                     id=uuid4(),
-                    workspace_id=workspace.id,
+                    workspace_id=workspace_id_val,
                     name="test.pdf",
                     file_path="/tmp/test.pdf",
                     status="completed",
                 )
                 db.add(document)
                 await db.commit()
+                document_id_val = document.id
 
                 embedding_vector = np.random.rand(vector_dimension).tolist()
                 chunk = DocumentChunk(
                     id=uuid4(),
-                    workspace_id=workspace.id,
-                    document_id=document.id,
+                    workspace_id=workspace_id_val,
+                    document_id=document_id_val,
                     content="Test chunk content for vector embedding",
                     embedding=embedding_vector,
                     chunk_index=0,
@@ -211,17 +218,18 @@ class TestDatabaseConstraintProperties:
                 # ------------------------------------------------------------------
                 conversation = Conversation(
                     id=uuid4(),
-                    workspace_id=workspace.id,
-                    contact_id=contact1.id,
+                    workspace_id=workspace_id_val,
+                    contact_id=contact_id_val,
                     channel_type="webchat",
                     status="active",
                 )
                 db.add(conversation)
                 await db.commit()
+                conversation_id_val = conversation.id
 
                 message1 = Message(
                     id=uuid4(),
-                    conversation_id=conversation.id,
+                    conversation_id=conversation_id_val,
                     role="customer",
                     content="Test message",
                     channel_type="webchat",
@@ -232,7 +240,7 @@ class TestDatabaseConstraintProperties:
 
                 message2 = Message(
                     id=uuid4(),
-                    conversation_id=conversation.id,
+                    conversation_id=conversation_id_val,
                     role="customer",
                     content="Another message",
                     channel_type="webchat",
@@ -249,7 +257,7 @@ class TestDatabaseConstraintProperties:
                 # NULL external_message_id should always be allowed multiple times
                 message3 = Message(
                     id=uuid4(),
-                    conversation_id=conversation.id,
+                    conversation_id=conversation_id_val,
                     role="ai",
                     content="AI response 1",
                     channel_type="webchat",
@@ -257,7 +265,7 @@ class TestDatabaseConstraintProperties:
                 )
                 message4 = Message(
                     id=uuid4(),
-                    conversation_id=conversation.id,
+                    conversation_id=conversation_id_val,
                     role="ai",
                     content="AI response 2",
                     channel_type="webchat",
@@ -271,7 +279,7 @@ class TestDatabaseConstraintProperties:
                 # ------------------------------------------------------------------
                 agent1 = Agent(
                     id=uuid4(),
-                    workspace_id=workspace.id,
+                    workspace_id=workspace_id_val,
                     name="Agent One",
                     email="agent@example.com",
                     is_active=True,
@@ -281,7 +289,7 @@ class TestDatabaseConstraintProperties:
 
                 agent2 = Agent(
                     id=uuid4(),
-                    workspace_id=workspace.id,
+                    workspace_id=workspace_id_val,
                     name="Agent Two",
                     email="agent@example.com",  # same email → unique violation
                     is_active=True,
@@ -297,7 +305,7 @@ class TestDatabaseConstraintProperties:
                     name="Another Business",
                     slug=f"another-{secrets.token_hex(8)}",
                     tier="free",
-                    owner_id=user.id,
+                    owner_id=user_id_val,
                 )
                 db.add(workspace2)
                 await db.commit()
