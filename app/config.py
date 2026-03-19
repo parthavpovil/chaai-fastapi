@@ -65,6 +65,7 @@ class Settings(BaseSettings):
         default="alerts@yourdomain.com",
         description="Default sender email address"
     )
+    RESEND_WEBHOOK_SECRET: str = Field(default="", description="Resend webhook signing secret")
     
     # File Storage
     STORAGE_PATH: str = Field(

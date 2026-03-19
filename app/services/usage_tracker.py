@@ -54,9 +54,8 @@ class UsageTracker:
         stmt = insert(UsageCounter).values(
             workspace_id=workspace_id,
             month=month,
-            message_count=0,
-            input_tokens=0,
-            output_tokens=0
+            messages_sent=0,
+            tokens_used=0
         )
         stmt = stmt.on_conflict_do_nothing(
             index_elements=['workspace_id', 'month']
@@ -97,14 +96,16 @@ class UsageTracker:
         # Ensure counter exists
         await self.get_or_create_counter(workspace_id, month)
         
+        # Calculate total tokens
+        total_tokens = input_tokens + output_tokens
+        
         # Update counters atomically
         stmt = update(UsageCounter).where(
             UsageCounter.workspace_id == workspace_id,
             UsageCounter.month == month
         ).values(
-            message_count=UsageCounter.message_count + count,
-            input_tokens=UsageCounter.input_tokens + input_tokens,
-            output_tokens=UsageCounter.output_tokens + output_tokens,
+            messages_sent=UsageCounter.messages_sent + count,
+            tokens_used=UsageCounter.tokens_used + total_tokens,
             updated_at=datetime.now(timezone.utc)
         ).returning(UsageCounter)
         
@@ -131,10 +132,8 @@ class UsageTracker:
         
         return {
             "month": month,
-            "message_count": counter.message_count,
-            "input_tokens": counter.input_tokens,
-            "output_tokens": counter.output_tokens,
-            "total_tokens": counter.input_tokens + counter.output_tokens
+            "message_count": counter.messages_sent,
+            "tokens_used": counter.tokens_used
         }
     
     async def get_usage_history(self, workspace_id: str, months: int = 6) -> list[Dict[str, Any]]:
@@ -159,10 +158,8 @@ class UsageTracker:
         return [
             {
                 "month": counter.month,
-                "message_count": counter.message_count,
-                "input_tokens": counter.input_tokens,
-                "output_tokens": counter.output_tokens,
-                "total_tokens": counter.input_tokens + counter.output_tokens,
+                "message_count": counter.messages_sent,
+                "tokens_used": counter.tokens_used,
                 "updated_at": counter.updated_at
             }
             for counter in counters
@@ -184,9 +181,8 @@ class UsageTracker:
             UsageCounter.workspace_id == workspace_id,
             UsageCounter.month == month
         ).values(
-            message_count=0,
-            input_tokens=0,
-            output_tokens=0,
+            messages_sent=0,
+            tokens_used=0,
             updated_at=datetime.now(timezone.utc)
         )
         
@@ -208,9 +204,8 @@ class UsageTracker:
         result = await self.db.execute(
             select(
                 UsageCounter.workspace_id,
-                func.sum(UsageCounter.message_count).label('total_messages'),
-                func.sum(UsageCounter.input_tokens).label('total_input_tokens'),
-                func.sum(UsageCounter.output_tokens).label('total_output_tokens')
+                func.sum(UsageCounter.messages_sent).label('total_messages'),
+                func.sum(UsageCounter.tokens_used).label('total_tokens')
             )
             .where(UsageCounter.workspace_id == workspace_id)
             .group_by(UsageCounter.workspace_id)
@@ -220,16 +215,12 @@ class UsageTracker:
         if not row:
             return {
                 "total_messages": 0,
-                "total_input_tokens": 0,
-                "total_output_tokens": 0,
                 "total_tokens": 0
             }
         
         return {
             "total_messages": row.total_messages or 0,
-            "total_input_tokens": row.total_input_tokens or 0,
-            "total_output_tokens": row.total_output_tokens or 0,
-            "total_tokens": (row.total_input_tokens or 0) + (row.total_output_tokens or 0)
+            "total_tokens": row.total_tokens or 0
         }
 
 
@@ -262,10 +253,8 @@ async def track_message_usage(
     )
     
     return {
-        "message_count": counter.message_count,
-        "input_tokens": counter.input_tokens,
-        "output_tokens": counter.output_tokens,
-        "total_tokens": counter.input_tokens + counter.output_tokens
+        "message_count": counter.messages_sent,
+        "tokens_used": counter.tokens_used
     }
 
 

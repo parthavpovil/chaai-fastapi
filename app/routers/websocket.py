@@ -272,8 +272,8 @@ async def handle_conversations_request(
                 "conversation_id": conv.id,
                 "status": conv.status,
                 "contact_name": conv.contact.name if conv.contact else "Unknown",
-                "channel_type": conv.channel.channel_type if conv.channel else "unknown",
-                "agent_name": conv.agent.name if conv.agent else None,
+                "channel_type": conv.channel_type,
+                "agent_name": conv.assigned_agent.name if conv.assigned_agent else None,
                 "created_at": conv.created_at.isoformat(),
                 "updated_at": conv.updated_at.isoformat()
             })

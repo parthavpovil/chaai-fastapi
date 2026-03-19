@@ -2,14 +2,24 @@
 
 This document provides instructions for setting up SSL/TLS certificates for secure HTTPS communication.
 
+## Your Domain Configuration
+
+**Domain:** parthavpovil.in  
+**API Subdomain:** api.parthavpovil.in  
+**Server IP:** 84.247.169.119
+
+DNS records configured:
+- `api.parthavpovil.in` → 84.247.169.119
+- `parthavpovil.in` → 84.247.169.119
+
 ## Option 1: Let's Encrypt (Recommended for Production)
 
 Let's Encrypt provides free SSL certificates with automatic renewal.
 
 ### Prerequisites
-- Domain name pointing to your server
-- Nginx installed and configured
-- Port 80 and 443 open in firewall
+- Domain name pointing to your server ✓ (configured)
+- Nginx installed and configured (to be done)
+- Port 80 and 443 open in firewall (to be done)
 
 ### Installation
 
@@ -23,9 +33,9 @@ Let's Encrypt provides free SSL certificates with automatic renewal.
    sudo yum install certbot python3-certbot-nginx
    ```
 
-2. **Obtain SSL Certificate:**
+2. **Obtain SSL Certificate for your domains:**
    ```bash
-   sudo certbot --nginx -d your-domain.com -d www.your-domain.com
+   sudo certbot --nginx -d parthavpovil.in -d api.parthavpovil.in
    ```
 
 3. **Test Automatic Renewal:**
@@ -36,8 +46,8 @@ Let's Encrypt provides free SSL certificates with automatic renewal.
 4. **Update Nginx Configuration:**
    The nginx.conf file is already configured for SSL. Update the certificate paths:
    ```nginx
-   ssl_certificate /etc/letsencrypt/live/your-domain.com/fullchain.pem;
-   ssl_certificate_key /etc/letsencrypt/live/your-domain.com/privkey.pem;
+   ssl_certificate /etc/letsencrypt/live/parthavpovil.in/fullchain.pem;
+   ssl_certificate_key /etc/letsencrypt/live/parthavpovil.in/privkey.pem;
    ```
 
 ## Option 2: Self-Signed Certificates (Development/Testing)
@@ -111,12 +121,23 @@ If you have a commercial SSL certificate from a Certificate Authority:
    # Check certificate details
    openssl x509 -in /etc/ssl/certs/chatsaas.crt -text -noout
    
-   # Test SSL connection
-   openssl s_client -connect your-domain.com:443 -servername your-domain.com
+   # Test SSL connection for your domains
+   openssl s_client -connect api.parthavpovil.in:443 -servername api.parthavpovil.in
+   openssl s_client -connect parthavpovil.in:443 -servername parthavpovil.in
    ```
 
-4. **Online SSL Test:**
+4. **Verify DNS Resolution:**
+   ```bash
+   # Check if DNS is working
+   nslookup api.parthavpovil.in
+   nslookup parthavpovil.in
+   
+   # Should both return: 84.247.169.119
+   ```
+
+5. **Online SSL Test:**
    - Use [SSL Labs SSL Test](https://www.ssllabs.com/ssltest/) to verify your SSL configuration
+   - Test URL: https://www.ssllabs.com/ssltest/analyze.html?d=api.parthavpovil.in
    - Should achieve A+ rating with the provided configuration
 
 ### Security Headers Verification
@@ -124,7 +145,7 @@ If you have a commercial SSL certificate from a Certificate Authority:
 Test security headers using curl:
 
 ```bash
-curl -I https://your-domain.com/health
+curl -I https://api.parthavpovil.in/health
 ```
 
 Expected headers:
@@ -160,7 +181,7 @@ Create a monitoring script to check certificate expiration:
 #!/bin/bash
 # /usr/local/bin/check-ssl-expiry.sh
 
-DOMAIN="your-domain.com"
+DOMAIN="api.parthavpovil.in"
 THRESHOLD_DAYS=30
 
 EXPIRY_DATE=$(openssl s_client -connect $DOMAIN:443 -servername $DOMAIN 2>/dev/null | openssl x509 -noout -dates | grep notAfter | cut -d= -f2)

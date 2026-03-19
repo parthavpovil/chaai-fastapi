@@ -369,11 +369,14 @@ class EscalationRouter:
             # Get priority level
             priority = self.classifier.get_escalation_priority(classification)
             
+            # Use escalation_type ("explicit" or "implicit") per requirements 4.2 and 4.3
+            escalation_type = classification.get('escalation_type', 'unknown')
+            
             # Process escalation
             return await self.process_escalation(
                 conversation_id=conversation_id,
                 workspace_id=workspace_id,
-                escalation_reason=classification['reason'],
+                escalation_reason=escalation_type,  # Use "explicit" or "implicit" per requirements
                 classification_data=classification,
                 priority=priority
             )
@@ -417,7 +420,7 @@ class EscalationRouter:
             escalated_conversations.append({
                 "conversation_id": conv.id,
                 "contact_name": conv.contact.name if conv.contact else "Unknown",
-                "channel_type": conv.channel.channel_type if conv.channel else "unknown",
+                "channel_type": conv.channel_type,
                 "escalated_at": escalation_metadata.get("escalated_at"),
                 "escalation_reason": escalation_metadata.get("escalation_reason", "Unknown"),
                 "priority": conv_priority,

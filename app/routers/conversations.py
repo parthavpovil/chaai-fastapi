@@ -109,7 +109,7 @@ class AgentMessageRequest(BaseModel):
 
 @router.get("/", response_model=ConversationListResponse)
 async def list_conversations(
-    status: Optional[str] = Query(None, description="Filter by status"),
+    status_filter: Optional[str] = Query(None, description="Filter by status"),
     assigned_to_me: bool = Query(False, description="Show only conversations assigned to current user (agents only)"),
     limit: int = Query(50, ge=1, le=100, description="Maximum number of conversations to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
@@ -121,7 +121,7 @@ async def list_conversations(
     List conversations for the workspace
     
     Args:
-        status: Filter by conversation status
+        status_filter: Filter by conversation status
         assigned_to_me: Show only conversations assigned to current user (for agents)
         limit: Maximum number of conversations to return
         offset: Offset for pagination
@@ -150,18 +150,64 @@ async def list_conversations(
             if agent:
                 agent_id = agent.id
         
-        conversations_data = await manager.get_workspace_conversations(
+        conversations = await manager.get_workspace_conversations(
             workspace_id=current_workspace.id,
-            status_filter=status,
-            assigned_agent_id=agent_id,
+            status=status_filter,
             limit=limit,
             offset=offset
         )
         
+        # Filter by agent if requested
+        if assigned_to_me and agent_id:
+            conversations = [c for c in conversations if c.assigned_agent_id == agent_id]
+        
+        # Convert to response format
+        conversation_responses = []
+        for conv in conversations:
+            # Get last message
+            last_message = None
+            if hasattr(conv, 'messages') and conv.messages:
+                msg = conv.messages[-1]
+                last_message = MessageResponse(
+                    id=str(msg.id),
+                    content=msg.content,
+                    role=msg.role,
+                    sender_name=None,
+                    created_at=msg.created_at.isoformat(),
+                    metadata=msg.metadata
+                )
+            
+            # Get message count
+            from sqlalchemy import select, func
+            from app.models.message import Message
+            msg_count_result = await db.execute(
+                select(func.count(Message.id)).where(Message.conversation_id == conv.id)
+            )
+            message_count = msg_count_result.scalar() or 0
+            
+            conversation_responses.append(ConversationResponse(
+                id=str(conv.id),
+                status=conv.status,
+                contact=ContactResponse(
+                    id=str(conv.contact.id),
+                    name=conv.contact.name,
+                    external_id=conv.contact.external_id,
+                    channel_type=conv.contact.channel_type if hasattr(conv.contact, 'channel_type') else "unknown",
+                    metadata=conv.contact.metadata
+                ),
+                assigned_agent_id=str(conv.assigned_agent_id) if conv.assigned_agent_id else None,
+                assigned_agent_name=conv.assigned_agent.name if conv.assigned_agent else None,
+                escalation_reason=conv.escalation_reason,
+                message_count=message_count,
+                last_message=last_message,
+                created_at=conv.created_at.isoformat(),
+                updated_at=conv.updated_at.isoformat()
+            ))
+        
         return ConversationListResponse(
-            conversations=[ConversationResponse(**conv) for conv in conversations_data["conversations"]],
-            total_count=conversations_data["total_count"],
-            has_more=conversations_data["has_more"]
+            conversations=conversation_responses,
+            total_count=len(conversation_responses),
+            has_more=len(conversations) == limit
         )
         
     except Exception as e:

@@ -72,7 +72,6 @@ class AgentManager:
                 name=name,
                 invitation_token=invitation_token,
                 invitation_expires_at=expires_at,
-                invited_by=invited_by_user_id,
                 is_active=False  # Not active until invitation is accepted
             )
             
@@ -163,7 +162,7 @@ class AgentManager:
             # Update agent record
             agent.user_id = user_id
             agent.is_active = True
-            agent.accepted_at = datetime.now(timezone.utc)
+            agent.invitation_accepted_at = datetime.now(timezone.utc)
             agent.invitation_token = None  # Clear token after acceptance
             agent.invitation_expires_at = None
             
@@ -211,8 +210,6 @@ class AgentManager:
             
             # Update agent status
             agent.is_active = False
-            agent.deactivated_at = datetime.now(timezone.utc)
-            agent.deactivated_by = deactivated_by_user_id
             
             # Update conversations assigned to this agent
             await self._cleanup_agent_conversations(agent_id)
@@ -243,7 +240,7 @@ class AgentManager:
             select(Conversation.id, Conversation.workspace_id)
             .where(
                 and_(
-                    Conversation.agent_id == agent_id,
+                    Conversation.assigned_agent_id == agent_id,
                     Conversation.status == "agent"
                 )
             )
@@ -253,12 +250,12 @@ class AgentManager:
         # Update conversations assigned to this agent
         stmt = update(Conversation).where(
             and_(
-                Conversation.agent_id == agent_id,
+                Conversation.assigned_agent_id == agent_id,
                 Conversation.status == "agent"
             )
         ).values(
             status="escalated",
-            agent_id=None,
+            assigned_agent_id=None,
             updated_at=datetime.now(timezone.utc)
         )
         
@@ -380,7 +377,6 @@ class AgentManager:
             # Generate new token and extend expiration
             agent.invitation_token = generate_invitation_token()
             agent.invitation_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-            agent.invited_by = resent_by_user_id
             
             await self.db.commit()
             await self.db.refresh(agent)

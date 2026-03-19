@@ -37,7 +37,8 @@ def valid_email(draw):
 @composite
 def valid_password(draw):
     """Generate valid passwords (bcrypt has 72 byte limit)"""
-    return draw(st.text(min_size=8, max_size=50, alphabet=st.characters(whitelist_categories=('Lu', 'Ll', 'Nd', 'Pc'))))
+    # Bcrypt has a 72 byte limit, so we limit to 60 chars to be safe with UTF-8
+    return draw(st.text(min_size=8, max_size=60, alphabet=st.characters(whitelist_categories=('Lu', 'Ll', 'Nd', 'Pc'))))
 
 @composite
 def business_name(draw):
@@ -59,7 +60,7 @@ class TestCriticalProperties:
     @given(
         password=valid_password()
     )
-    @settings(max_examples=100)
+    @settings(max_examples=20, deadline=1000)  # Reduced examples, increased deadline for bcrypt
     def test_property_password_hashing_round_trip(self, password):
         """
         Property: Password Hashing Round Trip

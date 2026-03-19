@@ -1,495 +1,232 @@
 """
-Email Service with Resend Integration
-Handles escalation alerts and agent invitation emails
+Email Service using Resend API
+Handles transactional emails for the application
 """
-import aiohttp
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timezone
-from sqlalchemy.ext.asyncio import AsyncSession
-
+import httpx
+from typing import Optional, List, Dict, Any
 from app.config import settings
 
 
-class EmailError(Exception):
-    """Base exception for email service errors"""
-    pass
-
-
 class EmailService:
-    """
-    Email service using Resend API
-    Handles escalation alerts and agent invitation emails
-    """
+    """Service for sending emails via Resend API"""
     
     def __init__(self):
-        self.api_url = "https://api.resend.com"
         self.api_key = settings.RESEND_API_KEY
         self.from_email = settings.RESEND_FROM_EMAIL
-        self.timeout = aiohttp.ClientTimeout(total=30)
+        self.base_url = "https://api.resend.com"
     
     async def send_email(
         self,
-        to_email: str,
+        to: str | List[str],
         subject: str,
-        html_content: str,
-        text_content: Optional[str] = None,
-        reply_to: Optional[str] = None
+        html: str,
+        text: Optional[str] = None,
+        from_email: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None,
+        tags: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
         """
-        Send email via Resend API
+        Send an email via Resend API
         
         Args:
-            to_email: Recipient email address
+            to: Recipient email address(es)
             subject: Email subject
-            html_content: HTML email content
-            text_content: Plain text content (optional)
-            reply_to: Reply-to email address (optional)
-        
+            html: HTML email body
+            text: Plain text email body (optional)
+            from_email: Sender email (defaults to RESEND_FROM_EMAIL)
+            reply_to: Reply-to email address
+            cc: CC recipients
+            bcc: BCC recipients
+            tags: Email tags for tracking
+            
         Returns:
-            Resend API response
-        
+            Response from Resend API containing email ID
+            
         Raises:
-            EmailError: If email sending fails
+            httpx.HTTPStatusError: If the API request fails
         """
         if not self.api_key:
-            raise EmailError("RESEND_API_KEY not configured")
+            raise ValueError("RESEND_API_KEY not configured")
         
-        try:
-            headers = {
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "from": self.from_email,
-                "to": [to_email],
-                "subject": subject,
-                "html": html_content
-            }
-            
-            if text_content:
-                payload["text"] = text_content
-            
-            if reply_to:
-                payload["reply_to"] = [reply_to]
-            
-            async with aiohttp.ClientSession(timeout=self.timeout) as session:
-                async with session.post(
-                    f"{self.api_url}/emails",
-                    headers=headers,
-                    json=payload
-                ) as response:
-                    response_data = await response.json()
-                    
-                    if response.status != 200:
-                        error_msg = response_data.get("message", f"HTTP {response.status}")
-                        raise EmailError(f"Resend API error: {error_msg}")
-                    
-                    return response_data
-                    
-        except aiohttp.ClientError as e:
-            raise EmailError(f"Network error sending email: {str(e)}")
-        except Exception as e:
-            if isinstance(e, EmailError):
-                raise
-            raise EmailError(f"Email sending failed: {str(e)}")
-    
-    async def send_escalation_alert(
-        self,
-        workspace_owner_email: str,
-        workspace_name: str,
-        conversation_id: str,
-        escalation_reason: str,
-        priority: str = "medium",
-        contact_name: str = "Unknown",
-        channel_type: str = "unknown"
-    ) -> Dict[str, Any]:
-        """
-        Send escalation alert email to workspace owner
-        
-        Args:
-            workspace_owner_email: Owner email address
-            workspace_name: Workspace name
-            conversation_id: Conversation ID
-            escalation_reason: Reason for escalation
-            priority: Priority level
-            contact_name: Customer contact name
-            channel_type: Channel type
-        
-        Returns:
-            Email sending result
-        """
-        subject = f"🚨 Customer Escalation Alert - {workspace_name}"
-        
-        # Priority emoji and styling
-        priority_info = {
-            "high": {"emoji": "🔴", "color": "#dc2626", "label": "High Priority"},
-            "medium": {"emoji": "🟡", "color": "#ea580c", "label": "Medium Priority"},
-            "low": {"emoji": "🟢", "color": "#16a34a", "label": "Low Priority"}
+        # Prepare payload
+        payload = {
+            "from": from_email or self.from_email,
+            "to": [to] if isinstance(to, str) else to,
+            "subject": subject,
+            "html": html,
         }
         
-        priority_data = priority_info.get(priority, priority_info["medium"])
+        if text:
+            payload["text"] = text
+        if reply_to:
+            payload["reply_to"] = reply_to
+        if cc:
+            payload["cc"] = cc
+        if bcc:
+            payload["bcc"] = bcc
+        if tags:
+            payload["tags"] = tags
         
-        # Channel type display
-        channel_display = {
-            "telegram": "Telegram",
-            "whatsapp": "WhatsApp",
-            "instagram": "Instagram",
-            "webchat": "Web Chat"
-        }.get(channel_type, channel_type.title())
+        # Send request
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"{self.base_url}/emails",
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=30.0,
+            )
+            response.raise_for_status()
+            return response.json()
+    
+    async def send_password_reset_email(
+        self,
+        to: str,
+        reset_token: str,
+        user_name: str,
+    ) -> Dict[str, Any]:
+        """Send password reset email"""
+        reset_url = f"{settings.APP_URL}/reset-password?token={reset_token}"
         
-        html_content = f"""
-        <!DOCTYPE html>
+        html = f"""
         <html>
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Customer Escalation Alert</title>
-        </head>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-                <h1 style="margin: 0; font-size: 24px;">🚨 Customer Escalation Alert</h1>
-                <p style="margin: 10px 0 0 0; opacity: 0.9;">{workspace_name}</p>
-            </div>
-            
-            <div style="background: #f8fafc; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0;">
-                <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid {priority_data['color']};">
-                    <h2 style="margin: 0 0 15px 0; color: {priority_data['color']};">
-                        {priority_data['emoji']} {priority_data['label']}
-                    </h2>
-                    <p style="margin: 0; font-size: 16px;"><strong>Reason:</strong> {escalation_reason}</p>
-                </div>
-                
-                <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                    <h3 style="margin: 0 0 15px 0; color: #374151;">Customer Details</h3>
-                    <table style="width: 100%; border-collapse: collapse;">
-                        <tr>
-                            <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6;"><strong>Contact:</strong></td>
-                            <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6;">{contact_name}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6;"><strong>Channel:</strong></td>
-                            <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6;">{channel_display}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 8px 0;"><strong>Conversation ID:</strong></td>
-                            <td style="padding: 8px 0; font-family: monospace; font-size: 12px;">{conversation_id}</td>
-                        </tr>
-                    </table>
-                </div>
-                
-                <div style="text-align: center; margin-top: 30px;">
-                    <a href="{settings.APP_URL}/conversations/{conversation_id}" 
-                       style="background: #4f46e5; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; display: inline-block;">
-                        View Conversation
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #2563eb;">Password Reset Request</h2>
+                <p>Hi {user_name},</p>
+                <p>We received a request to reset your password. Click the button below to create a new password:</p>
+                <div style="margin: 30px 0;">
+                    <a href="{reset_url}" 
+                       style="background-color: #2563eb; color: white; padding: 12px 24px; 
+                              text-decoration: none; border-radius: 6px; display: inline-block;">
+                        Reset Password
                     </a>
                 </div>
-                
-                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; color: #6b7280; font-size: 14px;">
-                    <p>This alert was sent because a customer message was escalated and requires human attention.</p>
-                    <p>Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</p>
-                </div>
+                <p>Or copy and paste this link into your browser:</p>
+                <p style="color: #666; word-break: break-all;">{reset_url}</p>
+                <p style="margin-top: 30px; color: #666; font-size: 14px;">
+                    This link will expire in 1 hour. If you didn't request a password reset, 
+                    you can safely ignore this email.
+                </p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                <p style="color: #999; font-size: 12px;">
+                    ChatSaaS - AI-Powered Customer Support Platform
+                </p>
             </div>
         </body>
         </html>
         """
         
-        text_content = f"""
-        Customer Escalation Alert - {workspace_name}
-        
-        Priority: {priority_data['label']}
-        Reason: {escalation_reason}
-        
-        Customer Details:
-        - Contact: {contact_name}
-        - Channel: {channel_display}
-        - Conversation ID: {conversation_id}
-        
-        Please log in to your dashboard to view and respond to this escalation.
-        
-        Time: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
-        """
-        
         return await self.send_email(
-            to_email=workspace_owner_email,
-            subject=subject,
-            html_content=html_content,
-            text_content=text_content
+            to=to,
+            subject="Reset Your Password",
+            html=html,
+            tags=[{"name": "category", "value": "password_reset"}],
         )
     
-    async def send_agent_invitation(
+    async def send_welcome_email(
         self,
-        agent_email: str,
-        agent_name: str,
+        to: str,
+        user_name: str,
         workspace_name: str,
-        invitation_token: str,
-        invited_by_name: str,
-        expires_at: datetime
     ) -> Dict[str, Any]:
-        """
-        Send agent invitation email
+        """Send welcome email to new users"""
+        dashboard_url = f"{settings.APP_URL}/dashboard"
         
-        Args:
-            agent_email: Agent email address
-            agent_name: Agent name
-            workspace_name: Workspace name
-            invitation_token: Invitation token
-            invited_by_name: Name of person who sent invitation
-            expires_at: Invitation expiration date
-        
-        Returns:
-            Email sending result
-        """
-        subject = f"You're invited to join {workspace_name} as an agent"
-        
-        # Create invitation acceptance URL
-        accept_url = f"{settings.APP_URL}/accept-invitation?token={invitation_token}"
-        
-        html_content = f"""
-        <!DOCTYPE html>
+        html = f"""
         <html>
-        <head>
-            <meta charset="utf-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Agent Invitation</title>
-        </head>
-        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-                <h1 style="margin: 0; font-size: 24px;">🎉 You're Invited!</h1>
-                <p style="margin: 10px 0 0 0; opacity: 0.9;">Join {workspace_name} as a Customer Support Agent</p>
-            </div>
-            
-            <div style="background: #f8fafc; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0;">
-                <div style="background: white; padding: 25px; border-radius: 8px; margin-bottom: 25px;">
-                    <p style="margin: 0 0 20px 0; font-size: 16px;">Hi {agent_name},</p>
-                    
-                    <p style="margin: 0 0 20px 0;">
-                        <strong>{invited_by_name}</strong> has invited you to join <strong>{workspace_name}</strong> 
-                        as a customer support agent. You'll be able to help customers, manage conversations, 
-                        and provide excellent support.
-                    </p>
-                    
-                    <div style="background: #f0f9ff; border: 1px solid #0ea5e9; border-radius: 6px; padding: 15px; margin: 20px 0;">
-                        <h3 style="margin: 0 0 10px 0; color: #0369a1;">What you'll be able to do:</h3>
-                        <ul style="margin: 0; padding-left: 20px; color: #374151;">
-                            <li>Respond to customer messages in real-time</li>
-                            <li>Handle escalated conversations</li>
-                            <li>Access customer conversation history</li>
-                            <li>Collaborate with other team members</li>
-                        </ul>
-                    </div>
-                </div>
-                
-                <div style="text-align: center; margin: 30px 0;">
-                    <a href="{accept_url}" 
-                       style="background: #10b981; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block;">
-                        Accept Invitation
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #2563eb;">Welcome to ChatSaaS! 🎉</h2>
+                <p>Hi {user_name},</p>
+                <p>Welcome to your new workspace: <strong>{workspace_name}</strong></p>
+                <p>You're all set to start building amazing customer support experiences with AI.</p>
+                <div style="margin: 30px 0;">
+                    <a href="{dashboard_url}" 
+                       style="background-color: #2563eb; color: white; padding: 12px 24px; 
+                              text-decoration: none; border-radius: 6px; display: inline-block;">
+                        Go to Dashboard
                     </a>
                 </div>
-                
-                <div style="background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
-                    <h3 style="margin: 0 0 15px 0; color: #374151;">Invitation Details</h3>
-                    <table style="width: 100%; border-collapse: collapse;">
-                        <tr>
-                            <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6;"><strong>Workspace:</strong></td>
-                            <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6;">{workspace_name}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6;"><strong>Invited by:</strong></td>
-                            <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6;">{invited_by_name}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6;"><strong>Your email:</strong></td>
-                            <td style="padding: 8px 0; border-bottom: 1px solid #f3f4f6;">{agent_email}</td>
-                        </tr>
-                        <tr>
-                            <td style="padding: 8px 0;"><strong>Expires:</strong></td>
-                            <td style="padding: 8px 0; color: #dc2626;">{expires_at.strftime('%B %d, %Y at %H:%M UTC')}</td>
-                        </tr>
-                    </table>
-                </div>
-                
-                <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e2e8f0; text-align: center; color: #6b7280; font-size: 14px;">
-                    <p>This invitation will expire in 7 days. If you have any questions, please contact {invited_by_name}.</p>
-                    <p>If you can't click the button above, copy and paste this link into your browser:</p>
-                    <p style="word-break: break-all; font-family: monospace; background: #f3f4f6; padding: 10px; border-radius: 4px;">
-                        {accept_url}
-                    </p>
-                </div>
+                <h3 style="color: #333; margin-top: 30px;">Quick Start Guide:</h3>
+                <ol style="color: #666;">
+                    <li>Connect your first channel (WhatsApp, Telegram, or Instagram)</li>
+                    <li>Upload knowledge base documents</li>
+                    <li>Configure your AI agent settings</li>
+                    <li>Start receiving and responding to messages</li>
+                </ol>
+                <p style="margin-top: 30px;">
+                    Need help? Check out our 
+                    <a href="{settings.APP_URL}/docs" style="color: #2563eb;">documentation</a> 
+                    or reach out to our support team.
+                </p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                <p style="color: #999; font-size: 12px;">
+                    ChatSaaS - AI-Powered Customer Support Platform
+                </p>
             </div>
         </body>
         </html>
         """
         
-        text_content = f"""
-        You're invited to join {workspace_name} as a Customer Support Agent!
-        
-        Hi {agent_name},
-        
-        {invited_by_name} has invited you to join {workspace_name} as a customer support agent.
-        
-        What you'll be able to do:
-        - Respond to customer messages in real-time
-        - Handle escalated conversations
-        - Access customer conversation history
-        - Collaborate with other team members
-        
-        Invitation Details:
-        - Workspace: {workspace_name}
-        - Invited by: {invited_by_name}
-        - Your email: {agent_email}
-        - Expires: {expires_at.strftime('%B %d, %Y at %H:%M UTC')}
-        
-        To accept this invitation, visit:
-        {accept_url}
-        
-        This invitation will expire in 7 days. If you have any questions, please contact {invited_by_name}.
-        """
-        
         return await self.send_email(
-            to_email=agent_email,
-            subject=subject,
-            html_content=html_content,
-            text_content=text_content
+            to=to,
+            subject=f"Welcome to {workspace_name}!",
+            html=html,
+            tags=[{"name": "category", "value": "welcome"}],
         )
     
-    async def send_test_email(
+    async def send_tier_limit_alert(
         self,
-        to_email: str,
-        test_type: str = "connection"
+        to: str,
+        user_name: str,
+        limit_type: str,
+        current_usage: int,
+        limit: int,
+        tier: str,
     ) -> Dict[str, Any]:
-        """
-        Send test email to verify email service configuration
+        """Send alert when approaching or exceeding tier limits"""
+        percentage = (current_usage / limit) * 100
+        upgrade_url = f"{settings.APP_URL}/settings/billing"
         
-        Args:
-            to_email: Test recipient email
-            test_type: Type of test email
-        
-        Returns:
-            Email sending result
-        """
-        subject = "Email Service Test - ChatSaaS"
-        
-        html_content = f"""
-        <!DOCTYPE html>
+        html = f"""
         <html>
-        <head>
-            <meta charset="utf-8">
-            <title>Email Test</title>
-        </head>
-        <body style="font-family: Arial, sans-serif; padding: 20px; max-width: 500px; margin: 0 auto;">
-            <div style="text-align: center; padding: 20px; background: #f0f9ff; border-radius: 8px;">
-                <h2 style="color: #0369a1; margin: 0 0 15px 0;">✅ Email Service Test</h2>
-                <p style="margin: 0; color: #374151;">
-                    This is a test email from your ChatSaaS email service. 
-                    If you received this, your email configuration is working correctly!
-                </p>
-                <p style="margin: 15px 0 0 0; font-size: 14px; color: #6b7280;">
-                    Test Type: {test_type}<br>
-                    Sent: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #dc2626;">⚠️ Usage Limit Alert</h2>
+                <p>Hi {user_name},</p>
+                <p>You're approaching your <strong>{tier}</strong> plan limit for <strong>{limit_type}</strong>.</p>
+                <div style="background-color: #fef2f2; border-left: 4px solid #dc2626; padding: 15px; margin: 20px 0;">
+                    <p style="margin: 0;"><strong>Current Usage:</strong> {current_usage} / {limit} ({percentage:.1f}%)</p>
+                </div>
+                <p>To continue without interruption, consider upgrading your plan:</p>
+                <div style="margin: 30px 0;">
+                    <a href="{upgrade_url}" 
+                       style="background-color: #2563eb; color: white; padding: 12px 24px; 
+                              text-decoration: none; border-radius: 6px; display: inline-block;">
+                        Upgrade Plan
+                    </a>
+                </div>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                <p style="color: #999; font-size: 12px;">
+                    ChatSaaS - AI-Powered Customer Support Platform
                 </p>
             </div>
         </body>
         </html>
         """
         
-        text_content = f"""
-        Email Service Test - ChatSaaS
-        
-        This is a test email from your ChatSaaS email service.
-        If you received this, your email configuration is working correctly!
-        
-        Test Type: {test_type}
-        Sent: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}
-        """
-        
         return await self.send_email(
-            to_email=to_email,
-            subject=subject,
-            html_content=html_content,
-            text_content=text_content
+            to=to,
+            subject=f"Usage Alert: {limit_type} limit approaching",
+            html=html,
+            tags=[{"name": "category", "value": "tier_limit_alert"}],
         )
 
 
-# ─── Global Email Service Instance ────────────────────────────────────────────
-
+# Global email service instance
 email_service = EmailService()
-
-
-# ─── Convenience Functions ────────────────────────────────────────────────────
-
-async def send_escalation_alert_email(
-    workspace_owner_email: str,
-    workspace_name: str,
-    conversation_id: str,
-    escalation_reason: str,
-    priority: str = "medium",
-    contact_name: str = "Unknown",
-    channel_type: str = "unknown"
-) -> bool:
-    """
-    Convenience function to send escalation alert email
-    
-    Args:
-        workspace_owner_email: Owner email
-        workspace_name: Workspace name
-        conversation_id: Conversation ID
-        escalation_reason: Escalation reason
-        priority: Priority level
-        contact_name: Customer name
-        channel_type: Channel type
-    
-    Returns:
-        True if email sent successfully
-    """
-    try:
-        await email_service.send_escalation_alert(
-            workspace_owner_email=workspace_owner_email,
-            workspace_name=workspace_name,
-            conversation_id=conversation_id,
-            escalation_reason=escalation_reason,
-            priority=priority,
-            contact_name=contact_name,
-            channel_type=channel_type
-        )
-        return True
-    except EmailError as e:
-        print(f"Failed to send escalation alert email: {e}")
-        return False
-
-
-async def send_agent_invitation_email(
-    agent_email: str,
-    agent_name: str,
-    workspace_name: str,
-    invitation_token: str,
-    invited_by_name: str,
-    expires_at: datetime
-) -> bool:
-    """
-    Convenience function to send agent invitation email
-    
-    Args:
-        agent_email: Agent email
-        agent_name: Agent name
-        workspace_name: Workspace name
-        invitation_token: Invitation token
-        invited_by_name: Inviter name
-        expires_at: Expiration date
-    
-    Returns:
-        True if email sent successfully
-    """
-    try:
-        await email_service.send_agent_invitation(
-            agent_email=agent_email,
-            agent_name=agent_name,
-            workspace_name=workspace_name,
-            invitation_token=invitation_token,
-            invited_by_name=invited_by_name,
-            expires_at=expires_at
-        )
-        return True
-    except EmailError as e:
-        print(f"Failed to send agent invitation email: {e}")
-        return False

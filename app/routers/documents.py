@@ -228,7 +228,7 @@ async def list_documents(
             total_count=total_count,
             tier_info={
                 "current_tier": tier_info["tier"],
-                "document_limit": tier_info["limits"]["documents"],
+                "document_limit": tier_info["limits"].get("documents_max", 0),
                 "documents_remaining": tier_info["remaining"]["documents"]
             }
         )
@@ -495,7 +495,7 @@ async def get_document_statistics(
             total_chunks=total_chunks,
             tier_info={
                 "current_tier": tier_info["tier"],
-                "document_limit": tier_info["limits"]["documents"],
+                "document_limit": tier_info["limits"].get("documents_max", 0),
                 "documents_remaining": tier_info["remaining"]["documents"]
             }
         )

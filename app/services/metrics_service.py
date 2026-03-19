@@ -63,7 +63,6 @@ class MetricsService:
                     Workspace.tier,
                     func.count(Workspace.id).label('count')
                 )
-                .where(Workspace.is_active == True)
                 .group_by(Workspace.tier)
             )
             

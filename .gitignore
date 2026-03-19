@@ -74,3 +74,4 @@ htmlcov/
 # Temporary files
 *.tmp
 *.temp
+.hypothesis/*

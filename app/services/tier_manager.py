@@ -90,7 +90,7 @@ class TierManager:
         # Get monthly message usage
         current_month = datetime.now(timezone.utc).strftime("%Y-%m")
         usage_result = await self.db.execute(
-            select(UsageCounter.message_count)
+            select(UsageCounter.messages_sent)
             .where(UsageCounter.workspace_id == workspace_id)
             .where(UsageCounter.month == current_month)
         )

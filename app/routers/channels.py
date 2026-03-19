@@ -110,9 +110,14 @@ async def create_channel(
             request.credentials
         )
         
+        # Merge validation result (includes widget_id for WebChat) with credentials
+        credentials_to_store = {**request.credentials}
+        if "widget_id" in validation_result:
+            credentials_to_store["widget_id"] = validation_result["widget_id"]
+        
         # Encrypt credentials for storage
         encrypted_credentials = {}
-        for key, value in request.credentials.items():
+        for key, value in credentials_to_store.items():
             if isinstance(value, str) and value:
                 encrypted_credentials[key] = encrypt_credential(value)
             else:
@@ -121,12 +126,9 @@ async def create_channel(
         # Create channel record
         channel = Channel(
             workspace_id=current_workspace.id,
-            channel_type=request.channel_type,
-            name=request.name,
-            encrypted_config=encrypted_credentials,
-            widget_id=validation_result.get("widget_id"),
-            platform_data=validation_result,
-            is_active=request.is_active
+            type=request.channel_type,
+            is_active=request.is_active,
+            config=encrypted_credentials
         )
         
         db.add(channel)
@@ -134,14 +136,14 @@ async def create_channel(
         await db.refresh(channel)
         
         return ChannelResponse(
-            id=channel.id,
-            channel_type=channel.channel_type,
-            name=channel.name,
+            id=str(channel.id),
+            channel_type=channel.type,
+            name=request.name,
             is_active=channel.is_active,
-            widget_id=channel.widget_id,
-            platform_info=channel.platform_data or {},
+            widget_id=validation_result.get("widget_id"),
+            platform_info=validation_result,
             created_at=channel.created_at.isoformat(),
-            updated_at=channel.updated_at.isoformat()
+            updated_at=channel.created_at.isoformat()  # No updated_at in model
         )
         
     except TierLimitError as e:
@@ -189,14 +191,14 @@ async def list_channels(
         channel_list = []
         for channel in channels:
             channel_list.append(ChannelResponse(
-                id=channel.id,
-                channel_type=channel.channel_type,
-                name=channel.name,
+                id=str(channel.id),
+                channel_type=channel.type,
+                name=f"{channel.type.capitalize()} Channel",  # Generate name from type
                 is_active=channel.is_active,
-                widget_id=channel.widget_id,
-                platform_info=channel.platform_data or {},
+                widget_id=None,  # Not stored in simple model
+                platform_info={},
                 created_at=channel.created_at.isoformat(),
-                updated_at=channel.updated_at.isoformat()
+                updated_at=channel.created_at.isoformat()
             ))
         
         return channel_list
@@ -245,14 +247,14 @@ async def get_channel(
             )
         
         return ChannelResponse(
-            id=channel.id,
-            channel_type=channel.channel_type,
-            name=channel.name,
+            id=str(channel.id),
+            channel_type=channel.type,
+            name=f"{channel.type.capitalize()} Channel",
             is_active=channel.is_active,
-            widget_id=channel.widget_id,
-            platform_info=channel.platform_data or {},
+            widget_id=None,
+            platform_info={},
             created_at=channel.created_at.isoformat(),
-            updated_at=channel.updated_at.isoformat()
+            updated_at=channel.created_at.isoformat()
         )
         
     except HTTPException:
@@ -303,23 +305,22 @@ async def update_channel(
             )
         
         # Update fields
-        if request.name is not None:
-            channel.name = request.name
         if request.is_active is not None:
             channel.is_active = request.is_active
+        # Note: name is not stored in the simple Channel model
         
         await db.commit()
         await db.refresh(channel)
         
         return ChannelResponse(
-            id=channel.id,
-            channel_type=channel.channel_type,
-            name=channel.name,
+            id=str(channel.id),
+            channel_type=channel.type,
+            name=f"{channel.type.capitalize()} Channel",
             is_active=channel.is_active,
-            widget_id=channel.widget_id,
-            platform_info=channel.platform_data or {},
+            widget_id=None,
+            platform_info={},
             created_at=channel.created_at.isoformat(),
-            updated_at=channel.updated_at.isoformat()
+            updated_at=channel.created_at.isoformat()
         )
         
     except HTTPException:
@@ -456,12 +457,12 @@ async def get_channel_statistics(
         # Get channel counts by type and status
         result = await db.execute(
             select(
-                Channel.channel_type,
+                Channel.type,
                 Channel.is_active,
                 func.count(Channel.id).label('count')
             )
             .where(Channel.workspace_id == current_workspace.id)
-            .group_by(Channel.channel_type, Channel.is_active)
+            .group_by(Channel.type, Channel.is_active)
         )
         
         stats = {
@@ -472,7 +473,7 @@ async def get_channel_statistics(
         }
         
         for row in result:
-            channel_type = row.channel_type
+            channel_type = row.type
             is_active = row.is_active
             count = row.count
             

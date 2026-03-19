@@ -232,11 +232,25 @@ class EscalationClassifier:
                 reason = f"Keywords detected: {', '.join(found_keywords)}" if found_keywords else "No escalation indicators"
                 category = "human_request" if any(kw in ['human', 'agent', 'manager'] for kw in found_keywords) else "none"
             
+            # Determine escalation type per requirements 4.2 and 4.3
+            # Requirement 4.2: Explicit keywords (human, agent, manager) -> "explicit"
+            # Requirement 4.3: Frustration/urgency patterns -> "implicit"
+            escalation_type = None
+            if should_escalate:
+                # Check for explicit human request keywords
+                human_keywords = ['human', 'agent', 'manager', 'supervisor', 'person', 'representative']
+                if any(kw in found_keywords for kw in human_keywords):
+                    escalation_type = "explicit"
+                else:
+                    # Frustration or urgency patterns
+                    escalation_type = "implicit"
+            
             return {
                 'should_escalate': should_escalate,
                 'confidence': confidence,
                 'reason': reason,
                 'category': category,
+                'escalation_type': escalation_type,  # "explicit" or "implicit" per requirements
                 'keywords_found': found_keywords,
                 'keyword_confidence': keyword_confidence,
                 'llm_used': llm_result is not None,

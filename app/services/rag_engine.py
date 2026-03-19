@@ -94,7 +94,7 @@ class RAGEngine:
         # Vector similarity search using cosine similarity
         # Note: This uses pgvector extension with <=> operator for cosine distance
         query_sql = text("""
-            SELECT dc.*, d.filename, d.workspace_id,
+            SELECT dc.*, d.name as filename, d.workspace_id,
                    1 - (dc.embedding <=> :query_embedding) as similarity
             FROM document_chunks dc
             JOIN documents d ON dc.document_id = d.id
@@ -120,20 +120,16 @@ class RAGEngine:
             # Reconstruct DocumentChunk object
             chunk = DocumentChunk(
                 id=row.id,
+                workspace_id=row.workspace_id,
                 document_id=row.document_id,
                 chunk_index=row.chunk_index,
                 content=row.content,
-                token_count=row.token_count,
-                start_char=row.start_char,
-                end_char=row.end_char,
                 embedding=row.embedding,
-                metadata=row.metadata,
                 created_at=row.created_at
             )
             
-            # Add filename to metadata for context
-            chunk.metadata = chunk.metadata or {}
-            chunk.metadata['filename'] = row.filename
+            # Store filename as an attribute on the chunk for context building
+            chunk.filename = row.filename
             
             chunks_with_similarity.append((chunk, row.similarity))
         
@@ -213,7 +209,7 @@ class RAGEngine:
         if relevant_chunks:
             prompt_parts.append("\n--- RELEVANT KNOWLEDGE BASE ---")
             for i, (chunk, similarity) in enumerate(relevant_chunks, 1):
-                filename = chunk.metadata.get('filename', 'Unknown')
+                filename = getattr(chunk, 'filename', 'Unknown')
                 prompt_parts.append(
                     f"\nSource {i} (from {filename}, similarity: {similarity:.3f}):\n"
                     f"{chunk.content}"
@@ -320,11 +316,10 @@ class RAGEngine:
             
             # 4. Get workspace fallback message
             workspace_result = await self.db.execute(
-                select(Workspace.fallback_message)
+                select(Workspace.fallback_msg)
                 .where(Workspace.id == workspace_id)
             )
-            workspace = workspace_result.scalar_one_or_none()
-            fallback_message = workspace.fallback_message if workspace else None
+            fallback_message = workspace_result.scalar_one_or_none()
             
             # 5. Build context prompt
             context_prompt = await self.build_context_prompt(
@@ -351,7 +346,7 @@ class RAGEngine:
                     {
                         'chunk_id': chunk.id,
                         'similarity': similarity,
-                        'filename': chunk.metadata.get('filename', 'Unknown'),
+                        'filename': getattr(chunk, 'filename', 'Unknown'),
                         'content_preview': chunk.content[:100] + '...' if len(chunk.content) > 100 else chunk.content
                     }
                     for chunk, similarity in relevant_chunks
@@ -376,13 +371,13 @@ class RAGEngine:
             Fallback message or default message
         """
         result = await self.db.execute(
-            select(Workspace.fallback_message)
+            select(Workspace.fallback_msg)
             .where(Workspace.id == workspace_id)
         )
-        workspace = result.scalar_one_or_none()
+        fallback_msg = result.scalar_one_or_none()
         
-        if workspace and workspace.fallback_message:
-            return workspace.fallback_message
+        if fallback_msg:
+            return fallback_msg
         
         return (
             "I don't have specific information about that in my knowledge base. "
@@ -457,8 +452,8 @@ async def search_knowledge_base(
             'chunk_id': chunk.id,
             'content': chunk.content,
             'similarity': similarity,
-            'filename': chunk.metadata.get('filename', 'Unknown'),
-            'token_count': chunk.token_count,
+            'filename': getattr(chunk, 'filename', 'Unknown'),
+            'token_count': getattr(chunk, 'token_count', 0),
             'chunk_index': chunk.chunk_index
         }
         for chunk, similarity in relevant_chunks

@@ -104,10 +104,18 @@ async def get_webchat_channel_by_widget_id(
     for channel in channels:
         if channel.config:
             try:
-                # Decrypt and parse JSON config
-                import json
-                decrypted_config_str = decrypt_credential(channel.config)
-                decrypted_config = json.loads(decrypted_config_str)
+                # Decrypt config - each field is encrypted separately
+                decrypted_config = {}
+                for key, value in channel.config.items():
+                    if isinstance(value, str) and value:
+                        try:
+                            decrypted_config[key] = decrypt_credential(value)
+                        except Exception:
+                            # If decryption fails, use value as-is
+                            decrypted_config[key] = value
+                    else:
+                        decrypted_config[key] = value
+                
                 if decrypted_config.get("widget_id") == widget_id:
                     return channel
             except Exception:
@@ -222,15 +230,33 @@ async def get_webchat_config(
         
         channel, workspace = result
         
-        # Decrypt and parse the channel configuration
+        # Decrypt the channel configuration
+        # Note: channel.config is a dict where each value is encrypted separately
         try:
-            import json
-            decrypted_config_str = decrypt_credential(channel.config)
-            config = json.loads(decrypted_config_str)
+            config = {}
+            if not channel.config:
+                raise HTTPException(
+                    status_code=500,
+                    detail="WebChat configuration is empty"
+                )
+            
+            # Decrypt each field in the config
+            for key, value in channel.config.items():
+                if isinstance(value, str) and value:
+                    try:
+                        config[key] = decrypt_credential(value)
+                    except Exception:
+                        # If decryption fails, use the value as-is (might not be encrypted)
+                        config[key] = value
+                else:
+                    config[key] = value
+                    
+        except HTTPException:
+            raise
         except Exception as e:
             raise HTTPException(
                 status_code=500,
-                detail="Failed to load WebChat configuration"
+                detail=f"Failed to load WebChat configuration: {str(e)}"
             )
         
         # Validate required configuration fields

@@ -52,8 +52,7 @@ class WebSocketEventBroadcaster:
             .where(Conversation.id == conversation_id)
             .where(Conversation.workspace_id == workspace_id)
             .options(
-                selectinload(Conversation.contact),
-                selectinload(Conversation.channel)
+                selectinload(Conversation.contact)
             )
         )
         conversation = result.scalar_one_or_none()
@@ -67,7 +66,7 @@ class WebSocketEventBroadcaster:
             "escalation_reason": escalation_reason,
             "priority": priority,
             "contact_name": conversation.contact.name if conversation.contact else "Unknown",
-            "channel_type": conversation.channel.channel_type if conversation.channel else "unknown",
+            "channel_type": conversation.channel_type,
             "escalated_at": datetime.now(timezone.utc).isoformat()
         }
         

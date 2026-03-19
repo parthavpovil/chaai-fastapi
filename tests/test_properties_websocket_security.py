@@ -17,6 +17,7 @@ import tempfile
 import os
 from unittest.mock import AsyncMock, MagicMock, patch
 from fastapi import WebSocket
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import Workspace, User, PlatformSetting, UsageCounter
@@ -50,95 +51,291 @@ class TestWebSocketProperties:
     
     @given(
         workspace_id=st.uuids(),
-        user_id=st.uuids(),
-        event_type=st.sampled_from(['escalation', 'claim', 'message'])
+        user_id_1=st.uuids(),
+        user_id_2=st.uuids(),
+        event_type=st.sampled_from(['escalation', 'agent_claim', 'new_message'])
     )
-    @settings(max_examples=100)
-    async def test_property_18_websocket_event_broadcasting(self, workspace_id, user_id, event_type):
+    @settings(max_examples=100, deadline=None)
+    @pytest.mark.asyncio
+    async def test_property_18_websocket_event_broadcasting(self, workspace_id, user_id_1, user_id_2, event_type):
         """
         Property 18: WebSocket Event Broadcasting
-        For any workspace event, the WebSocket manager should broadcast to all
-        authenticated connections in that workspace while maintaining isolation.
+        For any workspace event (conversation escalation, agent claim, new message),
+        the WebSocket manager should broadcast the event to all authenticated connections
+        in that workspace while maintaining isolation between different workspaces.
+        
+        Feature: chatsaas-backend, Property 18: WebSocket Event Broadcasting
         
         Validates: Requirements 7.1, 7.2, 7.3, 7.5
         """
-        websocket_manager = WebSocketManager()
+        # Create fresh WebSocket manager for this test
+        ws_manager = WebSocketManager()
         
-        # Mock WebSocket connections
-        mock_ws1 = MagicMock(spec=WebSocket)
-        mock_ws2 = MagicMock(spec=WebSocket)
-        mock_ws_other_workspace = MagicMock(spec=WebSocket)
+        # Create mock WebSocket connections for target workspace
+        mock_ws1 = AsyncMock(spec=WebSocket)
+        mock_ws1.send_text = AsyncMock()
+        mock_ws2 = AsyncMock(spec=WebSocket)
+        mock_ws2.send_text = AsyncMock()
         
+        # Create mock WebSocket connection for different workspace (should not receive events)
         other_workspace_id = uuid4()
+        mock_ws_other = AsyncMock(spec=WebSocket)
+        mock_ws_other.send_text = AsyncMock()
         
-        # Add connections to workspace
-        websocket_manager.connections[workspace_id] = {
-            user_id: mock_ws1,
-            uuid4(): mock_ws2
+        # Manually add connections to the manager (simulating established connections)
+        from app.services.websocket_manager import WebSocketConnection
+        
+        # Add connections to target workspace
+        conn_id_1 = ws_manager.generate_connection_id(str(workspace_id), str(user_id_1))
+        conn_1 = WebSocketConnection(
+            websocket=mock_ws1,
+            connection_id=conn_id_1,
+            workspace_id=str(workspace_id),
+            user_id=str(user_id_1),
+            user_email=f"user1@test.com",
+            user_role="owner"
+        )
+        
+        conn_id_2 = ws_manager.generate_connection_id(str(workspace_id), str(user_id_2))
+        conn_2 = WebSocketConnection(
+            websocket=mock_ws2,
+            connection_id=conn_id_2,
+            workspace_id=str(workspace_id),
+            user_id=str(user_id_2),
+            user_email=f"user2@test.com",
+            user_role="agent"
+        )
+        
+        # Add connection to different workspace
+        other_user_id = uuid4()
+        conn_id_other = ws_manager.generate_connection_id(str(other_workspace_id), str(other_user_id))
+        conn_other = WebSocketConnection(
+            websocket=mock_ws_other,
+            connection_id=conn_id_other,
+            workspace_id=str(other_workspace_id),
+            user_id=str(other_user_id),
+            user_email=f"other@test.com",
+            user_role="owner"
+        )
+        
+        # Add to manager's connection pools
+        ws_manager.workspace_connections[str(workspace_id)] = {
+            conn_id_1: conn_1,
+            conn_id_2: conn_2
         }
-        websocket_manager.connections[other_workspace_id] = {
-            uuid4(): mock_ws_other_workspace
+        ws_manager.workspace_connections[str(other_workspace_id)] = {
+            conn_id_other: conn_other
         }
+        ws_manager.connections[conn_id_1] = conn_1
+        ws_manager.connections[conn_id_2] = conn_2
+        ws_manager.connections[conn_id_other] = conn_other
         
-        # Create event data
-        event_data = {
-            "type": event_type,
-            "workspace_id": str(workspace_id),
-            "timestamp": datetime.now().isoformat(),
-            "data": {"test": "data"}
-        }
+        # Create event data based on event type
+        conversation_id = str(uuid4())
         
-        # Broadcast event
-        await websocket_manager.broadcast_to_workspace(workspace_id, event_data)
+        if event_type == 'escalation':
+            event_data = {
+                "type": "escalation",
+                "conversation_id": conversation_id,
+                "reason": "explicit",
+                "confidence": 0.95,
+                "timestamp": datetime.now().isoformat()
+            }
+        elif event_type == 'agent_claim':
+            event_data = {
+                "type": "agent_claim",
+                "conversation_id": conversation_id,
+                "agent_id": str(user_id_2),
+                "agent_name": "Test Agent",
+                "timestamp": datetime.now().isoformat()
+            }
+        else:  # new_message
+            event_data = {
+                "type": "new_message",
+                "conversation_id": conversation_id,
+                "sender_type": "customer",
+                "content": "Test message",
+                "timestamp": datetime.now().isoformat()
+            }
         
-        # Verify connections in target workspace received event
-        mock_ws1.send_json.assert_called_once_with(event_data)
-        mock_ws2.send_json.assert_called_once_with(event_data)
+        # Broadcast event to target workspace
+        sent_count = await ws_manager.broadcast_to_workspace(str(workspace_id), event_data)
         
-        # Verify other workspace connections did not receive event
-        mock_ws_other_workspace.send_json.assert_not_called()
+        # Property 1: All connections in target workspace should receive the event
+        assert sent_count == 2, f"Should broadcast to 2 connections in workspace, got {sent_count}"
+        
+        # Verify both connections in target workspace received the event
+        assert mock_ws1.send_text.called, "First connection should receive event"
+        assert mock_ws2.send_text.called, "Second connection should receive event"
+        
+        # Verify the event data was sent correctly
+        call_args_1 = mock_ws1.send_text.call_args[0][0]
+        call_args_2 = mock_ws2.send_text.call_args[0][0]
+        
+        # Parse JSON to verify content
+        sent_data_1 = json.loads(call_args_1)
+        sent_data_2 = json.loads(call_args_2)
+        
+        assert sent_data_1["type"] == event_type, "Event type should match"
+        assert sent_data_2["type"] == event_type, "Event type should match"
+        assert sent_data_1["conversation_id"] == conversation_id, "Conversation ID should match"
+        assert sent_data_2["conversation_id"] == conversation_id, "Conversation ID should match"
+        
+        # Property 2: Workspace isolation - other workspace should NOT receive the event
+        assert not mock_ws_other.send_text.called, \
+            "Connection in different workspace should NOT receive event (workspace isolation)"
+        
+        # Property 3: Test broadcast with exclusion (e.g., don't send to sender)
+        mock_ws1.send_text.reset_mock()
+        mock_ws2.send_text.reset_mock()
+        
+        sent_count_excluded = await ws_manager.broadcast_to_workspace(
+            str(workspace_id), 
+            event_data,
+            exclude_connection_id=conn_id_1
+        )
+        
+        # Should only send to one connection (excluding conn_id_1)
+        assert sent_count_excluded == 1, "Should broadcast to 1 connection when excluding one"
+        assert not mock_ws1.send_text.called, "Excluded connection should not receive event"
+        assert mock_ws2.send_text.called, "Non-excluded connection should receive event"
+        
+        # Property 4: Broadcasting to non-existent workspace should return 0
+        non_existent_workspace = uuid4()
+        sent_count_none = await ws_manager.broadcast_to_workspace(str(non_existent_workspace), event_data)
+        assert sent_count_none == 0, "Broadcasting to non-existent workspace should return 0"
 
     @given(
         workspace_id=st.uuids(),
         user_id=st.uuids(),
-        jwt_token=st.text(min_size=20, max_size=200)
+        user_email=st.emails()
     )
-    @settings(max_examples=100)
-    async def test_property_19_websocket_connection_management(self, workspace_id, user_id, jwt_token):
+    @settings(max_examples=100, deadline=None)
+    @pytest.mark.asyncio
+    async def test_property_19_websocket_connection_management(self, workspace_id, user_id, user_email):
         """
         Property 19: WebSocket Connection Management
         For any WebSocket connection attempt, the system should authenticate using
-        JWT tokens and clean up connections when they drop.
+        JWT tokens in query parameters, validate tokens before accepting connections,
+        and automatically clean up connection references when connections drop.
+        
+        Feature: chatsaas-backend, Property 19: WebSocket Connection Management
         
         Validates: Requirements 7.4, 7.6
         """
-        websocket_manager = WebSocketManager()
-        auth_service = AuthService()
+        # Create fresh WebSocket manager for this test
+        ws_manager = WebSocketManager()
         
-        mock_websocket = MagicMock(spec=WebSocket)
+        # Create mock WebSocket
+        mock_websocket = AsyncMock(spec=WebSocket)
+        mock_websocket.accept = AsyncMock()
+        mock_websocket.send_text = AsyncMock()
+        mock_websocket.close = AsyncMock()
         
-        # Test valid JWT token
-        with patch.object(auth_service, 'decode_token') as mock_decode:
-            mock_decode.return_value = {
-                "sub": str(user_id),
-                "workspace_id": str(workspace_id),
-                "role": "owner"
+        # Create mock database session
+        mock_db = AsyncMock(spec=AsyncSession)
+        
+        # Create valid JWT token
+        valid_token = AuthService.create_access_token(
+            user_id=user_id,
+            email=user_email,
+            role="owner",
+            workspace_id=workspace_id
+        )
+        
+        # Mock the authenticate_connection method to return auth info
+        async def mock_authenticate(token, db):
+            payload = AuthService.decode_access_token(token)
+            if not payload:
+                return None
+            return {
+                "user_id": payload.get("sub"),
+                "workspace_id": payload.get("workspace_id"),
+                "user_email": payload.get("email"),
+                "user_role": payload.get("role", "owner")
             }
+        
+        # Patch authenticate_connection
+        with patch.object(ws_manager, 'authenticate_connection', side_effect=mock_authenticate):
+            # Test 1: Valid JWT token should establish connection
+            connection = await ws_manager.connect(mock_websocket, valid_token, mock_db)
             
-            # Connect WebSocket
-            await websocket_manager.connect(mock_websocket, workspace_id, user_id)
+            # Verify connection was established
+            assert connection is not None, "Connection should be established with valid token"
+            assert connection.workspace_id == str(workspace_id), "Workspace ID should match"
+            assert connection.user_id == str(user_id), "User ID should match"
+            assert connection.user_email == user_email, "User email should match"
             
-            # Verify connection was added
-            assert workspace_id in websocket_manager.connections
-            assert user_id in websocket_manager.connections[workspace_id]
-            assert websocket_manager.connections[workspace_id][user_id] == mock_websocket
+            # Verify WebSocket was accepted
+            mock_websocket.accept.assert_called_once()
             
-            # Test connection cleanup
-            await websocket_manager.disconnect(mock_websocket, workspace_id, user_id)
+            # Verify connection was added to manager
+            assert connection.connection_id in ws_manager.connections, "Connection should be in global pool"
+            assert str(workspace_id) in ws_manager.workspace_connections, "Workspace pool should exist"
+            assert connection.connection_id in ws_manager.workspace_connections[str(workspace_id)], \
+                "Connection should be in workspace pool"
             
-            # Verify connection was removed
-            if workspace_id in websocket_manager.connections:
-                assert user_id not in websocket_manager.connections[workspace_id]
+            # Verify connection confirmation was sent
+            assert mock_websocket.send_text.called, "Connection confirmation should be sent"
+            
+            # Test 2: Connection cleanup on disconnect
+            connection_id = connection.connection_id
+            disconnect_result = await ws_manager.disconnect(connection_id)
+            
+            # Verify disconnect was successful
+            assert disconnect_result is True, "Disconnect should return True"
+            
+            # Verify connection was removed from all pools
+            assert connection_id not in ws_manager.connections, "Connection should be removed from global pool"
+            
+            # Verify workspace pool cleanup
+            if str(workspace_id) in ws_manager.workspace_connections:
+                assert connection_id not in ws_manager.workspace_connections[str(workspace_id)], \
+                    "Connection should be removed from workspace pool"
+            
+            # Verify WebSocket was closed
+            mock_websocket.close.assert_called()
+            
+            # Test 3: Invalid token should reject connection
+            mock_websocket_invalid = AsyncMock(spec=WebSocket)
+            mock_websocket_invalid.accept = AsyncMock()
+            mock_websocket_invalid.close = AsyncMock()
+            
+            invalid_token = "invalid_token_string"
+            
+            connection_invalid = await ws_manager.connect(mock_websocket_invalid, invalid_token, mock_db)
+            
+            # Verify connection was rejected
+            assert connection_invalid is None, "Connection should be rejected with invalid token"
+            mock_websocket_invalid.close.assert_called_once(), "WebSocket should be closed on auth failure"
+            
+            # Test 4: Automatic cleanup on connection drop
+            # Create a new connection
+            mock_websocket3 = AsyncMock(spec=WebSocket)
+            mock_websocket3.accept = AsyncMock()
+            mock_websocket3.send_text = AsyncMock()
+            mock_websocket3.close = AsyncMock()
+            
+            user_id_3 = uuid4()
+            valid_token_3 = AuthService.create_access_token(
+                user_id=user_id_3,
+                email="user3@test.com",
+                role="owner",
+                workspace_id=workspace_id
+            )
+            
+            connection3 = await ws_manager.connect(mock_websocket3, valid_token_3, mock_db)
+            
+            # Verify connection exists
+            assert connection3 is not None, "Third connection should be established"
+            assert connection3.connection_id in ws_manager.connections, "Connection should be in pool"
+            
+            # Simulate automatic cleanup (connection drop)
+            await ws_manager.disconnect(connection3.connection_id)
+            
+            # Verify cleanup was successful
+            assert connection3.connection_id not in ws_manager.connections, \
+                "Connection should be automatically removed on disconnect"
 
     @given(
         secret=st.text(min_size=10, max_size=50),

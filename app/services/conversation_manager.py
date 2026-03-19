@@ -53,8 +53,7 @@ class ConversationManager:
             Conversation.workspace_id == workspace_id
         ).options(
             selectinload(Conversation.contact),
-            selectinload(Conversation.channel),
-            selectinload(Conversation.agent)
+            selectinload(Conversation.assigned_agent)
         ).order_by(desc(Conversation.updated_at))
         
         if status:
@@ -86,8 +85,7 @@ class ConversationManager:
             .where(Conversation.workspace_id == workspace_id)
             .options(
                 selectinload(Conversation.contact),
-                selectinload(Conversation.channel),
-                selectinload(Conversation.agent)
+                selectinload(Conversation.assigned_agent)
             )
         )
         return result.scalar_one_or_none()
@@ -155,9 +153,9 @@ class ConversationManager:
         }
         
         if new_status == "agent" and agent_id:
-            update_data["agent_id"] = agent_id
+            update_data["assigned_agent_id"] = agent_id
         elif new_status != "agent":
-            update_data["agent_id"] = None
+            update_data["assigned_agent_id"] = None
         
         stmt = update(Conversation).where(
             Conversation.id == conversation_id
@@ -189,24 +187,28 @@ class ConversationManager:
         Returns:
             Updated conversation or None if not found
         """
-        conversation = await self.update_conversation_status(
-            conversation_id, workspace_id, "escalated"
-        )
+        # Verify conversation belongs to workspace
+        conversation = await self.get_conversation_by_id(conversation_id, workspace_id)
+        if not conversation:
+            return None
         
-        if conversation and escalation_reason:
-            # Add escalation metadata
-            metadata = conversation.metadata or {}
-            metadata["escalation_reason"] = escalation_reason
-            metadata["escalated_at"] = datetime.now(timezone.utc).isoformat()
-            
-            stmt = update(Conversation).where(
-                Conversation.id == conversation_id
-            ).values(metadata=metadata)
-            
-            await self.db.execute(stmt)
-            await self.db.commit()
+        # Update status and escalation reason
+        stmt = update(Conversation).where(
+            Conversation.id == conversation_id
+        ).values(
+            status="escalated",
+            escalation_reason=escalation_reason,
+            updated_at=datetime.now(timezone.utc)
+        ).returning(Conversation)
         
-        return conversation
+        result = await self.db.execute(stmt)
+        await self.db.commit()
+        
+        updated_conversation = result.scalar_one_or_none()
+        if updated_conversation:
+            await self.db.refresh(updated_conversation)
+        
+        return updated_conversation
     
     async def assign_agent_to_conversation(
         self,
@@ -259,12 +261,11 @@ class ConversationManager:
         """
         result = await self.db.execute(
             select(Conversation)
-            .where(Conversation.agent_id == agent_id)
+            .where(Conversation.assigned_agent_id == agent_id)
             .where(Conversation.workspace_id == workspace_id)
             .where(Conversation.status == "agent")
             .options(
-                selectinload(Conversation.contact),
-                selectinload(Conversation.channel)
+                selectinload(Conversation.contact)
             )
             .order_by(desc(Conversation.updated_at))
             .limit(limit)
@@ -291,19 +292,6 @@ class ConversationManager:
         conversation = await self.update_conversation_status(
             conversation_id, workspace_id, "closed"
         )
-        
-        if conversation and closed_by:
-            # Add closure metadata
-            metadata = conversation.metadata or {}
-            metadata["closed_by"] = closed_by
-            metadata["closed_at"] = datetime.now(timezone.utc).isoformat()
-            
-            stmt = update(Conversation).where(
-                Conversation.id == conversation_id
-            ).values(metadata=metadata)
-            
-            await self.db.execute(stmt)
-            await self.db.commit()
         
         return conversation
     
@@ -466,7 +454,7 @@ async def escalate_conversation_by_id(
             .where(Conversation.workspace_id == workspace_id)
             .options(
                 selectinload(Conversation.contact),
-                selectinload(Conversation.messages).selectinload(Message.sender)
+                selectinload(Conversation.messages)
             )
         )
         conversation = result.scalar_one_or_none()
@@ -487,13 +475,18 @@ async def escalate_conversation_by_id(
         # Format messages
         messages = []
         for msg in conversation.messages:
+            # Get sender name from metadata if available
+            sender_name = None
+            if msg.extra_data and "agent_name" in msg.extra_data:
+                sender_name = msg.extra_data["agent_name"]
+            
             messages.append({
                 "id": str(msg.id),
                 "content": msg.content,
                 "role": msg.role,
-                "sender_name": msg.sender.email if msg.sender else None,
+                "sender_name": sender_name,
                 "created_at": msg.created_at.isoformat(),
-                "metadata": msg.metadata
+                "metadata": msg.extra_data
             })
         
         return {

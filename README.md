@@ -11,6 +11,26 @@ Multi-tenant customer support platform with AI-powered responses and human agent
 - **Real-time Communication**: WebSocket notifications for agents
 - **Multi-tier System**: Free, Starter, Growth, and Pro subscription tiers
 
+## Project Structure
+
+```
+backend/
+├── app/                    # Application code
+│   ├── models/            # SQLAlchemy models
+│   ├── routers/           # FastAPI route handlers
+│   ├── services/          # Business logic services
+│   ├── middleware/        # Custom middleware
+│   └── utils/             # Utility functions
+├── tests/                 # Test suite
+├── alembic/              # Database migrations
+├── scripts/              # Utility scripts
+├── storage/              # File storage (documents)
+├── logs/                 # Application logs
+├── main.py               # Application entry point
+├── requirements.txt      # Python dependencies
+└── README.md            # This file
+```
+
 ## Quick Start
 
 ### Prerequisites
@@ -134,3 +154,39 @@ See the deployment documentation for production setup instructions including:
 ## License
 
 [Your License Here]# chaai-fastapi
+
+
+## Maintenance
+
+### Cleanup
+
+Remove cache files and test artifacts:
+```bash
+./cleanup.sh
+```
+
+This removes:
+- Python cache files (`__pycache__`, `*.pyc`)
+- Pytest cache
+- Coverage reports
+- Log files
+- Temporary files
+
+### Logs
+
+Application logs are stored in `logs/` directory. Configure log rotation in production.
+
+### Storage
+
+Uploaded documents are stored in `storage/documents/{workspace_id}/`. Ensure proper backup procedures.
+
+## Documentation
+
+- **API Documentation**: Available at `/docs` when running the server
+- **Production Deployment**: See `PRODUCTION_DEPLOYMENT.md`
+- **SSL Setup**: See `SSL_SETUP.md`
+- **Spec Files**: See `.kiro/specs/chatsaas-backend/` for requirements and design
+
+## License
+
+Proprietary - All rights reserved
