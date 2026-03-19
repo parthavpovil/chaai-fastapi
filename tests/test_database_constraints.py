@@ -11,7 +11,7 @@ This test validates that the database properly enforces:
 
 import pytest
 import asyncio
-from hypothesis import given, strategies as st, settings
+from hypothesis import given, strategies as st, settings, HealthCheck
 from uuid import UUID, uuid4
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
@@ -37,7 +37,7 @@ class TestDatabaseConstraintProperties:
         contact_count=st.integers(min_value=1, max_value=5),
         vector_dimension=st.sampled_from([1536, 3072])  # OpenAI vs Google dimensions
     )
-    @settings(max_examples=1)  # Keep minimal for speed as requested
+    @settings(max_examples=1, suppress_health_check=[HealthCheck.function_scoped_fixture])
     @pytest.mark.asyncio
     async def test_property_31_database_constraint_enforcement(self, workspace_count, contact_count, vector_dimension, db_session):
         """

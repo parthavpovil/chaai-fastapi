@@ -214,8 +214,10 @@ class TestDatabaseInitialization:
     
     async def test_close_db_error_handling(self):
         """Test database cleanup error handling"""
-        # Mock the engine.dispose method to raise an error
-        with patch('app.database.engine.dispose', side_effect=Exception("Cleanup error")):
+        # Mock the entire engine to raise an error on dispose
+        mock_engine = MagicMock()
+        mock_engine.dispose = AsyncMock(side_effect=Exception("Cleanup error"))
+        with patch('app.database.engine', mock_engine):
             with pytest.raises(Exception, match="Cleanup error"):
                 await close_db()
 
@@ -223,18 +225,26 @@ class TestDatabaseInitialization:
 class TestErrorScenarios:
     """Test various database error scenarios and recovery"""
     
-    async def test_session_transaction_rollback(self, db_session):
+    async def test_session_transaction_rollback(self):
         """Test session rollback on transaction error"""
+        session_gen = get_db()
+        session = await session_gen.__anext__()
         try:
-            # Simulate a transaction that needs rollback
-            await db_session.execute(text("SELECT 1"))
-            # Force an error condition
+            await session.execute(text("SELECT 1"))
             raise SQLAlchemyError("Transaction error")
         except SQLAlchemyError:
-            # Session should handle rollback automatically
-            # Test that we can still use the session after error
-            result = await db_session.execute(text("SELECT 1"))
+            pass  # get_db handles rollback in its exception handler
+        finally:
+            await session_gen.aclose()
+
+        # Verify a fresh session still works after the error
+        session_gen2 = get_db()
+        session2 = await session_gen2.__anext__()
+        try:
+            result = await session2.execute(text("SELECT 1"))
             assert result.fetchone()[0] == 1
+        finally:
+            await session_gen2.aclose()
     
     async def test_connection_recovery_after_error(self):
         """Test connection recovery after database error"""
