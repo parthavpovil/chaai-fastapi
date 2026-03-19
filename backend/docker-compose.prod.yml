@@ -1,0 +1,116 @@
+# Docker Compose configuration for ChatSaaS Backend production deployment
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: chatsaas-postgres
+    environment:
+      POSTGRES_DB: chatsaas_prod
+      POSTGRES_USER: chatsaas_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatsaas_user -d chatsaas_prod"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chatsaas-network
+
+  # Redis for caching (optional)
+  redis:
+    image: redis:7-alpine
+    container_name: chatsaas-redis
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - chatsaas-network
+
+  # ChatSaaS Backend Application
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: chatsaas-backend
+    environment:
+      - DEBUG=false
+      - DATABASE_URL=postgresql+asyncpg://chatsaas_user:${POSTGRES_PASSWORD}@postgres:5432/chatsaas_prod
+      - JWT_SECRET_KEY=${JWT_SECRET_KEY}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - RESEND_API_KEY=${RESEND_API_KEY}
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY}
+      - PROCESS_SECRET=${PROCESS_SECRET}
+      - STORAGE_PATH=/var/chatsaas/storage
+      - SUPER_ADMIN_EMAIL=${SUPER_ADMIN_EMAIL}
+      - TELEGRAM_SECRET_TOKEN=${TELEGRAM_SECRET_TOKEN}
+      - WHATSAPP_APP_SECRET=${WHATSAPP_APP_SECRET}
+      - INSTAGRAM_APP_SECRET=${INSTAGRAM_APP_SECRET}
+    volumes:
+      - storage_data:/var/chatsaas/storage
+      - ./logs:/var/log/chatsaas
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - chatsaas-network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: chatsaas-nginx
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./ssl:/etc/ssl:ro
+      - ./static:/var/chatsaas/static:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - chatsaas-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  storage_data:
+    driver: local
+
+networks:
+  chatsaas-network:
+    driver: bridge

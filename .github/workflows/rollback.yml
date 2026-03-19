@@ -1,0 +1,167 @@
+name: Rollback Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit_sha:
+        description: 'Commit SHA to rollback to'
+        required: true
+        type: string
+      reason:
+        description: 'Reason for rollback'
+        required: true
+        type: string
+
+env:
+  DOCKER_IMAGE_NAME: chatsaas-backend
+  DEPLOY_PATH: /var/www/chatsaas
+
+jobs:
+  rollback:
+    name: Rollback to Previous Version
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://${{ secrets.VPS_HOST }}
+    
+    steps:
+      - name: Validate inputs
+        run: |
+          echo "=========================================="
+          echo "ROLLBACK INITIATED"
+          echo "=========================================="
+          echo "Target Commit: ${{ inputs.commit_sha }}"
+          echo "Reason: ${{ inputs.reason }}"
+          echo "Initiated by: ${{ github.actor }}"
+          echo "Time: $(date)"
+          echo "=========================================="
+
+      - name: Install sshpass
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Create rollback script
+        run: |
+          cat > /tmp/rollback.sh << 'ROLLBACK_SCRIPT'
+          #!/bin/bash
+          set -e
+
+          DEPLOY_PATH="${{ env.DEPLOY_PATH }}"
+          DOCKER_IMAGE="${{ env.DOCKER_IMAGE_NAME }}"
+          TARGET_SHA="${{ inputs.commit_sha }}"
+          SHORT_SHA="${TARGET_SHA:0:7}"
+          
+          echo "=========================================="
+          echo "Rolling back to commit: ${TARGET_SHA}"
+          echo "=========================================="
+          
+          cd ${DEPLOY_PATH}
+          
+          # Check if target image exists
+          if ! docker images ${DOCKER_IMAGE}:${SHORT_SHA} | grep -q ${SHORT_SHA}; then
+            echo "❌ Error: Docker image for commit ${SHORT_SHA} not found!"
+            echo "Available images:"
+            docker images ${DOCKER_IMAGE}
+            exit 1
+          fi
+          
+          # Tag target image as latest
+          docker tag ${DOCKER_IMAGE}:${SHORT_SHA} ${DOCKER_IMAGE}:latest
+          
+          # Stop current container
+          echo "Stopping current container..."
+          docker-compose -f docker-compose.prod.yml down
+          
+          # Start container with rollback image
+          echo "Starting container with rollback image..."
+          docker-compose -f docker-compose.prod.yml up -d
+          
+          # Wait for container to be healthy
+          echo "Waiting for container to be healthy..."
+          for i in {1..30}; do
+            if docker-compose -f docker-compose.prod.yml ps | grep -q "healthy"; then
+              echo "Container is healthy!"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "❌ Container failed to become healthy!"
+              exit 1
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 2
+          done
+          
+          # Health check
+          echo "Performing health check..."
+          for i in {1..3}; do
+            if curl -f http://localhost:8000/api/metrics/health/detailed > /dev/null 2>&1; then
+              echo "✅ Health check passed!"
+              break
+            fi
+            if [ $i -eq 3 ]; then
+              echo "❌ Health check failed after 3 attempts!"
+              exit 1
+            fi
+            echo "Health check attempt $i failed, retrying..."
+            sleep 10
+          done
+          
+          echo "=========================================="
+          echo "✅ Rollback completed successfully!"
+          echo "Rolled back to: ${TARGET_SHA}"
+          echo "Time: $(date)"
+          echo "=========================================="
+          ROLLBACK_SCRIPT
+          
+          chmod +x /tmp/rollback.sh
+
+      - name: Execute rollback
+        run: |
+          sshpass -p "${{ secrets.VPS_PASSWORD }}" scp \
+            -o StrictHostKeyChecking=no \
+            /tmp/rollback.sh \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
+          
+          sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh \
+            -o StrictHostKeyChecking=no \
+            ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
+            'bash /tmp/rollback.sh'
+
+      - name: Verify rollback
+        run: |
+          echo "Verifying rollback..."
+          HEALTH_URL="https://${{ secrets.VPS_HOST }}/api/metrics/health/detailed"
+          
+          for i in {1..5}; do
+            if curl -f -k ${HEALTH_URL} > /dev/null 2>&1; then
+              echo "✅ Rollback verified successfully!"
+              exit 0
+            fi
+            echo "Verification attempt $i failed, retrying..."
+            sleep 10
+          done
+          
+          echo "❌ Rollback verification failed"
+          exit 1
+
+      - name: Cleanup
+        if: always()
+        run: |
+          rm -rf ~/.ssh/known_hosts
+
+      - name: Create rollback summary
+        if: always()
+        run: |
+          echo "## Rollback Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target Commit:** ${{ inputs.commit_sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reason:** ${{ inputs.reason }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time:** $(date)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Initiated by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
