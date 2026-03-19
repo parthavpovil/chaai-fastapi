@@ -6,6 +6,8 @@ import httpx
 from typing import Optional, List, Dict, Any
 from app.config import settings
 
+# Deployment trigger
+
 
 class EmailService:
     """Service for sending emails via Resend API"""
