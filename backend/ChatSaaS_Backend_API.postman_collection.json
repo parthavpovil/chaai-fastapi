@@ -2,3083 +2,10 @@
   "info": {
     "_postman_id": "chatsaas-backend-api-v1",
     "name": "ChatSaaS Backend API",
-    "description": "# ChatSaaS Backend API\n\nComplete API collection for the ChatSaaS Backend platform. This collection includes all REST endpoints, WebSocket documentation, and webhook integrations.\n\n## Version\n\nAPI Version: 1.0  \nCollection Version: 1.0.0  \nLast Updated: 2026-03-19\n\n## Getting Started\n\n### 1. Set Up Environment Variables\n\nBefore using this collection, create a Postman environment with the following variables:\n\n- `base_url`: API base URL (default: `http://localhost:8000`)\n- `access_token`: JWT authentication token (auto-populated by login requests)\n- `workspace_id`: Current workspace ID (auto-populated)\n- `workspace_slug`: Current workspace slug (auto-populated)\n- `channel_id`: Current channel ID (auto-populated)\n- `document_id`: Current document ID (auto-populated)\n- `agent_id`: Current agent ID (auto-populated)\n- `conversation_id`: Current conversation ID (auto-populated)\n- `session_token`: WebChat session token (auto-populated)\n- `widget_id`: WebChat widget ID (auto-populated)\n- `invitation_token`: Agent invitation token (auto-populated)\n\n### 2. Authenticate\n\nRun one of the authentication requests to obtain an access token:\n\n- **POST Register**: Create a new user account and workspace\n- **POST Login**: Login with existing credentials\n- **POST Agent Login**: Login as an agent\n\nThe test scripts will automatically save the `access_token` to your environment.\n\n### 3. Use the Collection\n\nAll authenticated endpoints will automatically use the stored `access_token`. Navigate through the folders to explore different API areas.\n\n## Authentication\n\nMost endpoints require JWT authentication via Bearer token. The collection automatically adds the Authorization header using pre-request scripts.\n\n**Token Format:** `Authorization: Bearer <access_token>`\n\nTokens contain:\n- User ID and email\n- User role (owner, agent)\n- Workspace ID\n- Expiration timestamp\n\n## Tier Limits\n\nDifferent tiers have different limits:\n\n| Feature | Free | Starter | Growth | Pro |\n|---------|------|---------|--------|-----|\n| Channels | 3 | 10 | 25 | Unlimited |\n| Agents | 5 | 15 | 50 | Unlimited |\n| Documents | 10 | 50 | 200 | Unlimited |\n| Messages/month | 1000 | 10000 | 50000 | Unlimited |\n\nExceeding limits returns 402 Payment Required error.\n\n## Rate Limiting\n\nRate limits are enforced on public endpoints:\n\n- **WebChat /send**: 10 messages per minute per session\n- **WebChat /messages**: 30 requests per minute per session\n\nRate limit headers:\n- `X-RateLimit-Limit`: Maximum requests allowed\n- `X-RateLimit-Remaining`: Remaining requests\n- `X-RateLimit-Reset`: Unix timestamp when limit resets\n\n## Error Responses\n\nAll endpoints follow a consistent error response format:\n\n```json\n{\n  \"detail\": \"Error description\"\n}\n```\n\nCommon status codes:\n- `400`: Bad Request - Invalid parameters\n- `401`: Unauthorized - Missing or invalid authentication\n- `402`: Payment Required - Tier limit exceeded\n- `403`: Forbidden - Insufficient permissions\n- `404`: Not Found - Resource not found\n- `413`: Request Entity Too Large - File size exceeded\n- `429`: Too Many Requests - Rate limit exceeded\n- `500`: Internal Server Error\n- `503`: Service Unavailable\n\n## WebSocket Connections\n\nWebSocket connections require JWT authentication via query parameter:\n\n```\nws://your-domain/ws/{workspace_id}?token=<jwt_token>\n```\n\nSee the WebSocket folder for detailed message format documentation.\n\n## API Documentation\n\nFor complete API documentation, see: [API_DOCUMENTATION.md](./API_DOCUMENTATION.md)\n\n## Support\n\nFor API support and questions, contact the platform administrator.",
+    "description": "# ChatSaaS Backend API\n\nComplete API collection for the ChatSaaS Backend platform.\n\n## Environment Variables\n- `base_url`: API base URL (e.g. `http://localhost:8000`)\n- `access_token`: JWT token (auto-populated by login/register)\n- `workspace_id`: Current workspace ID (auto-populated)\n- `workspace_slug`: Current workspace slug (auto-populated)\n- `channel_id`: Channel ID (auto-populated)\n- `document_id`: Document ID (auto-populated)\n- `agent_id`: Agent ID (auto-populated)\n- `conversation_id`: Conversation ID (auto-populated)\n- `session_token`: WebChat session token (auto-populated)\n- `widget_id`: WebChat widget ID (auto-populated)\n- `invitation_token`: Agent invitation token (auto-populated)\n\n## Authentication\nMost endpoints require `Authorization: Bearer {{access_token}}`.\n\n## Trailing Slashes\nFastAPI routes are defined with trailing slashes. Always use `/api/channels/` not `/api/channels`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "version": "1.0.0"
+    "version": "2.0.0"
   },
-  "item": [
-    {
-      "name": "Authentication",
-      "description": "Authentication endpoints for user and agent login, registration, and token management.",
-      "item": [
-        {
-          "name": "POST Register",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/auth/register",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "register"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"securepassword123\",\n  \"business_name\": \"My Business\"\n}"
-            },
-            "description": "Register a new user and create workspace. Returns JWT access token and workspace information."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has access_token\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"access_token\");",
-                  "    pm.environment.set(\"access_token\", jsonData.access_token);",
-                  "    ",
-                  "    if (jsonData.workspace) {",
-                  "        pm.environment.set(\"workspace_id\", jsonData.workspace.id);",
-                  "        pm.environment.set(\"workspace_slug\", jsonData.workspace.slug);",
-                  "    }",
-                  "});",
-                  "",
-                  "pm.test(\"Response has user info\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"user\");",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Login",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/auth/login",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "login"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"securepassword123\"\n}"
-            },
-            "description": "User login with email and password. Returns JWT access token."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has access_token\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"access_token\");",
-                  "    pm.environment.set(\"access_token\", jsonData.access_token);",
-                  "    ",
-                  "    if (jsonData.workspace) {",
-                  "        pm.environment.set(\"workspace_id\", jsonData.workspace.id);",
-                  "        pm.environment.set(\"workspace_slug\", jsonData.workspace.slug);",
-                  "    }",
-                  "});",
-                  "",
-                  "pm.test(\"Response has user info\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"user\");",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Agent Login",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/auth/agent-login",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "agent-login"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"agent@example.com\",\n  \"password\": \"securepassword123\"\n}"
-            },
-            "description": "Agent login with email and password. Returns JWT access token for agent."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has access_token\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"access_token\");",
-                  "    pm.environment.set(\"access_token\", jsonData.access_token);",
-                  "    ",
-                  "    if (jsonData.workspace) {",
-                  "        pm.environment.set(\"workspace_id\", jsonData.workspace.id);",
-                  "        pm.environment.set(\"workspace_slug\", jsonData.workspace.slug);",
-                  "    }",
-                  "});",
-                  "",
-                  "pm.test(\"Response has user info\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"user\");",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Accept Invite",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/auth/accept-invite",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "accept-invite"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"token\": \"invitation-token-string\",\n  \"password\": \"securepassword123\"\n}"
-            },
-            "description": "Accept agent invitation and create account."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Me",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/auth/me",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "auth",
-                "me"
-              ]
-            },
-            "description": "Get current user information. Requires authentication."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Channel Management",
-      "description": "Channel management endpoints for creating, updating, and managing communication channels (Telegram, WhatsApp, Instagram, WebChat). All endpoints require authentication.",
-      "item": [
-        {
-          "name": "POST Create Channel - Telegram",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/channels",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "channels"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"channel_type\": \"telegram\",\n  \"name\": \"My Telegram Bot\",\n  \"credentials\": {\n    \"bot_token\": \"123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11\"\n  },\n  \"is_active\": true\n}"
-            },
-            "description": "Create a new Telegram channel for the workspace."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has channel_id\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"id\");",
-                  "    pm.environment.set(\"channel_id\", jsonData.id);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Create Channel - WhatsApp",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/channels",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "channels"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"channel_type\": \"whatsapp\",\n  \"name\": \"My WhatsApp Channel\",\n  \"credentials\": {\n    \"phone_number_id\": \"1234567890\",\n    \"access_token\": \"whatsapp-access-token\"\n  },\n  \"is_active\": true\n}"
-            },
-            "description": "Create a new WhatsApp channel for the workspace."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has channel id\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"id\");",
-                  "    pm.environment.set(\"channel_id\", jsonData.id);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Create Channel - Instagram",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/channels",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "channels"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"channel_type\": \"instagram\",\n  \"name\": \"My Instagram Channel\",\n  \"credentials\": {\n    \"page_id\": \"instagram-page-id\",\n    \"access_token\": \"instagram-access-token\"\n  },\n  \"is_active\": true\n}"
-            },
-            "description": "Create a new Instagram channel for the workspace."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has channel id\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"id\");",
-                  "    pm.environment.set(\"channel_id\", jsonData.id);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Create Channel - WebChat",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/channels",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "channels"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"channel_type\": \"webchat\",\n  \"name\": \"My WebChat Widget\",\n  \"credentials\": {\n    \"business_name\": \"My Business\",\n    \"primary_color\": \"#FF5733\",\n    \"position\": \"bottom-right\",\n    \"welcome_message\": \"Hello! How can we help you today?\"\n  },\n  \"is_active\": true\n}"
-            },
-            "description": "Create a new WebChat channel for the workspace."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has channel_id and widget_id\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"id\");",
-                  "    pm.environment.set(\"channel_id\", jsonData.id);",
-                  "    if (jsonData.widget_id) {",
-                  "        pm.environment.set(\"widget_id\", jsonData.widget_id);",
-                  "    }",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET List Channels",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/channels",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "channels"
-              ]
-            },
-            "description": "List all channels for the workspace."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Channel by ID",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/channels/:channel_id",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "channels",
-                ":channel_id"
-              ],
-              "variable": [
-                {
-                  "key": "channel_id",
-                  "value": "{{channel_id}}",
-                  "description": "Channel UUID"
-                }
-              ]
-            },
-            "description": "Get channel details by ID."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "PUT Update Channel",
-          "request": {
-            "method": "PUT",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/channels/:channel_id",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "channels",
-                ":channel_id"
-              ],
-              "variable": [
-                {
-                  "key": "channel_id",
-                  "value": "{{channel_id}}",
-                  "description": "Channel UUID"
-                }
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"name\": \"Updated Channel Name\",\n  \"is_active\": false\n}"
-            },
-            "description": "Update channel information."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "DELETE Channel",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/channels/:channel_id",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "channels",
-                ":channel_id"
-              ],
-              "variable": [
-                {
-                  "key": "channel_id",
-                  "value": "{{channel_id}}",
-                  "description": "Channel UUID"
-                }
-              ]
-            },
-            "description": "Delete a channel."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Validate Telegram",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/channels/validate/telegram",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "channels",
-                "validate",
-                "telegram"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"bot_token\": \"123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11\"\n}"
-            },
-            "description": "Validate Telegram channel credentials without creating a channel."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Channel Stats",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/channels/stats/summary",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "channels",
-                "stats",
-                "summary"
-              ]
-            },
-            "description": "Get channel statistics for the workspace."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Document Management",
-      "description": "Document management endpoints for uploading, processing, and managing knowledge base documents. All endpoints require authentication.",
-      "item": [
-        {
-          "name": "POST Upload Document",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/documents/upload",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "documents",
-                "upload"
-              ]
-            },
-            "body": {
-              "mode": "formdata",
-              "formdata": [
-                {
-                  "key": "file",
-                  "type": "file",
-                  "src": [],
-                  "description": "Document file (PDF or TXT, max 10MB)"
-                },
-                {
-                  "key": "name",
-                  "value": "My Document",
-                  "type": "text",
-                  "description": "Optional custom document name",
-                  "disabled": true
-                }
-              ]
-            },
-            "description": "Upload and process a document for the workspace. Supports PDF and TXT files up to 10MB."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has document id\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"id\");",
-                  "    pm.environment.set(\"document_id\", jsonData.id);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET List Documents",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/documents?limit=50&offset=0",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "documents"
-              ],
-              "query": [
-                {
-                  "key": "status_filter",
-                  "value": "completed",
-                  "description": "Filter by status (pending, processing, completed, failed)",
-                  "disabled": true
-                },
-                {
-                  "key": "limit",
-                  "value": "50",
-                  "description": "Maximum number of documents (default: 50, max: 100)"
-                },
-                {
-                  "key": "offset",
-                  "value": "0",
-                  "description": "Offset for pagination (default: 0)"
-                }
-              ]
-            },
-            "description": "List documents for the workspace with optional filtering and pagination."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Document by ID",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/documents/:document_id",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "documents",
-                ":document_id"
-              ],
-              "variable": [
-                {
-                  "key": "document_id",
-                  "value": "{{document_id}}",
-                  "description": "Document UUID"
-                }
-              ]
-            },
-            "description": "Get document details by ID."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "DELETE Document",
-          "request": {
-            "method": "DELETE",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/documents/:document_id",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "documents",
-                ":document_id"
-              ],
-              "variable": [
-                {
-                  "key": "document_id",
-                  "value": "{{document_id}}",
-                  "description": "Document UUID"
-                }
-              ]
-            },
-            "description": "Delete a document and its chunks."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Reprocess Document",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/documents/:document_id/reprocess",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "documents",
-                ":document_id",
-                "reprocess"
-              ],
-              "variable": [
-                {
-                  "key": "document_id",
-                  "value": "{{document_id}}",
-                  "description": "Document UUID"
-                }
-              ]
-            },
-            "description": "Reprocess a failed document."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Document Stats",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/documents/stats/summary",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "documents",
-                "stats",
-                "summary"
-              ]
-            },
-            "description": "Get document statistics for the workspace."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Agent Management",
-      "description": "Agent management endpoints for inviting, managing, and monitoring human agents. All endpoints require authentication except for GET /invitation/{token}.",
-      "item": [
-        {
-          "name": "POST Invite Agent",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/agents/invite",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "agents",
-                "invite"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"email\": \"agent@example.com\",\n  \"name\": \"John Doe\"\n}"
-            },
-            "description": "Invite an agent to the workspace."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has agent_id and invitation_token\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"id\");",
-                  "    pm.expect(jsonData).to.have.property(\"invitation_token\");",
-                  "    pm.environment.set(\"agent_id\", jsonData.id);",
-                  "    pm.environment.set(\"invitation_token\", jsonData.invitation_token);",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET List Agents",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/agents",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "agents"
-              ],
-              "query": [
-                {
-                  "key": "include_inactive",
-                  "value": "false",
-                  "description": "Include inactive agents (default: false)",
-                  "disabled": true
-                }
-              ]
-            },
-            "description": "List agents for the workspace."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Pending Invitations",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/agents/pending",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "agents",
-                "pending"
-              ]
-            },
-            "description": "List pending agent invitations."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Deactivate Agent",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/agents/:agent_id/deactivate",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "agents",
-                ":agent_id",
-                "deactivate"
-              ],
-              "variable": [
-                {
-                  "key": "agent_id",
-                  "value": "{{agent_id}}",
-                  "description": "Agent UUID"
-                }
-              ]
-            },
-            "description": "Deactivate an agent."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Activate Agent",
-          "request": {
-            "method": "POST",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/agents/:agent_id/activate",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "agents",
-                ":agent_id",
-                "activate"
-              ],
-              "variable": [
-                {
-                  "key": "agent_id",
-                  "value": "{{agent_id}}",
-                  "description": "Agent UUID"
-                }
-              ]
-            },
-            "description": "Activate an agent."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Agent Stats",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/agents/stats",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "agents",
-                "stats"
-              ]
-            },
-            "description": "Get agent statistics for the workspace."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Conversation Management",
-      "description": "Conversation management endpoints for viewing, claiming, and managing customer conversations. All endpoints require authentication.",
-      "item": [
-        {
-          "name": "GET List Conversations",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/conversations?limit=50&offset=0",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "conversations"
-              ],
-              "query": [
-                {
-                  "key": "status",
-                  "value": "active",
-                  "description": "Filter by status",
-                  "disabled": true
-                },
-                {
-                  "key": "assigned_to_me",
-                  "value": "false",
-                  "description": "Show only assigned conversations",
-                  "disabled": true
-                },
-                {
-                  "key": "limit",
-                  "value": "50",
-                  "description": "Maximum number (default: 50, max: 100)"
-                },
-                {
-                  "key": "offset",
-                  "value": "0",
-                  "description": "Offset for pagination"
-                }
-              ]
-            },
-            "description": "List conversations for the workspace."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Conversation by ID",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/conversations/:conversation_id",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "conversations",
-                ":conversation_id"
-              ],
-              "variable": [
-                {
-                  "key": "conversation_id",
-                  "value": "{{conversation_id}}",
-                  "description": "Conversation UUID"
-                }
-              ]
-            },
-            "description": "Get detailed conversation information with messages."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Claim Conversation",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/conversations/claim",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "conversations",
-                "claim"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\"\n}"
-            },
-            "description": "Claim an escalated conversation (agents only)."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Update Status",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/conversations/status",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "conversations",
-                "status"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"status\": \"resolved\",\n  \"note\": \"Issue resolved\"\n}"
-            },
-            "description": "Update conversation status."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Send Message",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/conversations/:conversation_id/messages",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "conversations",
-                ":conversation_id",
-                "messages"
-              ],
-              "variable": [
-                {
-                  "key": "conversation_id",
-                  "value": "{{conversation_id}}",
-                  "description": "Conversation UUID"
-                }
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"content\": \"I can help you with that\"\n}"
-            },
-            "description": "Send a message as an agent in a conversation."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Conversation Stats",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/conversations/stats/summary",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "conversations",
-                "stats",
-                "summary"
-              ]
-            },
-            "description": "Get conversation statistics for the workspace."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Webhooks",
-      "description": "Webhook endpoints for receiving events from external platforms. These endpoints use platform-specific authentication.",
-      "item": [
-        {
-          "name": "POST Telegram Webhook",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/webhooks/telegram/:bot_token",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "webhooks",
-                "telegram",
-                ":bot_token"
-              ],
-              "variable": [
-                {
-                  "key": "bot_token",
-                  "value": "123456:ABC-DEF",
-                  "description": "Telegram bot token"
-                }
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"update_id\": 123456,\n  \"message\": {\n    \"text\": \"Hello\"\n  }\n}"
-            },
-            "description": "Telegram webhook endpoint. Uses bot_token in URL for authentication."
-          },
-          "event": [],
-          "response": []
-        },
-        {
-          "name": "POST WhatsApp Webhook",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/webhooks/whatsapp/:phone_number_id",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "webhooks",
-                "whatsapp",
-                ":phone_number_id"
-              ],
-              "variable": [
-                {
-                  "key": "phone_number_id",
-                  "value": "1234567890",
-                  "description": "WhatsApp phone number ID"
-                }
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"entry\": [\n    {\n      \"changes\": [\n        {\n          \"value\": {\n            \"messages\": [\n              {\n                \"text\": {\n                  \"body\": \"Hello\"\n                }\n              }\n            ]\n          }\n        }\n      ]\n    }\n  ]\n}"
-            },
-            "description": "WhatsApp webhook endpoint. Verifies X-Hub-Signature-256 header."
-          },
-          "event": [],
-          "response": []
-        },
-        {
-          "name": "GET Webhook Health",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/webhooks/health",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "webhooks",
-                "health"
-              ]
-            },
-            "description": "Webhook service health check."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "WebSocket",
-      "description": "WebSocket connection documentation and management endpoints for real-time updates. WebSocket connections require JWT authentication via query parameter.",
-      "item": [
-        {
-          "name": "WebSocket Connection Documentation",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "ws://{{base_url}}/ws/:workspace_id?token={{access_token}}",
-              "protocol": "ws",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "ws",
-                ":workspace_id"
-              ],
-              "query": [
-                {
-                  "key": "token",
-                  "value": "{{access_token}}",
-                  "description": "JWT authentication token"
-                }
-              ],
-              "variable": [
-                {
-                  "key": "workspace_id",
-                  "value": "{{workspace_id}}",
-                  "description": "Workspace UUID"
-                }
-              ]
-            },
-            "description": "# WebSocket Connection\n\n**URL Format:** `ws://your-domain/ws/{workspace_id}?token=<jwt_token>`\n\n**Authentication:** JWT token required via query parameter\n\n## Connection Established\n\nWhen you successfully connect, the server sends:\n\n```json\n{\n  \"type\": \"connection_established\",\n  \"connection_id\": \"uuid\",\n  \"workspace_id\": \"uuid\",\n  \"user_email\": \"user@example.com\"\n}\n```\n\n## Client \u2192 Server Messages\n\n### Ping\nKeep-alive message to maintain connection.\n\n```json\n{\n  \"type\": \"ping\"\n}\n```\n\n### Subscribe to Events\nSubscribe to specific event types for real-time notifications.\n\n```json\n{\n  \"type\": \"subscribe\",\n  \"events\": [\"escalation\", \"new_message\", \"agent_claim\"]\n}\n```\n\n**Available Events:**\n- `escalation` - Conversation escalated to human agent\n- `agent_claim` - Agent claimed a conversation\n- `new_message` - New message in conversation\n- `conversation_status_change` - Conversation status updated\n- `agent_status_change` - Agent status changed\n- `document_processing` - Document processing status update\n- `system_notification` - System-wide notifications\n\n### Get Statistics\nRequest current workspace statistics.\n\n```json\n{\n  \"type\": \"get_stats\"\n}\n```\n\n### Get Conversations\nRequest list of conversations with filters.\n\n```json\n{\n  \"type\": \"get_conversations\",\n  \"status\": \"escalated\",\n  \"limit\": 20,\n  \"offset\": 0\n}\n```\n\n### Get Agents\nRequest list of agents in workspace.\n\n```json\n{\n  \"type\": \"get_agents\"\n}\n```\n\n## Server \u2192 Client Messages\n\n### Pong\nResponse to ping message.\n\n```json\n{\n  \"type\": \"pong\",\n  \"timestamp\": \"2024-01-01T00:00:00Z\"\n}\n```\n\n### Subscription Confirmed\nConfirmation of event subscription.\n\n```json\n{\n  \"type\": \"subscription_confirmed\",\n  \"subscribed_events\": [\"escalation\", \"new_message\"],\n  \"available_events\": [\"escalation\", \"agent_claim\", \"new_message\", \"conversation_status_change\", \"agent_status_change\", \"document_processing\", \"system_notification\"]\n}\n```\n\n### Escalation Event\nNotification when conversation is escalated.\n\n```json\n{\n  \"type\": \"escalation\",\n  \"conversation_id\": \"uuid\",\n  \"escalation_reason\": \"customer_request\",\n  \"timestamp\": \"2024-01-01T00:00:00Z\"\n}\n```\n\n### Agent Claim Event\nNotification when agent claims a conversation.\n\n```json\n{\n  \"type\": \"agent_claim\",\n  \"conversation_id\": \"uuid\",\n  \"agent_id\": \"uuid\",\n  \"agent_name\": \"John Doe\",\n  \"timestamp\": \"2024-01-01T00:00:00Z\"\n}\n```\n\n### New Message Event\nNotification of new message in conversation.\n\n```json\n{\n  \"type\": \"new_message\",\n  \"conversation_id\": \"uuid\",\n  \"message_id\": \"uuid\",\n  \"timestamp\": \"2024-01-01T00:00:00Z\"\n}\n```\n\n### Conversation Status Change\nNotification when conversation status changes.\n\n```json\n{\n  \"type\": \"conversation_status_change\",\n  \"conversation_id\": \"uuid\",\n  \"old_status\": \"escalated\",\n  \"new_status\": \"agent\",\n  \"agent_id\": \"uuid\",\n  \"timestamp\": \"2024-01-01T00:00:00Z\"\n}\n```\n\n### Error\nError message from server.\n\n```json\n{\n  \"type\": \"error\",\n  \"message\": \"Error description\"\n}\n```\n\n## Testing WebSocket Connections\n\n**Note:** Postman has limited WebSocket support. For full WebSocket testing, use dedicated tools:\n\n- **Postman WebSocket Request** (beta feature)\n- **wscat** CLI tool: `wscat -c \"ws://localhost:8000/ws/{workspace_id}?token={jwt_token}\"`\n- **Browser DevTools** with JavaScript WebSocket API\n- **Dedicated WebSocket clients** like Insomnia, Hoppscotch, or online tools\n\n## REST Endpoints for WebSocket Management\n\nUse the REST endpoints below to manage WebSocket connections and broadcast messages."
-          },
-          "event": [],
-          "response": []
-        },
-        {
-          "name": "GET WebSocket Health",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/ws/health",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "ws",
-                "health"
-              ]
-            },
-            "description": "WebSocket service health check."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Workspace Connections",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/ws/connections/:workspace_id",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "ws",
-                "connections",
-                ":workspace_id"
-              ],
-              "variable": [
-                {
-                  "key": "workspace_id",
-                  "value": "{{workspace_id}}",
-                  "description": "Workspace UUID"
-                }
-              ]
-            },
-            "description": "Get WebSocket connections for a workspace. Requires authentication."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Broadcast Message",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/ws/broadcast/:workspace_id",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "ws",
-                "broadcast",
-                ":workspace_id"
-              ],
-              "variable": [
-                {
-                  "key": "workspace_id",
-                  "value": "{{workspace_id}}",
-                  "description": "Workspace UUID"
-                }
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"type\": \"system_notification\",\n  \"message\": \"System maintenance scheduled for tonight at 2 AM\"\n}"
-            },
-            "description": "Broadcast a message to all WebSocket connections in a workspace. Requires authentication. Useful for sending system notifications or announcements to all connected users."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "WebChat Public API",
-      "description": "Public API endpoints for WebChat widget integration. These endpoints do not require authentication but are rate-limited.",
-      "item": [
-        {
-          "name": "GET Widget Config",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/webchat/config/:workspace_slug",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "webchat",
-                "config",
-                ":workspace_slug"
-              ],
-              "variable": [
-                {
-                  "key": "workspace_slug",
-                  "value": "{{workspace_slug}}",
-                  "description": "Workspace slug"
-                }
-              ]
-            },
-            "description": "Get WebChat widget configuration by workspace slug."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Send Message",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/webchat/send",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "webchat",
-                "send"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"widget_id\": \"{{widget_id}}\",\n  \"session_token\": \"{{session_token}}\",\n  \"message\": \"Hello, I need help\",\n  \"contact_name\": \"John Doe\"\n}"
-            },
-            "description": "Send a message through WebChat widget. Rate limited: 10 messages per minute per session."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has session_token\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    if (jsonData.session_token) {",
-                  "        pm.environment.set(\"session_token\", jsonData.session_token);",
-                  "    }",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Messages",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/webchat/messages?widget_id={{widget_id}}&session_token={{session_token}}&limit=50&offset=0",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "webchat",
-                "messages"
-              ],
-              "query": [
-                {
-                  "key": "widget_id",
-                  "value": "{{widget_id}}",
-                  "description": "Widget ID (required)"
-                },
-                {
-                  "key": "session_token",
-                  "value": "{{session_token}}",
-                  "description": "Session token (required)"
-                },
-                {
-                  "key": "limit",
-                  "value": "50",
-                  "description": "Maximum number of messages"
-                },
-                {
-                  "key": "offset",
-                  "value": "0",
-                  "description": "Offset for pagination"
-                }
-              ]
-            },
-            "description": "Get messages for a WebChat session. Rate limited: 30 requests per minute per session."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Platform Administration",
-      "description": "Platform administration endpoints for managing users, workspaces, and system settings. All endpoints require super admin role authentication.",
-      "item": [
-        {
-          "name": "GET Overview",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/admin/overview",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "admin",
-                "overview"
-              ]
-            },
-            "description": "Get platform overview with statistics and metrics. Requires super admin role."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Workspaces",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/admin/workspaces?limit=50&offset=0",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "admin",
-                "workspaces"
-              ],
-              "query": [
-                {
-                  "key": "limit",
-                  "value": "50",
-                  "description": "Maximum number of workspaces"
-                },
-                {
-                  "key": "offset",
-                  "value": "0",
-                  "description": "Offset for pagination"
-                },
-                {
-                  "key": "tier",
-                  "value": "free",
-                  "description": "Filter by tier",
-                  "disabled": true
-                }
-              ]
-            },
-            "description": "Get paginated list of workspaces. Requires super admin role."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Users",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/admin/users?limit=50&offset=0",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "admin",
-                "users"
-              ],
-              "query": [
-                {
-                  "key": "limit",
-                  "value": "50",
-                  "description": "Maximum number of users"
-                },
-                {
-                  "key": "offset",
-                  "value": "0",
-                  "description": "Offset for pagination"
-                },
-                {
-                  "key": "active_only",
-                  "value": "false",
-                  "description": "Only active users",
-                  "disabled": true
-                }
-              ]
-            },
-            "description": "Get paginated list of users. Requires super admin role."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "POST Change Tier",
-          "request": {
-            "method": "POST",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "url": {
-              "raw": "{{base_url}}/api/admin/workspaces/change-tier",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "admin",
-                "workspaces",
-                "change-tier"
-              ]
-            },
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"workspace_id\": \"{{workspace_id}}\",\n  \"new_tier\": \"starter\",\n  \"reason\": \"Customer upgrade request\"\n}"
-            },
-            "description": "Change workspace tier. Requires super admin role."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Analytics",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/admin/analytics",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "admin",
-                "analytics"
-              ]
-            },
-            "description": "Get analytics dashboard with message volume, signup trends, and escalation statistics. Requires super admin role."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        }
-      ]
-    },
-    {
-      "name": "Metrics & Monitoring",
-      "description": "Metrics and monitoring endpoints for health checks, system metrics, and alerting. Some endpoints are public, others require authentication.",
-      "item": [
-        {
-          "name": "GET Detailed Health",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/metrics/health/detailed",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "metrics",
-                "health",
-                "detailed"
-              ]
-            },
-            "description": "Detailed health check endpoint with comprehensive system status. Public endpoint."
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200 or 503\", function () {",
-                  "    pm.expect(pm.response.code).to.be.oneOf([200, 503]);",
-                  "});",
-                  "",
-                  "pm.test(\"Response has status field\", function () {",
-                  "    var jsonData = pm.response.json();",
-                  "    pm.expect(jsonData).to.have.property(\"status\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET System Metrics",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/metrics/system",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "metrics",
-                "system"
-              ]
-            },
-            "description": "Get comprehensive system metrics. Requires authentication."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Workspace Metrics",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/metrics/workspace/:workspace_id",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "metrics",
-                "workspace",
-                ":workspace_id"
-              ],
-              "variable": [
-                {
-                  "key": "workspace_id",
-                  "value": "{{workspace_id}}",
-                  "description": "Workspace UUID"
-                }
-              ]
-            },
-            "description": "Get metrics for a specific workspace. Requires authentication."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        },
-        {
-          "name": "GET Prometheus Metrics",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/metrics/prometheus",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "metrics",
-                "prometheus"
-              ]
-            },
-            "description": "Get metrics in Prometheus format. Public endpoint, returns text/plain."
-          },
-          "event": [],
-          "response": []
-        },
-        {
-          "name": "GET Alert Status",
-          "request": {
-            "method": "GET",
-            "header": [],
-            "url": {
-              "raw": "{{base_url}}/api/metrics/alerts/status",
-              "host": [
-                "{{base_url}}"
-              ],
-              "path": [
-                "api",
-                "metrics",
-                "alerts",
-                "status"
-              ]
-            },
-            "description": "Get current alert status and thresholds. Requires authentication."
-          },
-          "event": [
-            {
-              "listen": "prerequest",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "if (pm.environment.get(\"access_token\")) {",
-                  "    pm.request.headers.add({",
-                  "        key: \"Authorization\",",
-                  "        value: \"Bearer \" + pm.environment.get(\"access_token\")",
-                  "    });",
-                  "}"
-                ]
-              }
-            },
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"Status code is 200\", function () {",
-                  "    pm.response.to.have.status(200);",
-                  "});",
-                  "",
-                  "pm.test(\"Content-Type is application/json\", function () {",
-                  "    pm.response.to.have.header(\"Content-Type\");",
-                  "    pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/json\");",
-                  "});"
-                ]
-              }
-            }
-          ],
-          "response": []
-        }
-      ]
-    }
-  ],
-  "variable": [
-    {
-      "key": "base_url",
-      "value": "http://localhost:8000",
-      "type": "string"
-    }
-  ],
   "auth": {
     "type": "bearer",
     "bearer": [
@@ -3089,67 +16,1157 @@
       }
     ]
   },
-  "event": [
+  "item": [
     {
-      "listen": "prerequest",
-      "script": {
-        "type": "text/javascript",
-        "exec": [
-          "// Collection-level pre-request script",
-          "// This runs before every request in the collection",
-          "",
-          "// Check if we have an access token",
-          "const accessToken = pm.collectionVariables.get('access_token') || pm.environment.get('access_token');",
-          "",
-          "if (!accessToken) {",
-          "    console.log('\u26a0\ufe0f  No access token found. Please run POST Register or POST Login first.');",
-          "}",
-          "",
-          "// Log current environment for debugging",
-          "console.log('\ud83d\udd27 Environment:', pm.environment.name || 'No environment selected');",
-          "console.log('\ud83c\udf10 Base URL:', pm.collectionVariables.get('base_url') || pm.environment.get('base_url'));",
-          "",
-          "// Helper function to check if token is expired",
-          "function isTokenExpired(token) {",
-          "    if (!token) return true;",
-          "    try {",
-          "        const payload = JSON.parse(atob(token.split('.')[1]));",
-          "        const exp = payload.exp * 1000; // Convert to milliseconds",
-          "        return Date.now() >= exp;",
-          "    } catch (e) {",
-          "        return true;",
-          "    }",
-          "}",
-          "",
-          "// Check if token is expired",
-          "if (accessToken && isTokenExpired(accessToken)) {",
-          "    console.log('\u26a0\ufe0f  Access token has expired. Please login again.');",
-          "}"
-        ]
-      }
+      "name": "Authentication",
+      "description": "User/agent registration, login, and token management.",
+      "item": [
+        {
+          "name": "POST Register",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "register"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"email\": \"owner@example.com\",\n  \"password\": \"securepassword123\",\n  \"business_name\": \"My Business\"\n}"
+            },
+            "description": "Register a new user and create a workspace. Returns JWT access token."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  var j = pm.response.json();",
+                  "  pm.environment.set('access_token', j.access_token);",
+                  "  if (j.workspace) {",
+                  "    pm.environment.set('workspace_id', j.workspace.id);",
+                  "    pm.environment.set('workspace_slug', j.workspace.slug);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "POST Login",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"email\": \"owner@example.com\",\n  \"password\": \"securepassword123\"\n}"
+            },
+            "description": "Login as a workspace owner. Returns JWT access token."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  var j = pm.response.json();",
+                  "  pm.environment.set('access_token', j.access_token);",
+                  "  if (j.workspace) {",
+                  "    pm.environment.set('workspace_id', j.workspace.id);",
+                  "    pm.environment.set('workspace_slug', j.workspace.slug);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "POST Agent Login",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/auth/agent-login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "agent-login"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"email\": \"agent@example.com\",\n  \"password\": \"agentpassword123\"\n}"
+            },
+            "description": "Login as an agent. Returns JWT access token."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set('access_token', pm.response.json().access_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "POST Accept Invite",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/auth/accept-invite",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "accept-invite"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"token\": \"{{invitation_token}}\",\n  \"password\": \"agentpassword123\"\n}"
+            },
+            "description": "Accept an agent invitation and set password."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Me",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/auth/me",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "me"]
+            },
+            "description": "Get current authenticated user and workspace info."
+          },
+          "response": []
+        }
+      ]
     },
     {
-      "listen": "test",
-      "script": {
-        "type": "text/javascript",
-        "exec": [
-          "// Collection-level test script",
-          "// This runs after every request in the collection",
-          "",
-          "// Log response time",
-          "console.log('\u23f1\ufe0f  Response time:', pm.response.responseTime + 'ms');",
-          "",
-          "// Log status code",
-          "const statusCode = pm.response.code;",
-          "if (statusCode >= 200 && statusCode < 300) {",
-          "    console.log('\u2705 Success:', statusCode);",
-          "} else if (statusCode >= 400 && statusCode < 500) {",
-          "    console.log('\u26a0\ufe0f  Client Error:', statusCode);",
-          "} else if (statusCode >= 500) {",
-          "    console.log('\u274c Server Error:', statusCode);",
-          "}"
-        ]
-      }
+      "name": "Channels",
+      "description": "Manage communication channels (WebChat, Telegram, WhatsApp, Instagram). NOTE: list/create routes require trailing slash.",
+      "item": [
+        {
+          "name": "POST Create Channel (WebChat)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/channels/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "channels", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"channel_type\": \"webchat\",\n  \"name\": \"My Website Chat\",\n  \"is_active\": true,\n  \"credentials\": {\n    \"primary_color\": \"#007bff\",\n    \"position\": \"bottom-right\",\n    \"welcome_message\": \"Hello! How can we help you today?\"\n  }\n}"
+            },
+            "description": "Create a new WebChat channel. Trailing slash is required."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  var j = pm.response.json();",
+                  "  pm.environment.set('channel_id', j.id);",
+                  "  if (j.widget_id) pm.environment.set('widget_id', j.widget_id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "POST Create Channel (Telegram)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/channels/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "channels", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"channel_type\": \"telegram\",\n  \"name\": \"My Telegram Bot\",\n  \"is_active\": true,\n  \"credentials\": {\n    \"bot_token\": \"123456789:AABBCCDDEEFFaabbccddeeff-1234567890\"\n  }\n}"
+            },
+            "description": "Create a Telegram bot channel."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Create Channel (WhatsApp)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/channels/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "channels", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"channel_type\": \"whatsapp\",\n  \"name\": \"My WhatsApp Business\",\n  \"is_active\": true,\n  \"credentials\": {\n    \"phone_number_id\": \"1234567890\",\n    \"access_token\": \"EAABxxxxxx\",\n    \"verify_token\": \"my_verify_token\"\n  }\n}"
+            },
+            "description": "Create a WhatsApp Business channel."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Create Channel (Instagram)",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/channels/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "channels", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"channel_type\": \"instagram\",\n  \"name\": \"My Instagram DMs\",\n  \"is_active\": true,\n  \"credentials\": {\n    \"page_access_token\": \"EAABxxxxxx\",\n    \"instagram_account_id\": \"1234567890\",\n    \"verify_token\": \"my_verify_token\"\n  }\n}"
+            },
+            "description": "Create an Instagram channel."
+          },
+          "response": []
+        },
+        {
+          "name": "GET List Channels",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/channels/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "channels", ""]
+            },
+            "description": "List all channels for the workspace."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Channel by ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/channels/{{channel_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "channels", "{{channel_id}}"]
+            },
+            "description": "Get a specific channel by ID."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT Update Channel",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/channels/{{channel_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "channels", "{{channel_id}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"name\": \"Updated Channel Name\",\n  \"is_active\": true\n}"
+            },
+            "description": "Update channel name and/or active status. All fields optional."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE Channel",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/channels/{{channel_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "channels", "{{channel_id}}"]
+            },
+            "description": "Delete a channel by ID."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Validate Channel Credentials",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/channels/validate/telegram",
+              "host": ["{{base_url}}"],
+              "path": ["api", "channels", "validate", "telegram"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"bot_token\": \"123456789:AABBCCDDEEFFaabbccddeeff-1234567890\"\n}"
+            },
+            "description": "Validate credentials for a channel type before creating. Replace 'telegram' in path with: webchat, telegram, whatsapp, instagram."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Channel Stats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/channels/stats/summary",
+              "host": ["{{base_url}}"],
+              "path": ["api", "channels", "stats", "summary"]
+            },
+            "description": "Get channel statistics summary for the workspace."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Conversations",
+      "description": "Manage customer conversations, escalations, and agent assignments.",
+      "item": [
+        {
+          "name": "GET List Conversations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/conversations/?status_filter=active&assigned_to_me=false&limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", ""],
+              "query": [
+                { "key": "status_filter", "value": "active", "description": "Filter by status: active, escalated, agent, resolved. Optional." },
+                { "key": "assigned_to_me", "value": "false", "description": "Only show conversations assigned to current agent (bool, default false)." },
+                { "key": "limit", "value": "50", "description": "Max results (1-100, default 50)." },
+                { "key": "offset", "value": "0", "description": "Pagination offset (default 0)." }
+              ]
+            },
+            "description": "List conversations with optional filters."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Conversation Detail",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/conversations/{{conversation_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", "{{conversation_id}}"]
+            },
+            "description": "Get full conversation detail including all messages."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Claim Conversation",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/conversations/claim",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", "claim"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\"\n}"
+            },
+            "description": "Agent claims an escalated conversation."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Update Conversation Status",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/conversations/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", "status"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"status\": \"resolved\",\n  \"note\": \"Issue resolved by agent\"\n}"
+            },
+            "description": "Update conversation status. Possible statuses: active, escalated, agent, resolved."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Send Agent Message",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/conversations/{{conversation_id}}/messages",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", "{{conversation_id}}", "messages"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"content\": \"Hello! I'm here to help you. Could you please describe your issue in more detail?\"\n}"
+            },
+            "description": "Agent sends a message in a conversation (max 2000 chars)."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Conversation Stats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/conversations/stats/summary",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", "stats", "summary"]
+            },
+            "description": "Get conversation statistics for the workspace."
+          },
+          "response": []
+        },
+        {
+          "name": "GET My Active Conversations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/conversations/my/active?limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", "my", "active"],
+              "query": [
+                { "key": "limit", "value": "50", "description": "Max results (1-100, default 50)." },
+                { "key": "offset", "value": "0", "description": "Pagination offset." }
+              ]
+            },
+            "description": "Get conversations assigned to the current agent."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Documents",
+      "description": "Upload and manage knowledge base documents for AI context.",
+      "item": [
+        {
+          "name": "POST Upload Document",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/documents/upload",
+              "host": ["{{base_url}}"],
+              "path": ["api", "documents", "upload"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "File to upload (max 10MB). Supported: PDF, TXT, DOCX, etc."
+                },
+                {
+                  "key": "name",
+                  "value": "My Knowledge Base Doc",
+                  "type": "text",
+                  "description": "Optional custom name for the document."
+                }
+              ]
+            },
+            "description": "Upload a document to the knowledge base. Max 10MB. Use form-data."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  pm.environment.set('document_id', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "GET List Documents",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/documents/?status_filter=completed&limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "documents", ""],
+              "query": [
+                { "key": "status_filter", "value": "completed", "description": "Filter by status: processing, completed, failed. Optional." },
+                { "key": "limit", "value": "50", "description": "Max results (default 50)." },
+                { "key": "offset", "value": "0", "description": "Pagination offset." }
+              ]
+            },
+            "description": "List all documents in the workspace knowledge base."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Document by ID",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/documents/{{document_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "documents", "{{document_id}}"]
+            },
+            "description": "Get a specific document by ID."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE Document",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/documents/{{document_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "documents", "{{document_id}}"]
+            },
+            "description": "Delete a document from the knowledge base."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Reprocess Document",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/documents/{{document_id}}/reprocess",
+              "host": ["{{base_url}}"],
+              "path": ["api", "documents", "{{document_id}}", "reprocess"]
+            },
+            "description": "Reprocess a failed document (re-chunk and re-embed)."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Document Stats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/documents/stats/summary",
+              "host": ["{{base_url}}"],
+              "path": ["api", "documents", "stats", "summary"]
+            },
+            "description": "Get document statistics for the workspace."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Agents",
+      "description": "Manage support agents: invite, activate, deactivate, and delete.",
+      "item": [
+        {
+          "name": "POST Invite Agent",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/agents/invite",
+              "host": ["{{base_url}}"],
+              "path": ["api", "agents", "invite"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"email\": \"agent@example.com\",\n  \"name\": \"Support Agent Name\"\n}"
+            },
+            "description": "Invite a new agent to the workspace. Sends invitation email."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  var j = pm.response.json();",
+                  "  pm.environment.set('agent_id', j.id);",
+                  "  if (j.invitation_token) pm.environment.set('invitation_token', j.invitation_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "POST Accept Agent Invitation",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/agents/accept",
+              "host": ["{{base_url}}"],
+              "path": ["api", "agents", "accept"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"invitation_token\": \"{{invitation_token}}\"\n}"
+            },
+            "description": "Accept an agent invitation using the token from the email."
+          },
+          "response": []
+        },
+        {
+          "name": "GET List Agents",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/agents/?include_inactive=false",
+              "host": ["{{base_url}}"],
+              "path": ["api", "agents", ""],
+              "query": [
+                { "key": "include_inactive", "value": "false", "description": "Include deactivated agents (bool, default false)." }
+              ]
+            },
+            "description": "List all agents in the workspace."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Pending Invitations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/agents/pending",
+              "host": ["{{base_url}}"],
+              "path": ["api", "agents", "pending"]
+            },
+            "description": "List pending (not yet accepted) agent invitations."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Agent Stats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/agents/stats",
+              "host": ["{{base_url}}"],
+              "path": ["api", "agents", "stats"]
+            },
+            "description": "Get agent statistics: total, active, inactive, pending invitations."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Invitation Info",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/agents/invitation/{{invitation_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "agents", "invitation", "{{invitation_token}}"]
+            },
+            "description": "Get info about an invitation token (validity, email, workspace)."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Activate Agent",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/agents/{{agent_id}}/activate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "agents", "{{agent_id}}", "activate"]
+            },
+            "description": "Reactivate a previously deactivated agent."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Deactivate Agent",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/agents/{{agent_id}}/deactivate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "agents", "{{agent_id}}", "deactivate"]
+            },
+            "description": "Deactivate an agent (soft disable, not delete)."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Resend Invitation",
+          "request": {
+            "method": "POST",
+            "url": {
+              "raw": "{{base_url}}/api/agents/{{agent_id}}/resend",
+              "host": ["{{base_url}}"],
+              "path": ["api", "agents", "{{agent_id}}", "resend"]
+            },
+            "description": "Resend the invitation email to a pending agent."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE Agent",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/agents/{{agent_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "agents", "{{agent_id}}"]
+            },
+            "description": "Permanently delete an agent from the workspace."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "WebChat (Public)",
+      "description": "Public WebChat endpoints — no auth required. Used by the widget embedded on customer websites.",
+      "item": [
+        {
+          "name": "GET WebChat Config",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/webchat/config/{{workspace_slug}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "webchat", "config", "{{workspace_slug}}"]
+            },
+            "description": "Get WebChat widget config for a workspace (public). Used by the embedded widget."
+          },
+          "response": []
+        },
+        {
+          "name": "POST WebChat Send Message",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/webchat/send",
+              "host": ["{{base_url}}"],
+              "path": ["api", "webchat", "send"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"widget_id\": \"{{widget_id}}\",\n  \"session_token\": \"{{session_token}}\",\n  \"message\": \"Hello, I need help with my order.\",\n  \"contact_name\": \"John Doe\"\n}"
+            },
+            "description": "Send a message via WebChat widget. `session_token` is optional on first message (auto-created). `contact_name` is optional. Rate limit: 10 msg/min per session."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  var j = pm.response.json();",
+                  "  if (j.session_token) pm.environment.set('session_token', j.session_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "GET WebChat Messages",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/webchat/messages?widget_id={{widget_id}}&session_token={{session_token}}&limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "webchat", "messages"],
+              "query": [
+                { "key": "widget_id", "value": "{{widget_id}}", "description": "Widget ID (required)." },
+                { "key": "session_token", "value": "{{session_token}}", "description": "Session token (required)." },
+                { "key": "limit", "value": "50", "description": "Max messages (1-100, default 50)." },
+                { "key": "offset", "value": "0", "description": "Pagination offset." }
+              ]
+            },
+            "description": "Get message history for a WebChat session. Rate limit: 30 req/min per session."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Admin",
+      "description": "Platform admin endpoints. Requires admin/superuser role.",
+      "item": [
+        {
+          "name": "GET Platform Overview",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/overview",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "overview"]
+            },
+            "description": "Get platform-wide stats: total workspaces, users, tier breakdown, recent activity."
+          },
+          "response": []
+        },
+        {
+          "name": "GET List Workspaces",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/workspaces?limit=50&offset=0&tier=free",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "workspaces"],
+              "query": [
+                { "key": "limit", "value": "50", "description": "Max results (1-100, default 50)." },
+                { "key": "offset", "value": "0", "description": "Pagination offset." },
+                { "key": "tier", "value": "free", "description": "Filter by tier: free, starter, growth, pro. Optional." }
+              ]
+            },
+            "description": "List all workspaces on the platform."
+          },
+          "response": []
+        },
+        {
+          "name": "GET List Users",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/users?limit=50&offset=0&active_only=false",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users"],
+              "query": [
+                { "key": "limit", "value": "50", "description": "Max results (1-100, default 50)." },
+                { "key": "offset", "value": "0", "description": "Pagination offset." },
+                { "key": "active_only", "value": "false", "description": "Only return active users (bool, default false)." }
+              ]
+            },
+            "description": "List all users on the platform."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Suspend User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/suspend",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "suspend"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"user_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+            },
+            "description": "Suspend a user account. Provide the user's UUID."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Unsuspend User",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/admin/users/unsuspend",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "users", "unsuspend"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"user_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+            },
+            "description": "Unsuspend a previously suspended user account."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Change Workspace Tier",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/admin/workspaces/change-tier",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "workspaces", "change-tier"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"new_tier\": \"growth\",\n  \"reason\": \"Manual upgrade by admin\"\n}"
+            },
+            "description": "Change a workspace's subscription tier. Tiers: free, starter, growth, pro. `reason` is optional."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Tier Change History",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/tier-changes?workspace_id={{workspace_id}}&limit=50",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "tier-changes"],
+              "query": [
+                { "key": "workspace_id", "value": "{{workspace_id}}", "description": "Filter by workspace UUID. Optional." },
+                { "key": "limit", "value": "50", "description": "Max results (1-100, default 50)." }
+              ]
+            },
+            "description": "Get tier change history, optionally filtered by workspace."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE Workspace",
+          "request": {
+            "method": "DELETE",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/admin/workspaces/delete",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "workspaces", "delete"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"confirmation_name\": \"My Business\"\n}"
+            },
+            "description": "Permanently delete a workspace. `confirmation_name` must match the workspace name exactly."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Analytics Dashboard",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/analytics",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "analytics"]
+            },
+            "description": "Get platform analytics: message volume, signup trends, escalation statistics."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Metrics",
+      "description": "System health and performance metrics.",
+      "item": [
+        {
+          "name": "GET Health Detailed",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/metrics/health/detailed",
+              "host": ["{{base_url}}"],
+              "path": ["api", "metrics", "health", "detailed"]
+            },
+            "description": "Detailed health check: status, timestamp, health breakdown, performance metrics."
+          },
+          "response": []
+        },
+        {
+          "name": "GET System Metrics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/metrics/system",
+              "host": ["{{base_url}}"],
+              "path": ["api", "metrics", "system"]
+            },
+            "description": "Get system-level performance metrics."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Workspace Metrics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/metrics/workspace/{{workspace_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "metrics", "workspace", "{{workspace_id}}"]
+            },
+            "description": "Get metrics scoped to a specific workspace."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Prometheus Metrics",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/metrics/prometheus",
+              "host": ["{{base_url}}"],
+              "path": ["api", "metrics", "prometheus"]
+            },
+            "description": "Get metrics in Prometheus text format for scraping."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Alert Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/metrics/alerts/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "metrics", "alerts", "status"]
+            },
+            "description": "Get current alert status and active alert list."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "description": "Incoming webhooks from third-party services.",
+      "item": [
+        {
+          "name": "POST Resend Webhook",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "svix-id", "value": "msg_xxxxxxxxxxxx", "description": "Svix message ID (sent by Resend)." },
+              { "key": "svix-timestamp", "value": "1234567890", "description": "Svix timestamp (sent by Resend)." },
+              { "key": "svix-signature", "value": "v1,xxxxxxxxxxxx", "description": "Svix signature for verification (sent by Resend)." }
+            ],
+            "url": {
+              "raw": "{{base_url}}/webhooks/resend",
+              "host": ["{{base_url}}"],
+              "path": ["webhooks", "resend"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"type\": \"email.delivered\",\n  \"data\": {\n    \"email_id\": \"email_xxxxxxxxxxxx\",\n    \"from\": \"noreply@example.com\",\n    \"to\": [\"agent@example.com\"],\n    \"subject\": \"You have been invited\",\n    \"created_at\": \"2026-03-20T12:00:00.000Z\"\n  }\n}"
+            },
+            "description": "Incoming webhook from Resend email service. Event types: email.sent, email.delivered, email.delivery_delayed, email.complained, email.bounced, email.opened, email.clicked."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "WebSocket (Reference)",
+      "description": "WebSocket connection documentation. Use a WebSocket client (e.g. wscat) to connect.\n\nConnect: ws://{{base_url}}/ws/{{workspace_id}}?token={{access_token}}\n\nIncoming message types:\n- ping\n- subscribe\n- get_stats\n- get_conversations\n- get_agents\n\nOutgoing event types:\n- connection_established\n- pong\n- escalation\n- agent_claim\n- new_message\n- conversation_status_change\n- system_notification",
+      "item": [
+        {
+          "name": "GET WebSocket Health",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/ws/health",
+              "host": ["{{base_url}}"],
+              "path": ["ws", "health"]
+            },
+            "description": "Check WebSocket server health and connection stats."
+          },
+          "response": []
+        },
+        {
+          "name": "GET WebSocket Connections",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/ws/connections/{{workspace_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["ws", "connections", "{{workspace_id}}"]
+            },
+            "description": "List active WebSocket connections for a workspace."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Broadcast Message",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/ws/broadcast/{{workspace_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["ws", "broadcast", "{{workspace_id}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"type\": \"system_notification\",\n  \"message\": \"System maintenance in 10 minutes.\",\n  \"data\": {}\n}"
+            },
+            "description": "Broadcast a message to all WebSocket connections in a workspace."
+          },
+          "response": []
+        }
+      ]
     }
+  ],
+  "variable": [
+    { "key": "base_url", "value": "http://localhost:8000", "type": "string" },
+    { "key": "access_token", "value": "", "type": "string" },
+    { "key": "workspace_id", "value": "", "type": "string" },
+    { "key": "workspace_slug", "value": "", "type": "string" },
+    { "key": "channel_id", "value": "", "type": "string" },
+    { "key": "document_id", "value": "", "type": "string" },
+    { "key": "agent_id", "value": "", "type": "string" },
+    { "key": "conversation_id", "value": "", "type": "string" },
+    { "key": "session_token", "value": "", "type": "string" },
+    { "key": "widget_id", "value": "", "type": "string" },
+    { "key": "invitation_token", "value": "", "type": "string" }
   ]
 }
