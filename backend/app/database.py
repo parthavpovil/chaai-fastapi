@@ -47,12 +47,17 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     Dependency to get database session
     Used with FastAPI's Depends() for dependency injection
     """
-    async with AsyncSessionLocal() as session:
+    session = AsyncSessionLocal()
+    try:
+        yield session
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
         try:
-            yield session
+            await session.close()
         except Exception:
-            await session.rollback()
-            raise
+            pass
 
 
 async def init_db() -> None:
