@@ -1,3 +1,0 @@
-"""
-ChatSaaS Backend Application Package
-"""
