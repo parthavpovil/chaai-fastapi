@@ -52,7 +52,10 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
     try:
         yield session
     except Exception:
-        await session.rollback()
+        try:
+            await session.rollback()
+        except IllegalStateChangeError:
+            pass
         raise
     finally:
         try:
