@@ -63,14 +63,14 @@ async def update_ai_config(
             detail="Custom AI model selection requires Growth or Pro tier."
         )
 
-    meta = current_workspace.metadata or {}
+    meta = current_workspace.meta or {}
     meta["ai_provider"] = request.ai_provider
     if request.ai_model:
         meta["ai_model"] = request.ai_model
     if request.ai_api_key:
         meta["ai_api_key"] = request.ai_api_key  # store plaintext; encrypt in transit via HTTPS
 
-    current_workspace.metadata = meta
+    current_workspace.meta = meta
     await db.commit()
     return {"status": "updated", "ai_provider": request.ai_provider, "ai_model": meta.get("ai_model")}
 
@@ -81,7 +81,7 @@ async def get_ai_config(
     current_workspace: Workspace = Depends(get_current_workspace),
 ):
     """Get current workspace AI configuration."""
-    meta = current_workspace.metadata or {}
+    meta = current_workspace.meta or {}
     return {
         "ai_provider": meta.get("ai_provider"),
         "ai_model": meta.get("ai_model"),

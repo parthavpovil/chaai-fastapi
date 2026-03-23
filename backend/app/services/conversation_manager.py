@@ -366,9 +366,9 @@ class ConversationManager:
         
         if metadata:
             # Merge with existing metadata
-            existing_metadata = contact.metadata or {}
+            existing_metadata = contact.meta or {}
             existing_metadata.update(metadata)
-            update_data["metadata"] = existing_metadata
+            update_data["meta"] = existing_metadata
         
         stmt = update(Contact).where(
             Contact.id == contact_id
@@ -499,7 +499,7 @@ async def escalate_conversation_by_id(
                 "name": conversation.contact.name,
                 "external_id": conversation.contact.external_contact_id,
                 "channel_type": conversation.channel_type,
-                "metadata": conversation.contact.metadata
+                "metadata": conversation.contact.meta
             },
             "assigned_agent_id": str(conversation.assigned_agent_id) if conversation.assigned_agent_id else None,
             "assigned_agent_name": assigned_agent_name,

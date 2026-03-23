@@ -22,7 +22,7 @@ class Conversation(Base):
     status = Column(String, nullable=False, default="ai")  # ai | escalated | agent | resolved
     assigned_agent_id = Column(PostgresUUID(as_uuid=True), ForeignKey("agents.id"), nullable=True)
     escalation_reason = Column(String, nullable=True)  # explicit | implicit
-    metadata = Column(JSONB, default=dict, nullable=True)
+    meta = Column("metadata", JSONB, default=dict, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

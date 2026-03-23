@@ -26,7 +26,7 @@ class Workspace(Base):
     subscription_notes = Column(Text, nullable=True)
     tier_changed_at = Column(DateTime(timezone=True), nullable=True)
     tier_changed_by = Column(String, nullable=True)
-    metadata = Column(JSONB, default=dict, nullable=True)  # workspace-level settings (AI config, etc.)
+    meta = Column("metadata", JSONB, default=dict, nullable=True)  # workspace-level settings (AI config, etc.)
     outside_hours_message = Column(Text, nullable=True)
     outside_hours_behavior = Column(String, nullable=True, default="inform_and_continue")
     escalation_keywords = Column(JSONB, nullable=True)  # None = use built-in defaults

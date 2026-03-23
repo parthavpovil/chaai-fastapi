@@ -463,7 +463,7 @@ class EscalationRouter:
         
         for conv in conversations:
             # Get escalation metadata from conversation
-            escalation_metadata = conv.metadata or {}
+            escalation_metadata = conv.meta or {}
             conv_priority = escalation_metadata.get("priority", "medium")
             
             # Filter by priority if specified

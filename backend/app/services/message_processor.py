@@ -178,8 +178,8 @@ class MessageProcessor:
                 if contact_data.get("phone") and not contact.phone:
                     contact.phone = contact_data["phone"]
                     updated = True
-                if contact_data.get("metadata") and not contact.metadata:
-                    contact.metadata = contact_data["metadata"]
+                if contact_data.get("metadata") and not contact.meta:
+                    contact.meta = contact_data["metadata"]
                     updated = True
             if contact_name and not contact.name:
                 contact.name = contact_name

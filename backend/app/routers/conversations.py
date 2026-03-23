@@ -197,7 +197,7 @@ async def list_conversations(
                     name=conv.contact.name,
                     external_id=conv.contact.external_id,
                     channel_type=conv.contact.channel_type if hasattr(conv.contact, 'channel_type') else "unknown",
-                    metadata=conv.contact.metadata
+                    metadata=conv.contact.meta
                 ),
                 assigned_agent_id=str(conv.assigned_agent_id) if conv.assigned_agent_id else None,
                 assigned_agent_name=conv.assigned_agent.name if conv.assigned_agent else None,

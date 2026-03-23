@@ -230,10 +230,10 @@ class RAGEngine:
             conv = conv_result.scalar_one_or_none()
             if conv:
                 from datetime import timezone
-                meta = conv.metadata or {}
+                meta = conv.meta or {}
                 meta["summary"] = response_text
                 meta["summary_generated_at"] = datetime.now(timezone.utc).isoformat()
-                conv.metadata = meta
+                conv.meta = meta
                 await self.db.commit()
 
         except Exception as e:
@@ -389,8 +389,8 @@ class RAGEngine:
                     select(Conversation).where(Conversation.id == conversation_id)
                 )
                 conv = conv_result.scalar_one_or_none()
-                if conv and conv.metadata:
-                    conversation_summary = conv.metadata.get("summary")
+                if conv and conv.meta:
+                    conversation_summary = conv.meta.get("summary")
 
             # 4. Get workspace fallback message
             workspace_result = await self.db.execute(

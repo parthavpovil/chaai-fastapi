@@ -26,7 +26,7 @@ class Contact(Base):
     custom_fields = Column(JSONB, nullable=False, default=dict)
     source = Column(String, nullable=True)   # "telegram" | "whatsapp" | "instagram" | "webchat" | "api"
     is_blocked = Column(Boolean, nullable=False, default=False)
-    metadata = Column(JSONB, nullable=True, default=dict)
+    meta = Column("metadata", JSONB, nullable=True, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Broadcast opt-out
