@@ -1,17 +1,12 @@
 """
 Document Processing Pipeline
-Handles document upload, validation, text extraction, and chunking
+Handles document upload, validation, text extraction, and chunking.
+All files are stored in Cloudflare R2 — no local filesystem writes.
 """
-import os
-import uuid
-import mimetypes
-from typing import List, Dict, Any, Optional, Tuple
+import io
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 import PyPDF2
-from io import BytesIO
-
-from app.config import settings
-from app.services.file_storage import get_file_storage_service, FileStorageError
 
 
 class DocumentProcessingError(Exception):
@@ -36,204 +31,101 @@ class TextExtractionError(DocumentProcessingError):
 
 class DocumentProcessor:
     """
-    Document processing pipeline for RAG system
-    Handles validation, text extraction, and chunking using the file storage service
+    Document processing pipeline for RAG system.
+    Validates, extracts text in-memory, chunks, and uploads to Cloudflare R2.
     """
-    
-    # Chunking parameters
-    CHUNK_SIZE = 500  # tokens per chunk
-    CHUNK_OVERLAP = 50  # token overlap between chunks
-    
-    def __init__(self):
-        self.file_storage = get_file_storage_service()
-    
+
+    CHUNK_SIZE = 500      # tokens per chunk
+    CHUNK_OVERLAP = 50    # token overlap between chunks
+
+    ALLOWED_EXTENSIONS = {'.pdf', '.txt'}
+    ALLOWED_MIME_TYPES = {'application/pdf', 'text/plain'}
+    MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+    def __init__(self, db=None):
+        self.db = db
+
     def validate_file(self, filename: str, file_size: int, content_type: Optional[str] = None) -> bool:
         """
-        Validate file type and size using the file storage service
-        
-        Args:
-            filename: Original filename
-            file_size: File size in bytes
-            content_type: MIME type from upload
-        
-        Returns:
-            True if valid
-        
+        Validate file type and size.
+
         Raises:
             UnsupportedFileTypeError: If file type not supported
             FileSizeExceededError: If file too large
         """
-        try:
-            # Use file storage service validation
-            self.file_storage._validate_filename(filename)
-            self.file_storage._validate_mime_type(filename, content_type)
-            
-            # Check file size (file storage service checks this in store_file)
-            if file_size > self.file_storage.MAX_FILE_SIZE:
-                raise FileSizeExceededError(
-                    f"File size {file_size} bytes exceeds maximum {self.file_storage.MAX_FILE_SIZE} bytes"
-                )
-            
-            return True
-        except Exception as e:
-            # Convert file storage exceptions to document processor exceptions
-            if "not allowed" in str(e) or "doesn't match extension" in str(e):
-                raise UnsupportedFileTypeError(str(e))
-            elif "exceeds maximum" in str(e):
-                raise FileSizeExceededError(str(e))
-            else:
-                raise DocumentProcessingError(f"File validation failed: {str(e)}")
-    
-    def store_file(self, workspace_id: str, filename: str, file_content: bytes, content_type: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Store file using the file storage service
-        
-        Args:
-            workspace_id: Workspace ID for isolation
-            filename: Original filename
-            file_content: File content as bytes
-            content_type: MIME type for validation
-            
-        Returns:
-            Storage information dictionary
-        """
-        try:
-            return self.file_storage.store_file(workspace_id, filename, file_content, content_type)
-        except Exception as e:
-            raise DocumentProcessingError(f"Failed to store file: {str(e)}")
-    
-    def extract_text_from_pdf(self, file_path: str) -> str:
-        """
-        Extract text from PDF file
-        
-        Args:
-            file_path: Path to PDF file
-        
-        Returns:
-            Extracted text content
-        
-        Raises:
-            TextExtractionError: If extraction fails
-        """
+        ext = Path(filename).suffix.lower()
+        if ext not in self.ALLOWED_EXTENSIONS:
+            raise UnsupportedFileTypeError(
+                f"Extension '{ext}' not allowed. Supported: {sorted(self.ALLOWED_EXTENSIONS)}"
+            )
+        if content_type and content_type not in self.ALLOWED_MIME_TYPES:
+            raise UnsupportedFileTypeError(f"MIME type '{content_type}' is not supported")
+        if file_size > self.MAX_FILE_SIZE:
+            raise FileSizeExceededError(
+                f"File size {file_size} bytes exceeds maximum {self.MAX_FILE_SIZE} bytes"
+            )
+        return True
+
+    def extract_text_from_pdf(self, file_bytes: bytes) -> str:
+        """Extract text from PDF bytes in memory."""
         try:
             text_content = []
-            
-            with open(file_path, 'rb') as file:
-                pdf_reader = PyPDF2.PdfReader(file)
-                
-                for page_num, page in enumerate(pdf_reader.pages):
-                    try:
-                        page_text = page.extract_text()
-                        if page_text.strip():
-                            text_content.append(page_text)
-                    except Exception as e:
-                        # Log warning but continue with other pages
-                        print(f"Warning: Failed to extract text from page {page_num + 1}: {e}")
-                        continue
-            
+            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+            for page_num, page in enumerate(pdf_reader.pages):
+                try:
+                    page_text = page.extract_text()
+                    if page_text and page_text.strip():
+                        text_content.append(page_text)
+                except Exception as e:
+                    print(f"Warning: Failed to extract text from page {page_num + 1}: {e}")
+                    continue
             if not text_content:
                 raise TextExtractionError("No text content found in PDF")
-            
             return '\n\n'.join(text_content)
-            
+        except TextExtractionError:
+            raise
         except Exception as e:
-            if isinstance(e, TextExtractionError):
-                raise
             raise TextExtractionError(f"PDF text extraction failed: {str(e)}")
-    
-    def extract_text_from_txt(self, file_path: str) -> str:
-        """
-        Extract text from TXT file
-        
-        Args:
-            file_path: Path to TXT file
-        
-        Returns:
-            Text content
-        
-        Raises:
-            TextExtractionError: If extraction fails
-        """
-        try:
-            # Try different encodings
-            encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
-            
-            for encoding in encodings:
-                try:
-                    with open(file_path, 'r', encoding=encoding) as file:
-                        content = file.read()
-                        if content.strip():
-                            return content
-                except UnicodeDecodeError:
-                    continue
-            
-            raise TextExtractionError("Could not decode text file with any supported encoding")
-            
-        except Exception as e:
-            if isinstance(e, TextExtractionError):
-                raise
-            raise TextExtractionError(f"TXT text extraction failed: {str(e)}")
-    
-    def extract_text(self, file_path: str, file_type: str) -> str:
-        """
-        Extract text from file based on type
-        
-        Args:
-            file_path: Path to file
-            file_type: File extension (.pdf, .txt)
-        
-        Returns:
-            Extracted text content
-        
-        Raises:
-            TextExtractionError: If extraction fails
-        """
+
+    def extract_text_from_txt(self, file_bytes: bytes) -> str:
+        """Extract text from TXT bytes in memory, trying multiple encodings."""
+        encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
+        for encoding in encodings:
+            try:
+                content = file_bytes.decode(encoding)
+                if content.strip():
+                    return content
+            except UnicodeDecodeError:
+                continue
+        raise TextExtractionError("Could not decode text file with any supported encoding")
+
+    def extract_text(self, file_bytes: bytes, file_type: str) -> str:
+        """Dispatch text extraction based on file type."""
         if file_type == '.pdf':
-            return self.extract_text_from_pdf(file_path)
+            return self.extract_text_from_pdf(file_bytes)
         elif file_type == '.txt':
-            return self.extract_text_from_txt(file_path)
+            return self.extract_text_from_txt(file_bytes)
         else:
             raise TextExtractionError(f"Unsupported file type for text extraction: {file_type}")
-    
+
     def estimate_token_count(self, text: str) -> int:
-        """
-        Estimate token count for text (rough approximation)
-        
-        Args:
-            text: Text content
-        
-        Returns:
-            Estimated token count
-        """
-        # Rough estimation: 1 token ≈ 4 characters for English text
+        """Estimate token count (rough approximation: 1 token ≈ 4 characters)."""
         return len(text) // 4
-    
+
     def chunk_text(self, text: str, chunk_size: int = None, overlap: int = None) -> List[Dict[str, Any]]:
-        """
-        Split text into overlapping chunks
-        
-        Args:
-            text: Text content to chunk
-            chunk_size: Target tokens per chunk (default: CHUNK_SIZE)
-            overlap: Token overlap between chunks (default: CHUNK_OVERLAP)
-        
-        Returns:
-            List of chunk dictionaries with text and metadata
-        """
+        """Split text into overlapping chunks."""
         if chunk_size is None:
             chunk_size = self.CHUNK_SIZE
         if overlap is None:
             overlap = self.CHUNK_OVERLAP
-        
-        # Convert token counts to approximate character counts
+
         chunk_chars = chunk_size * 4
         overlap_chars = overlap * 4
-        
+
         chunks = []
         text_length = len(text)
-        
+
         if text_length <= chunk_chars:
-            # Text fits in single chunk
             chunks.append({
                 'text': text,
                 'chunk_index': 0,
@@ -242,122 +134,194 @@ class DocumentProcessor:
                 'token_count': self.estimate_token_count(text)
             })
             return chunks
-        
+
         start = 0
         chunk_index = 0
-        
+
         while start < text_length:
             end = min(start + chunk_chars, text_length)
-            
-            # Try to break at sentence or word boundaries
+
             if end < text_length:
-                # Look for sentence boundary within last 100 characters
                 sentence_break = text.rfind('.', end - 100, end)
                 if sentence_break > start:
                     end = sentence_break + 1
                 else:
-                    # Look for word boundary
                     word_break = text.rfind(' ', end - 50, end)
                     if word_break > start:
                         end = word_break
-            
-            chunk_text = text[start:end].strip()
-            if chunk_text:
+
+            chunk_text_content = text[start:end].strip()
+            if chunk_text_content:
                 chunks.append({
-                    'text': chunk_text,
+                    'text': chunk_text_content,
                     'chunk_index': chunk_index,
                     'start_char': start,
                     'end_char': end,
-                    'token_count': self.estimate_token_count(chunk_text)
+                    'token_count': self.estimate_token_count(chunk_text_content)
                 })
                 chunk_index += 1
-            
-            # Move start position with overlap
+
             start = max(start + 1, end - overlap_chars)
-            
-            # Prevent infinite loop
             if start >= text_length:
                 break
-        
+
         return chunks
-    
+
     async def process_document(
         self,
         workspace_id: str,
         filename: str,
         file_content: bytes,
-        content_type: Optional[str] = None
+        content_type: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Complete document processing pipeline with enhanced validation
-        
-        Args:
-            workspace_id: Workspace ID
-            filename: Original filename
-            file_content: File content as bytes
-            content_type: MIME type
-        
+        Validate, extract text in-memory, chunk, then upload to R2.
+        Text extraction runs BEFORE upload so corrupt files fail fast
+        without consuming R2 write capacity.
+
         Returns:
-            Dict with processing results
-        
-        Raises:
-            DocumentProcessingError: If processing fails
+            Dict with processing results including R2 URL as 'storage_path'
         """
-        from app.services.file_storage import get_file_storage_service
-        
-        storage_info = None
-        
-        try:
-            # 1. Early validation to prevent resource exhaustion
-            file_size = len(file_content)
-            
-            # Validate file size before any processing begins
-            file_storage = get_file_storage_service()
-            file_storage.validate_file_size_before_processing(file_size)
-            
-            # Validate file type and other constraints
-            self.validate_file(filename, file_size, content_type)
-            
-            # 2. Store file using file storage service
-            storage_info = self.store_file(workspace_id, filename, file_content, content_type)
-            
-            # 3. Extract text
-            file_ext = Path(filename).suffix.lower()
-            text_content = self.extract_text(storage_info['file_path'], file_ext)
-            
-            # 4. Create chunks
-            chunks = self.chunk_text(text_content)
-            
-            return {
-                'original_filename': storage_info['original_filename'],
-                'stored_filename': storage_info['stored_filename'],
-                'storage_path': storage_info['file_path'],
-                'file_size': storage_info['file_size'],
-                'file_type': file_ext,
-                'text_content': text_content,
-                'total_tokens': self.estimate_token_count(text_content),
-                'chunks': chunks,
-                'chunk_count': len(chunks)
-            }
-            
-        except (UnsupportedFileTypeError, FileSizeExceededError, TextExtractionError):
-            # Clean up stored file if text extraction or chunking fails
-            if storage_info and storage_info.get('stored_filename'):
-                try:
-                    file_storage = get_file_storage_service()
-                    file_storage.cleanup_partial_processing(workspace_id, storage_info['stored_filename'])
-                except Exception as cleanup_error:
-                    print(f"Warning: Failed to cleanup partial processing: {cleanup_error}")
-            raise
-        except Exception as e:
-            # Clean up stored file for any other processing failures
-            if storage_info and storage_info.get('stored_filename'):
-                try:
-                    file_storage = get_file_storage_service()
-                    file_storage.cleanup_partial_processing(workspace_id, storage_info['stored_filename'])
-                except Exception as cleanup_error:
-                    print(f"Warning: Failed to cleanup partial processing: {cleanup_error}")
-            raise DocumentProcessingError(f"Document processing failed: {str(e)}")
+        from app.services.r2_storage import upload_rag_document
+
+        file_size = len(file_content)
+        if file_size == 0:
+            raise DocumentProcessingError("File content is empty")
+
+        self.validate_file(filename, file_size, content_type)
+
+        file_ext = Path(filename).suffix.lower()
+        text_content = self.extract_text(file_content, file_ext)
+        chunks = self.chunk_text(text_content)
+
+        mime = content_type or ('application/pdf' if file_ext == '.pdf' else 'text/plain')
+        r2_result = await upload_rag_document(file_content, mime, str(workspace_id), filename)
+
+        return {
+            'original_filename': filename,
+            'storage_path': r2_result['url'],  # R2 URL — stored in Document.file_path
+            'file_size': file_size,
+            'file_type': file_ext,
+            'text_content': text_content,
+            'total_tokens': self.estimate_token_count(text_content),
+            'chunks': chunks,
+            'chunk_count': len(chunks),
+        }
+
+    async def upload_and_process_document(
+        self,
+        workspace_id,
+        filename: str,
+        original_filename: str,
+        content: bytes,
+        content_type: str,
+        uploaded_by_user_id=None,
+    ):
+        """
+        Full pipeline: process document and persist to DB with embeddings.
+        Called by the documents router on upload.
+        Returns the created Document ORM instance.
+        """
+        from app.services.embedding_service import EmbeddingService
+
+        processing_result = await self.process_document(
+            workspace_id=str(workspace_id),
+            filename=original_filename,
+            file_content=content,
+            content_type=content_type,
+        )
+
+        embedding_service = EmbeddingService(self.db)
+        document = await embedding_service.process_document_embeddings(
+            str(workspace_id), processing_result
+        )
+
+        # Apply custom name if caller provided one different from original filename
+        if filename != original_filename:
+            document.name = filename
+            await self.db.commit()
+            await self.db.refresh(document)
+
+        return document
+
+    async def delete_document(self, document_id):
+        """
+        Delete document DB records and the corresponding R2 object.
+        Called by the documents router on delete.
+        """
+        from sqlalchemy import select
+        from app.models.document import Document
+        from app.services.embedding_service import EmbeddingService
+        from app.services.r2_storage import delete_r2_object
+
+        result = await self.db.execute(
+            select(Document).where(Document.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+        if not doc:
+            return False
+
+        file_url = doc.file_path
+
+        embedding_service = EmbeddingService(self.db)
+        await embedding_service.delete_document_and_chunks(
+            str(document_id), str(doc.workspace_id)
+        )
+
+        # Delete R2 object best-effort (after successful DB cleanup)
+        if file_url:
+            try:
+                delete_r2_object(file_url)
+            except Exception as e:
+                print(f"Warning: Failed to delete R2 object {file_url}: {e}")
+
+        return True
+
+    async def reprocess_document(self, document_id):
+        """
+        Re-download file from R2, re-extract text, regenerate embeddings.
+        Does NOT re-upload to R2 — same file URL is preserved.
+        Called by the documents router on reprocess.
+        """
+        import httpx
+        from sqlalchemy import select, delete as sa_delete
+        from app.models.document import Document
+        from app.models.document_chunk import DocumentChunk
+        from app.services.embedding_service import EmbeddingService
+
+        result = await self.db.execute(
+            select(Document).where(Document.id == document_id)
+        )
+        doc = result.scalar_one_or_none()
+        if not doc:
+            raise DocumentProcessingError("Document not found")
+
+        # Download bytes from R2
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(doc.file_path)
+            resp.raise_for_status()
+            file_bytes = resp.content
+
+        # Re-extract and re-chunk in memory
+        file_ext = Path(doc.name).suffix.lower()
+        text_content = self.extract_text(file_bytes, file_ext)
+        chunks = self.chunk_text(text_content)
+
+        # Delete old chunks and regenerate
+        await self.db.execute(
+            sa_delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
+        )
+        doc.status = "processing"
+        doc.error_message = None
+        await self.db.commit()
+
+        embedding_service = EmbeddingService(self.db)
+        await embedding_service.create_document_chunks(str(document_id), chunks)
+
+        doc.chunks_count = len(chunks)
+        await self.db.commit()
+
+        return await embedding_service.update_document_status(str(document_id), "completed")
 
 
 # ─── Convenience Functions ────────────────────────────────────────────────────
@@ -366,30 +330,17 @@ async def process_uploaded_document(
     workspace_id: str,
     filename: str,
     file_content: bytes,
-    content_type: Optional[str] = None
+    content_type: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Convenience function to process an uploaded document
-    
-    Returns:
-        Processing results with chunks and metadata
-    
-    Raises:
-        DocumentProcessingError: If processing fails
+    Convenience function: validate, extract text, chunk, upload to R2.
+    Returns processing results dict (no DB writes).
     """
     processor = DocumentProcessor()
     return await processor.process_document(workspace_id, filename, file_content, content_type)
 
 
 def validate_document_upload(filename: str, file_size: int, content_type: Optional[str] = None) -> bool:
-    """
-    Convenience function to validate document before upload
-    
-    Returns:
-        True if valid
-    
-    Raises:
-        DocumentProcessingError: If validation fails
-    """
+    """Convenience function to validate document before upload."""
     processor = DocumentProcessor()
     return processor.validate_file(filename, file_size, content_type)

@@ -2,10 +2,12 @@
 Agent Management Router
 Handles agent invitations, acceptance, and management endpoints
 """
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, and_
 
 from app.database import get_db
 from app.middleware.auth_middleware import get_current_user, get_current_workspace
@@ -54,6 +56,17 @@ class AgentInvitationResponse(BaseModel):
     invited_at: str
 
 
+class AgentPerformanceItem(BaseModel):
+    """Per-agent performance metrics"""
+    agent_id: str
+    name: str
+    email: str
+    status: str
+    conversations_active: int
+    conversations_resolved_30d: int
+    avg_csat: Optional[float] = None
+
+
 class AgentStatsResponse(BaseModel):
     """Response model for agent statistics"""
     total_agents: int
@@ -61,6 +74,7 @@ class AgentStatsResponse(BaseModel):
     inactive_agents: int
     pending_invitations: int
     tier_info: dict
+    per_agent: List[AgentPerformanceItem] = []
 
 
 # ─── Agent Management Endpoints ───────────────────────────────────────────────
@@ -557,11 +571,66 @@ async def get_agent_statistics(
         Agent statistics
     """
     try:
+        from app.models.conversation import Conversation
+        from app.models.csat_rating import CSATRating
+
         manager = AgentManager(db)
         stats = await manager.get_agent_statistics(current_workspace.id)
-        
-        return AgentStatsResponse(**stats)
-        
+
+        # Fetch all active agents for per-agent breakdown
+        agents_result = await db.execute(
+            select(Agent)
+            .where(Agent.workspace_id == current_workspace.id)
+            .where(Agent.is_active == True)
+            .where(Agent.user_id != None)
+        )
+        agents = agents_result.scalars().all()
+
+        thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
+        per_agent = []
+
+        for agent in agents:
+            # Active conversations assigned to this agent
+            active_result = await db.execute(
+                select(func.count(Conversation.id))
+                .where(Conversation.workspace_id == current_workspace.id)
+                .where(Conversation.assigned_agent_id == agent.id)
+                .where(Conversation.status.in_(["escalated", "agent"]))
+            )
+            conversations_active = active_result.scalar() or 0
+
+            # Resolved conversations in last 30 days
+            resolved_result = await db.execute(
+                select(func.count(Conversation.id))
+                .where(Conversation.workspace_id == current_workspace.id)
+                .where(Conversation.assigned_agent_id == agent.id)
+                .where(Conversation.status == "resolved")
+                .where(Conversation.resolved_at >= thirty_days_ago)
+            )
+            conversations_resolved_30d = resolved_result.scalar() or 0
+
+            # Average CSAT for conversations handled by this agent
+            csat_result = await db.execute(
+                select(func.avg(CSATRating.rating))
+                .join(Conversation, Conversation.id == CSATRating.conversation_id)
+                .where(Conversation.assigned_agent_id == agent.id)
+                .where(CSATRating.workspace_id == current_workspace.id)
+            )
+            avg_csat_raw = csat_result.scalar()
+            avg_csat = round(float(avg_csat_raw), 2) if avg_csat_raw is not None else None
+
+            per_agent.append(AgentPerformanceItem(
+                agent_id=str(agent.id),
+                name=agent.name,
+                email=agent.email,
+                status=getattr(agent, "status", "offline"),
+                conversations_active=conversations_active,
+                conversations_resolved_30d=conversations_resolved_30d,
+                avg_csat=avg_csat,
+            ))
+
+        return AgentStatsResponse(**stats, per_agent=per_agent)
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -606,7 +675,7 @@ async def validate_invitation_token(
             "workspace_id": agent.workspace_id,
             "expires_at": agent.invitation_expires_at.isoformat()
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -614,3 +683,85 @@ async def validate_invitation_token(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to validate invitation: {str(e)}"
         )
+
+
+# ─── Agent Availability Status ────────────────────────────────────────────────
+
+from sqlalchemy import select as _select
+from datetime import datetime, timezone
+
+
+class AgentStatusUpdate(BaseModel):
+    status: str = Field(..., pattern="^(online|offline|busy)$")
+
+
+class AgentStatusResponse(BaseModel):
+    agent_id: str
+    status: str
+    last_heartbeat_at: Optional[str]
+
+
+@router.put("/me/status", response_model=AgentStatusResponse)
+async def update_agent_status(
+    request: AgentStatusUpdate,
+    current_workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Update the calling agent's availability status and heartbeat."""
+    from app.services.websocket_events import notify_agent_status_change
+
+    agent_result = await db.execute(
+        _select(Agent)
+        .where(Agent.workspace_id == current_workspace.id)
+        .where(Agent.user_id == current_user.id)
+        .where(Agent.is_active == True)
+    )
+    agent = agent_result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Active agent profile not found")
+
+    agent.status = request.status
+    agent.last_heartbeat_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(agent)
+
+    # Broadcast status change to workspace via WebSocket
+    try:
+        await notify_agent_status_change(
+            db=db,
+            workspace_id=str(current_workspace.id),
+            agent_id=str(agent.id),
+            status=request.status
+        )
+    except Exception:
+        pass  # Non-fatal
+
+    return AgentStatusResponse(
+        agent_id=str(agent.id),
+        status=agent.status,
+        last_heartbeat_at=agent.last_heartbeat_at.isoformat() if agent.last_heartbeat_at else None
+    )
+
+
+@router.get("/me/status", response_model=AgentStatusResponse)
+async def get_agent_status(
+    current_workspace: Workspace = Depends(get_current_workspace),
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get the calling agent's current availability status."""
+    agent_result = await db.execute(
+        _select(Agent)
+        .where(Agent.workspace_id == current_workspace.id)
+        .where(Agent.user_id == current_user.id)
+    )
+    agent = agent_result.scalar_one_or_none()
+    if not agent:
+        raise HTTPException(status_code=404, detail="Agent profile not found")
+
+    return AgentStatusResponse(
+        agent_id=str(agent.id),
+        status=agent.status,
+        last_heartbeat_at=agent.last_heartbeat_at.isoformat() if agent.last_heartbeat_at else None
+    )

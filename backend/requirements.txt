@@ -19,6 +19,10 @@ cryptography==42.0.5
 # AI Providers
 google-generativeai==0.7.2
 openai==1.35.0
+groq>=0.9.0
+
+# Billing
+stripe>=9.0.0
 
 # HTTP client and utilities
 httpx==0.27.0
@@ -34,6 +38,14 @@ resend==2.1.0
 # Configuration and environment
 python-dotenv==1.0.1
 pydantic-settings==2.2.1
+tzdata>=2024.1   # IANA timezone database for zoneinfo on non-Linux platforms
+
+# Cloudflare R2 (S3-compatible object storage)
+boto3>=1.34.0
+
+# Redis queue for broadcasts
+arq>=0.26.0
+redis>=5.0.0
 
 # Testing (development)
 pytest==8.1.1

@@ -1,14 +1,20 @@
 """
 Webhook Handlers
-Handles incoming webhooks from external services (Resend, etc.)
+Handles incoming webhooks from external services (Resend, Telegram, WhatsApp, Instagram)
 """
-from fastapi import APIRouter, Request, HTTPException, Header
+from fastapi import APIRouter, Request, HTTPException, Header, Query, Depends
+from fastapi.responses import PlainTextResponse
 from typing import Optional
 import hmac
 import hashlib
 import json
-from app.config import settings
+import logging
 
+from app.config import settings
+from app.database import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
 
@@ -201,8 +207,333 @@ async def handle_email_clicked(data: dict):
     email_id = data.get("email_id")
     to = data.get("to")
     link = data.get("link")
-    
+
     print(f"🔗 Email link clicked: {email_id} by {to} - {link}")
-    
+
     # TODO: Track email click
     # await track_email_click(email_id, link)
+
+
+# ─── Stripe Webhook ───────────────────────────────────────────────────────────
+
+@router.post("/stripe")
+async def stripe_webhook(
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Handle Stripe subscription lifecycle events."""
+    if not settings.STRIPE_WEBHOOK_SECRET:
+        return {"status": "ok"}
+
+    payload = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+
+    try:
+        import stripe
+        stripe.api_key = settings.STRIPE_SECRET_KEY
+        event = stripe.Webhook.construct_event(
+            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
+        )
+    except Exception as e:
+        logger.error(f"Stripe webhook signature failed: {e}")
+        raise HTTPException(status_code=400, detail="Invalid Stripe signature")
+
+    from app.services.stripe_service import handle_subscription_updated, handle_subscription_deleted
+
+    event_type = event.get("type", "")
+    event_data = event.get("data", {})
+
+    try:
+        if event_type == "customer.subscription.updated":
+            await handle_subscription_updated(event_data, db)
+        elif event_type == "customer.subscription.deleted":
+            await handle_subscription_deleted(event_data, db)
+    except Exception as e:
+        logger.error(f"Stripe event handling error: {e}")
+
+    return {"status": "ok"}
+
+
+# ─── Channel Webhooks ─────────────────────────────────────────────────────────
+
+async def _run_message_pipeline(
+    db: AsyncSession,
+    workspace_id: str,
+    channel_id: str,
+    message_data: dict,
+    channel_type: str
+) -> None:
+    """Run the full message pipeline: process → flow check → escalate → RAG → persist response."""
+    from app.services.message_processor import process_incoming_message, MessageProcessor
+    from app.services.escalation_router import check_and_escalate_message
+    from app.services.rag_engine import generate_rag_response
+    from app.services.usage_tracker import track_message_usage
+    from app.services.websocket_events import notify_new_message
+
+    processing_result = await process_incoming_message(
+        db=db,
+        workspace_id=workspace_id,
+        channel_id=channel_id,
+        external_contact_id=message_data["external_contact_id"],
+        content=message_data.get("content"),
+        external_message_id=message_data.get("external_message_id"),
+        contact_name=message_data.get("contact_name"),
+        contact_data=message_data.get("contact_data", {}),
+        message_metadata=message_data.get("message_metadata", {}),
+        channel_type=channel_type,
+        msg_type=message_data.get("msg_type", "text"),
+        media_id=message_data.get("media_id"),
+        media_mime_type=message_data.get("media_mime_type"),
+        media_filename=message_data.get("media_filename"),
+        location_lat=message_data.get("location_lat"),
+        location_lng=message_data.get("location_lng"),
+        location_name=message_data.get("location_name"),
+    )
+
+    conversation = processing_result["conversation"]
+    conversation_id = str(conversation.id)
+    user_message = processing_result["message"]
+    user_message_id = str(user_message.id)
+
+    await notify_new_message(
+        db=db,
+        workspace_id=workspace_id,
+        conversation_id=conversation_id,
+        message_id=user_message_id
+    )
+
+    # For non-text messages (media, location, reaction) skip RAG — no query to answer
+    text_content = message_data.get("content") or ""
+    msg_type = message_data.get("msg_type", "text")
+    if msg_type != "text" or not text_content.strip():
+        return
+
+    # Flow engine check — runs before RAG for WhatsApp
+    if channel_type == "whatsapp":
+        try:
+            from app.services.flow_engine import handle_message_with_flow_check
+            from app.models.channel import Channel
+            from sqlalchemy import select
+            ch_result = await db.execute(select(Channel).where(Channel.id == channel_id))
+            channel = ch_result.scalar_one_or_none()
+            if channel:
+                handled_by_flow = await handle_message_with_flow_check(
+                    db=db,
+                    conversation=conversation,
+                    message=user_message,
+                    workspace_id=workspace_id,
+                    channel=channel,
+                )
+                if handled_by_flow:
+                    return
+        except Exception as e:
+            logger.error(f"Flow engine error: {e}")
+
+    escalation_result = await check_and_escalate_message(
+        db=db,
+        conversation_id=conversation_id,
+        workspace_id=workspace_id,
+        message_content=text_content
+    )
+
+    if not escalation_result:
+        try:
+            rag_result = await generate_rag_response(
+                db=db,
+                workspace_id=workspace_id,
+                query=text_content,
+                conversation_id=conversation_id,
+                max_tokens=300
+            )
+
+            processor = MessageProcessor(db)
+            await processor.create_message(
+                conversation_id=conversation_id,
+                content=rag_result["response"],
+                role="assistant",
+                channel_type=channel_type,
+                metadata={
+                    "rag_used": True,
+                    "input_tokens": rag_result["input_tokens"],
+                    "output_tokens": rag_result["output_tokens"],
+                }
+            )
+
+            await track_message_usage(
+                db=db,
+                workspace_id=workspace_id,
+                input_tokens=rag_result["input_tokens"],
+                output_tokens=rag_result["output_tokens"]
+            )
+
+            await notify_new_message(
+                db=db,
+                workspace_id=workspace_id,
+                conversation_id=conversation_id,
+                message_id=user_message_id
+            )
+        except Exception as e:
+            logger.error(f"RAG response failed for {channel_type} conversation {conversation_id}: {e}")
+
+
+# ── Telegram ──────────────────────────────────────────────────────────────────
+
+@router.post("/telegram/{bot_token}")
+async def telegram_webhook(
+    bot_token: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Receive incoming Telegram messages."""
+    payload = await request.body()
+    headers = dict(request.headers)
+
+    try:
+        from app.services.webhook_handlers import WebhookHandlers, WebhookProcessingError
+        result = await WebhookHandlers(db).handle_telegram_webhook(payload, headers, bot_token)
+
+        if result.get("status") == "success":
+            try:
+                await _run_message_pipeline(
+                    db=db,
+                    workspace_id=str(result["workspace_id"]),
+                    channel_id=str(result["channel_id"]),
+                    message_data=result["message_data"],
+                    channel_type="telegram"
+                )
+            except Exception as e:
+                logger.error(f"Telegram pipeline error: {e}")
+
+    except Exception as e:
+        logger.error(f"Telegram webhook error: {e}")
+
+    # Always return 200 to prevent Telegram retries
+    return {"ok": True}
+
+
+# ── WhatsApp ──────────────────────────────────────────────────────────────────
+
+@router.get("/whatsapp/{phone_number_id}", response_class=PlainTextResponse)
+async def whatsapp_verify(
+    phone_number_id: str,
+    hub_mode: Optional[str] = Query(None, alias="hub.mode"),
+    hub_verify_token: Optional[str] = Query(None, alias="hub.verify_token"),
+    hub_challenge: Optional[str] = Query(None, alias="hub.challenge"),
+):
+    """Meta hub verification for WhatsApp webhook subscription."""
+    if hub_mode == "subscribe" and hub_verify_token:
+        expected = settings.META_VERIFY_TOKEN
+        if expected and hub_verify_token != expected:
+            raise HTTPException(status_code=403, detail="Verification token mismatch")
+        return hub_challenge or ""
+    raise HTTPException(status_code=400, detail="Invalid verification request")
+
+
+@router.post("/whatsapp/{phone_number_id}")
+async def whatsapp_webhook(
+    phone_number_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Receive incoming WhatsApp messages."""
+    payload = await request.body()
+    headers = dict(request.headers)
+
+    try:
+        from app.services.webhook_handlers import WebhookHandlers, WebhookProcessingError
+        result = await WebhookHandlers(db).handle_whatsapp_webhook(payload, headers, phone_number_id)
+
+        status = result.get("status")
+
+        if status == "success":
+            try:
+                await _run_message_pipeline(
+                    db=db,
+                    workspace_id=str(result["workspace_id"]),
+                    channel_id=str(result["channel_id"]),
+                    message_data=result["message_data"],
+                    channel_type="whatsapp"
+                )
+            except Exception as e:
+                logger.error(f"WhatsApp pipeline error: {e}")
+
+        elif status == "status_update":
+            try:
+                from app.services.message_processor import MessageProcessor
+                from app.services.websocket_events import notify_message_status_update
+                processor = MessageProcessor(db)
+                workspace_id = str(result["workspace_id"])
+                for s in result.get("statuses", []):
+                    msg = await processor.update_message_delivery_status(
+                        whatsapp_msg_id=s["whatsapp_msg_id"],
+                        status=s["status"],
+                        timestamp=s["timestamp"],
+                        workspace_id=workspace_id,
+                        error=s.get("error"),
+                    )
+                    if msg:
+                        await notify_message_status_update(
+                            db=db,
+                            workspace_id=workspace_id,
+                            message_id=str(msg.id),
+                            whatsapp_msg_id=s["whatsapp_msg_id"],
+                            status=s["status"],
+                            timestamp=s["timestamp"],
+                        )
+            except Exception as e:
+                logger.error(f"WhatsApp status update error: {e}")
+
+    except Exception as e:
+        logger.error(f"WhatsApp webhook error: {e}")
+
+    return {"status": "ok"}
+
+
+# ── Instagram ─────────────────────────────────────────────────────────────────
+
+@router.get("/instagram/{page_id}", response_class=PlainTextResponse)
+async def instagram_verify(
+    page_id: str,
+    hub_mode: Optional[str] = Query(None, alias="hub.mode"),
+    hub_verify_token: Optional[str] = Query(None, alias="hub.verify_token"),
+    hub_challenge: Optional[str] = Query(None, alias="hub.challenge"),
+):
+    """Meta hub verification for Instagram webhook subscription."""
+    if hub_mode == "subscribe" and hub_verify_token:
+        expected = settings.META_VERIFY_TOKEN
+        if expected and hub_verify_token != expected:
+            raise HTTPException(status_code=403, detail="Verification token mismatch")
+        return hub_challenge or ""
+    raise HTTPException(status_code=400, detail="Invalid verification request")
+
+
+@router.post("/instagram/{page_id}")
+async def instagram_webhook(
+    page_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Receive incoming Instagram messages."""
+    payload = await request.body()
+    headers = dict(request.headers)
+
+    try:
+        from app.services.webhook_handlers import WebhookHandlers, WebhookProcessingError
+        result = await WebhookHandlers(db).handle_instagram_webhook(payload, headers, page_id)
+
+        if result.get("status") == "success":
+            try:
+                await _run_message_pipeline(
+                    db=db,
+                    workspace_id=str(result["workspace_id"]),
+                    channel_id=str(result["channel_id"]),
+                    message_data=result["message_data"],
+                    channel_type="instagram"
+                )
+            except Exception as e:
+                logger.error(f"Instagram pipeline error: {e}")
+
+    except Exception as e:
+        logger.error(f"Instagram webhook error: {e}")
+
+    return {"status": "ok"}

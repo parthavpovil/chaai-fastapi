@@ -325,6 +325,47 @@ async def delete_workspace(
         )
 
 
+@router.get("/feedback/stats")
+async def get_feedback_stats(
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+    workspace_id: Optional[UUID] = Query(None, description="Filter by workspace ID")
+):
+    """
+    Get aggregate AI response feedback statistics.
+    Returns positive/negative counts per workspace (or for a specific workspace).
+    Only accessible by super admin.
+    """
+    from sqlalchemy import select, func
+    from app.models.ai_feedback import AIFeedback
+    from app.models.workspace import Workspace as WorkspaceModel
+
+    query = (
+        select(
+            AIFeedback.workspace_id,
+            AIFeedback.rating,
+            func.count(AIFeedback.id).label("count")
+        )
+        .group_by(AIFeedback.workspace_id, AIFeedback.rating)
+    )
+    if workspace_id:
+        query = query.where(AIFeedback.workspace_id == workspace_id)
+
+    result = await db.execute(query)
+    rows = result.all()
+
+    # Aggregate into per-workspace dict
+    stats: dict = {}
+    for row in rows:
+        ws_id = str(row.workspace_id)
+        if ws_id not in stats:
+            stats[ws_id] = {"workspace_id": ws_id, "positive": 0, "negative": 0, "total": 0}
+        stats[ws_id][row.rating] = row.count
+        stats[ws_id]["total"] += row.count
+
+    return {"feedback_stats": list(stats.values())}
+
+
 @router.get("/analytics", response_model=AnalyticsDashboardResponse)
 async def get_analytics_dashboard(
     current_user: User = Depends(require_super_admin),

@@ -16,8 +16,12 @@ from app.config import settings
 # Import all models to ensure they are registered
 from app.models import (
     user, workspace, channel, contact, conversation, message,
-    agent, document, document_chunk, usage_counter, 
-    platform_setting, tier_change, rate_limit
+    agent, document, document_chunk, usage_counter,
+    platform_setting, tier_change, rate_limit,
+    internal_note, canned_response, assignment_rule,
+    ai_feedback, outbound_webhook, api_key,
+    outbound_webhook_log, csat_rating, business_hours,
+    flow, whatsapp_template, broadcast,
 )
 
 # this is the Alembic Config object, which provides

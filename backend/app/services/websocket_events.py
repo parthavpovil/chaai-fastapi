@@ -443,6 +443,45 @@ async def notify_new_message(
     )
 
 
+async def notify_agent_status_change(
+    db: AsyncSession,
+    workspace_id: str,
+    agent_id: str,
+    status: str
+) -> int:
+    """Broadcast agent availability status change to workspace."""
+    return await websocket_manager.broadcast_to_workspace(
+        workspace_id,
+        {
+            "type": "agent_status",
+            "agent_id": agent_id,
+            "status": status,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    )
+
+
+async def notify_message_status_update(
+    db: AsyncSession,
+    workspace_id: str,
+    message_id: str,
+    whatsapp_msg_id: str,
+    status: str,
+    timestamp: str
+) -> int:
+    """Push delivery receipt update to dashboard in real time."""
+    return await websocket_manager.broadcast_to_workspace(
+        workspace_id,
+        {
+            "type": "message_status_update",
+            "message_id": message_id,
+            "whatsapp_message_id": whatsapp_msg_id,
+            "status": status,
+            "timestamp": timestamp
+        }
+    )
+
+
 async def notify_conversation_status_change(
     db: AsyncSession,
     workspace_id: str,

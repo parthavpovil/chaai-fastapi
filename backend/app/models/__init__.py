@@ -14,10 +14,22 @@ from .usage_counter import UsageCounter
 from .platform_setting import PlatformSetting
 from .tier_change import TierChange
 from .rate_limit import RateLimit
+from .internal_note import InternalNote
+from .canned_response import CannedResponse
+from .assignment_rule import AssignmentRule
+from .ai_feedback import AIFeedback
+from .outbound_webhook import OutboundWebhook
+from .outbound_webhook_log import OutboundWebhookLog
+from .api_key import APIKey
+from .csat_rating import CSATRating
+from .business_hours import BusinessHours
+from .flow import Flow, ConversationFlowState
+from .whatsapp_template import WhatsAppTemplate
+from .broadcast import Broadcast, BroadcastRecipient
 
 __all__ = [
     "User",
-    "Workspace", 
+    "Workspace",
     "Channel",
     "Contact",
     "Conversation",
@@ -28,5 +40,20 @@ __all__ = [
     "UsageCounter",
     "PlatformSetting",
     "TierChange",
-    "RateLimit"
+    "RateLimit",
+    "InternalNote",
+    "CannedResponse",
+    "AssignmentRule",
+    "AIFeedback",
+    "OutboundWebhook",
+    "OutboundWebhookLog",
+    "APIKey",
+    "CSATRating",
+    "BusinessHours",
+    "Flow",
+    "ConversationFlowState",
+    "WhatsAppTemplate",
+    "Broadcast",
+    "BroadcastRecipient",
+
 ]

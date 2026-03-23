@@ -4,8 +4,8 @@ Customer contact management across channels
 """
 from uuid import UUID, uuid4
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, func, ForeignKey, UniqueConstraint
-from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
+from sqlalchemy import Column, String, Boolean, DateTime, func, ForeignKey, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID as PostgresUUID, JSONB, ARRAY
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -20,7 +20,18 @@ class Contact(Base):
     channel_id = Column(PostgresUUID(as_uuid=True), ForeignKey("channels.id"), nullable=False)
     external_id = Column(String, nullable=False)  # platform-specific user ID
     name = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    tags = Column(ARRAY(String), nullable=False, server_default="{}")
+    custom_fields = Column(JSONB, nullable=False, default=dict)
+    source = Column(String, nullable=True)   # "telegram" | "whatsapp" | "instagram" | "webchat" | "api"
+    is_blocked = Column(Boolean, nullable=False, default=False)
+    metadata = Column(JSONB, nullable=True, default=dict)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    # Broadcast opt-out
+    broadcast_opted_out = Column(Boolean, nullable=False, default=False)
+    opted_out_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     workspace = relationship("Workspace", back_populates="contacts")

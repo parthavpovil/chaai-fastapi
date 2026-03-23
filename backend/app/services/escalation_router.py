@@ -13,6 +13,7 @@ from app.models.agent import Agent
 from app.models.message import Message
 from app.services.conversation_manager import ConversationManager
 from app.services.escalation_classifier import EscalationClassifier
+from app.services import assignment_service
 
 
 class EscalationRoutingError(Exception):
@@ -274,10 +275,30 @@ class EscalationRouter:
                 conversation_id, escalation_reason, classification_data
             )
             
-            # 3. Get available agents
+            # 3. Get available agents and assign via rules (or FIFO fallback)
             available_agents = await self.get_available_agents(workspace_id)
             has_agents = len(available_agents) > 0
-            
+
+            assigned_agent_id = None
+            if has_agents:
+                # Try assignment rules first
+                matched_rule = await assignment_service.evaluate_rules(
+                    self.db, workspace_id, escalation_reason, conversation.channel_type
+                )
+                if matched_rule:
+                    assigned_agent_id = await assignment_service.assign_by_rule(
+                        self.db, matched_rule, conversation_id
+                    )
+
+                # Fall back to FIFO (first agent in created_at order)
+                if not assigned_agent_id:
+                    assigned_agent_id = available_agents[0].id
+
+                # Persist assignment on conversation
+                if assigned_agent_id:
+                    conversation.assigned_agent_id = assigned_agent_id
+                    await self.db.commit()
+
             # 4. Send customer acknowledgment
             acknowledgment_message = await self.send_customer_acknowledgment(
                 conversation_id, has_agents, workspace_id
@@ -315,19 +336,41 @@ class EscalationRouter:
                         print(f"Email alert failed: {e}")
                         email_sent = False
             
-            return {
+            result = {
                 "success": True,
                 "conversation_id": conversation_id,
                 "escalation_reason": escalation_reason,
                 "priority": priority,
                 "has_agents": has_agents,
                 "available_agents_count": len(available_agents),
+                "assigned_agent_id": str(assigned_agent_id) if assigned_agent_id else None,
                 "notifications_sent": notifications_sent,
                 "email_sent": email_sent,
                 "escalation_message_id": escalation_message.id,
                 "acknowledgment_message_id": acknowledgment_message.id,
                 "escalated_at": datetime.now(timezone.utc).isoformat()
             }
+
+            # Fire outbound webhook event (fire-and-forget)
+            try:
+                import asyncio
+                from app.services.outbound_webhook_service import trigger_event
+                asyncio.create_task(trigger_event(
+                    db=self.db,
+                    workspace_id=workspace_id,
+                    event_type="conversation.escalated",
+                    payload={
+                        "workspace_id": workspace_id,
+                        "conversation_id": conversation_id,
+                        "escalation_reason": escalation_reason,
+                        "priority": priority,
+                        "escalated_at": result["escalated_at"],
+                    }
+                ))
+            except Exception:
+                pass
+
+            return result
             
         except Exception as e:
             raise EscalationRoutingError(f"Escalation processing failed: {str(e)}")
@@ -341,20 +384,30 @@ class EscalationRouter:
     ) -> Optional[Dict[str, Any]]:
         """
         Automatically escalate message if classification indicates escalation needed
-        
+
         Args:
             conversation_id: Conversation ID
             workspace_id: Workspace ID
             message_content: Message content to classify
             confidence_threshold: Minimum confidence for auto-escalation
-        
+
         Returns:
             Escalation results if escalated, None if not escalated
         """
         try:
+            # Load workspace escalation config
+            ws_result = await self.db.execute(
+                select(Workspace).where(Workspace.id == workspace_id)
+            )
+            workspace = ws_result.scalar_one_or_none()
+            workspace_keywords = workspace.escalation_keywords if workspace else None
+            sensitivity = (workspace.escalation_sensitivity or "medium") if workspace else "medium"
+
             # Classify message for escalation
             classification = await self.classifier.classify_message(
-                message_content, conversation_id
+                message_content, conversation_id,
+                workspace_keywords=workspace_keywords,
+                sensitivity=sensitivity
             )
             
             # Check if escalation is needed

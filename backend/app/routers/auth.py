@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from pydantic import BaseModel
+
 from app.database import get_db
 from app.models.user import User
 from app.models.workspace import Workspace
@@ -338,3 +340,40 @@ async def get_current_user_info(
         user=UserResponse.model_validate(current_user),
         workspace=WorkspaceResponse.model_validate(workspace) if workspace else None
     )
+
+
+class TokenRefreshRequest(BaseModel):
+    token: str
+
+
+class TokenRefreshResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+
+
+@router.post("/refresh", response_model=TokenRefreshResponse)
+async def refresh_token(request: TokenRefreshRequest):
+    """
+    Silently refresh a JWT token before it expires.
+
+    Accepts a valid (non-expired) token and returns a new token with a fresh
+    expiry. Frontend should call this proactively (e.g. 5 minutes before exp)
+    to avoid mid-session logouts.
+    """
+    payload = auth_service.decode_access_token(request.token)
+    if not payload:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token"
+        )
+
+    workspace_id_str = payload.get("workspace_id")
+    workspace_id = UUID(workspace_id_str) if workspace_id_str else None
+
+    new_token = auth_service.create_access_token(
+        user_id=UUID(payload["sub"]),
+        email=payload["email"],
+        role=payload["role"],
+        workspace_id=workspace_id,
+    )
+    return TokenRefreshResponse(access_token=new_token)

@@ -377,6 +377,61 @@ def get_embedding_provider() -> AIProvider:
         raise ValueError(f"Unknown EMBEDDING_PROVIDER: '{provider}'. Valid: google, openai")
 
 
+# ─── Workspace-aware provider factory ────────────────────────────────────────
+
+def get_llm_provider_for_workspace(workspace_metadata: dict) -> AIProvider:
+    """
+    Returns an LLM provider configured for a specific workspace.
+    Falls back to the global settings if no workspace override is set.
+
+    workspace_metadata keys:
+      - "ai_provider": "google" | "openai" | "groq"
+      - "ai_model": optional model name override
+      - "ai_api_key": optional raw API key (plaintext after decryption)
+    """
+    if not workspace_metadata:
+        return get_llm_provider()
+
+    provider_name = workspace_metadata.get("ai_provider", "").lower()
+    api_key = workspace_metadata.get("ai_api_key", "")
+
+    if provider_name == "google":
+        p = GoogleProvider.__new__(GoogleProvider)
+        try:
+            import google.generativeai as genai
+            genai.configure(api_key=api_key or settings.GOOGLE_API_KEY)
+            p.genai = genai
+            p.llm_model = workspace_metadata.get("ai_model", "gemini-2.0-flash")
+            p.embedding_model = "models/text-embedding-004"
+        except Exception as e:
+            raise AIProviderAuthError(f"Failed to initialize workspace Google provider: {e}")
+        return p
+
+    elif provider_name == "openai":
+        p = OpenAIProvider.__new__(OpenAIProvider)
+        try:
+            import openai as openai_lib
+            p.client = openai_lib.AsyncOpenAI(api_key=api_key or settings.OPENAI_API_KEY)
+            p.model = workspace_metadata.get("ai_model", "gpt-3.5-turbo")
+            p.embedding_model = "text-embedding-3-small"
+        except Exception as e:
+            raise AIProviderAuthError(f"Failed to initialize workspace OpenAI provider: {e}")
+        return p
+
+    elif provider_name == "groq":
+        p = GroqProvider.__new__(GroqProvider)
+        try:
+            from groq import AsyncGroq
+            p.client = AsyncGroq(api_key=api_key or settings.GROQ_API_KEY)
+            p.model = workspace_metadata.get("ai_model", "llama-3.3-70b-versatile")
+        except Exception as e:
+            raise AIProviderAuthError(f"Failed to initialize workspace Groq provider: {e}")
+        return p
+
+    # No workspace override — use global default
+    return get_llm_provider()
+
+
 # ─── Singletons ───────────────────────────────────────────────────────────────
 # Created once at startup, reused for all requests
 

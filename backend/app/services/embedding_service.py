@@ -4,7 +4,6 @@ Handles document chunk embedding generation and vector storage
 """
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
-from pathlib import Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
@@ -60,41 +59,32 @@ class EmbeddingService:
         workspace_id: str,
         filename: str,
         file_size: int,
-        file_type: str,
         storage_path: str,
-        total_tokens: int,
-        processing_metadata: Dict[str, Any]
+        **kwargs,
     ) -> Document:
         """
-        Create document record in database
-        
+        Create document record in database.
+
         Args:
             workspace_id: Workspace ID
-            filename: Original filename
-            file_size: File size in bytes
-            file_type: File extension
-            storage_path: Path to stored file
-            total_tokens: Total token count
-            processing_metadata: Additional processing metadata
-        
+            filename: Original filename (stored as Document.name)
+            file_size: File size in bytes (informational only)
+            storage_path: R2 URL (stored as Document.file_path)
+
         Returns:
             Created Document instance
         """
         document = Document(
             workspace_id=workspace_id,
-            filename=filename,
-            file_size=file_size,
-            file_type=file_type,
-            storage_path=storage_path,
-            total_tokens=total_tokens,
+            name=filename,           # model column is 'name'
+            file_path=storage_path,  # model column is 'file_path'
             status="processing",
-            metadata=processing_metadata
         )
-        
+
         self.db.add(document)
         await self.db.commit()
         await self.db.refresh(document)
-        
+
         return document
     
     async def create_document_chunks(
@@ -197,71 +187,60 @@ class EmbeddingService:
         processing_result: Dict[str, Any]
     ) -> Document:
         """
-        Complete embedding processing pipeline with enhanced cleanup
-        
+        Complete embedding processing pipeline.
+
         Args:
             workspace_id: Workspace ID
-            processing_result: Result from document processor
-        
+            processing_result: Result from DocumentProcessor.process_document()
+
         Returns:
             Completed Document instance with chunks
-        
+
         Raises:
             EmbeddingError: If processing fails
         """
-        from app.services.file_storage import get_file_storage_service
-        
         document = None
-        stored_filename = processing_result.get('stored_filename')
-        
+        r2_url = processing_result.get('storage_path')
+
         try:
             # 1. Create document record
             document = await self.create_document_record(
                 workspace_id=workspace_id,
                 filename=processing_result['original_filename'],
                 file_size=processing_result['file_size'],
-                file_type=processing_result['file_type'],
                 storage_path=processing_result['storage_path'],
-                total_tokens=processing_result['total_tokens'],
-                processing_metadata={
-                    'stored_filename': processing_result['stored_filename'],
-                    'chunk_count': processing_result['chunk_count']
-                }
             )
-            
+
             # 2. Process chunks and generate embeddings
             chunks = await self.create_document_chunks(
                 document.id,
                 processing_result['chunks']
             )
-            
-            # 3. Update document status to completed
+
+            # 3. Update chunks_count and status
+            document.chunks_count = len(chunks)
+            await self.db.commit()
             document = await self.update_document_status(document.id, "completed")
-            
+
             return document
-            
+
         except Exception as e:
-            # Enhanced cleanup for partial processing failures
             try:
-                # Update document status to failed if document was created
                 if document:
-                    await self.update_document_status(
-                        document.id, 
-                        "failed", 
-                        str(e)
-                    )
-                    
-                    # Clean up database records for failed processing
+                    await self.update_document_status(document.id, "failed", str(e))
                     await self.cleanup_failed_document_processing(document.id)
-                
-                # Clean up physical file if processing failed
-                if stored_filename:
-                    file_storage = get_file_storage_service()
-                    file_storage.cleanup_partial_processing(workspace_id, stored_filename)
-                    
+
+                # Delete R2 object if upload succeeded but embedding failed
+                if r2_url:
+                    try:
+                        from app.services.r2_storage import delete_r2_object
+                        delete_r2_object(r2_url)
+                    except Exception:
+                        pass
+
             except Exception as cleanup_error:
                 print(f"Warning: Cleanup failed after processing error: {cleanup_error}")
-            
+
             raise EmbeddingError(f"Document embedding processing failed: {str(e)}")
     
     async def cleanup_failed_document_processing(self, document_id: str) -> None:
@@ -317,56 +296,40 @@ class EmbeddingService:
         workspace_id: str
     ) -> bool:
         """
-        Delete document and all associated chunks with enhanced cleanup
-        
-        Args:
-            document_id: Document ID
-            workspace_id: Workspace ID for isolation
-        
+        Delete document and all associated chunks, then delete R2 object.
+
         Returns:
             True if deleted, False if not found
-        
-        Raises:
-            EmbeddingError: If deletion fails
         """
-        from app.services.file_storage import get_file_storage_service
-        
-        # Get document to verify ownership and get storage info
         document = await self.get_document_with_chunks(document_id, workspace_id)
         if not document:
             return False
-        
-        # Extract stored filename from file_path for file storage service
-        stored_filename = None
-        if hasattr(document, 'file_path') and document.file_path:
-            stored_filename = Path(document.file_path).name
-        
+
+        file_url = document.file_path if document.file_path else None
+
         try:
-            # Delete chunks first (due to foreign key constraint)
+            # Delete chunks first (foreign key constraint)
             await self.db.execute(
                 delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
             )
-            
+
             # Delete document record
             await self.db.execute(
                 delete(Document).where(Document.id == document_id)
             )
-            
+
             await self.db.commit()
-            
-            # Delete physical file using file storage service
-            if stored_filename:
+
+            # Delete R2 object best-effort (after DB commit succeeds)
+            if file_url:
                 try:
-                    file_storage = get_file_storage_service()
-                    file_deleted = file_storage.delete_file(workspace_id, stored_filename)
-                    if not file_deleted:
-                        print(f"Warning: File {stored_filename} was not found during deletion")
+                    from app.services.r2_storage import delete_r2_object
+                    delete_r2_object(file_url)
                 except Exception as e:
-                    print(f"Warning: Failed to delete physical file {stored_filename}: {e}")
-                    # Don't raise exception here - database cleanup was successful
-            
+                    print(f"Warning: Failed to delete R2 object {file_url}: {e}")
+
             return True
-            
+
         except Exception as e:
             await self.db.rollback()
             raise EmbeddingError(f"Failed to delete document: {str(e)}")
@@ -404,54 +367,52 @@ class EmbeddingService:
     
     async def reprocess_failed_document(self, document_id: str, workspace_id: str) -> Document:
         """
-        Reprocess a failed document
-        
-        Args:
-            document_id: Document ID
-            workspace_id: Workspace ID for isolation
-        
+        Reprocess a failed document by downloading from R2 and regenerating embeddings.
+
         Returns:
             Updated Document instance
-        
+
         Raises:
             EmbeddingError: If reprocessing fails
         """
+        import httpx
+
         document = await self.get_document_with_chunks(document_id, workspace_id)
         if not document:
             raise EmbeddingError("Document not found")
-        
+
         if document.status != "failed":
             raise EmbeddingError("Document is not in failed status")
-        
+
         try:
             # Delete existing chunks
             await self.db.execute(
                 delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
             )
-            
-            # Reprocess the file
+
+            # Download file bytes from R2
+            async with httpx.AsyncClient() as client:
+                resp = await client.get(document.file_path)
+                resp.raise_for_status()
+                file_content = resp.content
+
+            # Process document (re-extract + re-chunk, no new R2 upload)
             processor = DocumentProcessor()
-            
-            # Read file content
-            with open(document.storage_path, 'rb') as f:
-                file_content = f.read()
-            
-            # Process document
             processing_result = await processor.process_document(
                 workspace_id=workspace_id,
-                filename=document.filename,
-                file_content=file_content
+                filename=document.name,  # model field is 'name'
+                file_content=file_content,
             )
-            
+
             # Update document status to processing
             await self.update_document_status(document_id, "processing")
-            
+
             # Create new chunks
             await self.create_document_chunks(document_id, processing_result['chunks'])
-            
+
             # Update status to completed
             return await self.update_document_status(document_id, "completed")
-            
+
         except Exception as e:
             await self.update_document_status(document_id, "failed", str(e))
             raise EmbeddingError(f"Document reprocessing failed: {str(e)}")

@@ -9,17 +9,35 @@ Complete API reference for all REST endpoints, WebSocket connections, and webhoo
 3. [Document Management](#document-management)
 4. [Agent Management](#agent-management)
 5. [Conversation Management](#conversation-management)
-6. [Webhooks](#webhooks)
-7. [WebSocket](#websocket)
-8. [WebChat Public API](#webchat-public-api)
-9. [Platform Administration](#platform-administration)
-10. [Metrics & Monitoring](#metrics--monitoring)
+6. [Internal Notes](#internal-notes)
+7. [AI Response Feedback](#ai-response-feedback)
+8. [Canned Responses](#canned-responses)
+9. [Assignment Rules](#assignment-rules)
+10. [Workspace](#workspace)
+11. [Outbound Webhooks](#outbound-webhooks)
+12. [API Keys](#api-keys)
+13. [Billing](#billing)
+14. [Webhooks (Incoming)](#webhooks-incoming)
+15. [WebSocket](#websocket)
+16. [WebChat Public API](#webchat-public-api)
+17. [Platform Administration](#platform-administration)
+18. [Metrics & Monitoring](#metrics--monitoring)
+19. [Contact Management](#contact-management)
+20. [Outbound Webhook Delivery Logs](#outbound-webhook-delivery-logs)
+21. [CSAT Ratings](#csat-ratings)
+22. [Business Hours](#business-hours)
+23. [Conversation Search & Export](#conversation-search--export)
+24. [Flow Builder](#flow-builder)
+25. [WhatsApp Templates](#whatsapp-templates)
+26. [Broadcasts](#broadcasts)
 
 ---
 
 ## Authentication
 
 Base URL: `/api/auth`
+
+Handles user registration, login, and identity. JWT tokens returned here are used as `Bearer` tokens on all other authenticated endpoints. Agent login uses a separate flow with an invitation token.
 
 ### POST /register
 
@@ -168,11 +186,35 @@ Get current user information.
 }
 ```
 
+### POST /refresh
+
+Silently refresh a JWT token before it expires. Pass in a valid (non-expired) token and receive a new token with a fresh expiry. Frontend should call this proactively (~5 minutes before `exp`) to avoid mid-session logouts.
+
+**Request Body:**
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+**Response (200):**
+```json
+{
+  "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "token_type": "bearer"
+}
+```
+
+**Errors:**
+- 401: Invalid or expired token
+
 ---
 
 ## Channel Management
 
 Base URL: `/api/channels`
+
+Manages messaging channels (Telegram, WhatsApp, Instagram, WebChat) for the workspace. Each channel links the workspace to a specific platform integration. Tier limits apply to the total number of active channels.
 
 All endpoints require authentication via Bearer token.
 
@@ -405,11 +447,13 @@ Get channel statistics for the workspace.
 
 Base URL: `/api/documents`
 
+Upload and manage knowledge-base documents used by the AI for RAG (retrieval-augmented generation). Supported formats: PDF and TXT. Documents are extracted and chunked in-memory, then stored in Cloudflare R2. The `file_path` field in responses is the public R2 URL of the stored document. Tier limits apply to total document count.
+
 All endpoints require authentication via Bearer token.
 
 ### POST /upload
 
-Upload and process a document for the workspace.
+Upload and process a document for the workspace knowledge base.
 
 **Headers:**
 - `Authorization: Bearer <token>`
@@ -417,27 +461,28 @@ Upload and process a document for the workspace.
 
 **Form Data:**
 - `file`: Document file (PDF or TXT, max 10MB)
-- `name`: Optional custom document name
+- `name` *(optional)*: Custom display name for the document
 
 **Response (200):**
 ```json
 {
   "id": "uuid",
-  "name": "document.pdf",
-  "original_filename": "document.pdf",
-  "file_size": 1024000,
-  "content_type": "application/pdf",
-  "status": "processing",
+  "name": "my-policy.pdf",
+  "file_path": "https://media.yourdomain.com/documents/workspace-uuid/uuid.pdf",
+  "status": "completed",
+  "chunks_count": 24,
   "error_message": null,
-  "chunk_count": null,
-  "created_at": "2024-01-01T00:00:00Z",
-  "updated_at": "2024-01-01T00:00:00Z"
+  "created_at": "2024-01-01T00:00:00Z"
 }
 ```
 
+**Notes:**
+- Text extraction runs in-memory before upload — corrupt or empty files are rejected immediately with no R2 write.
+- `status` will be `"processing"` briefly while embeddings are generated, then `"completed"` or `"failed"`.
+
 **Errors:**
-- 400: No file provided / Only PDF and TXT files supported
-- 402: Tier limit exceeded
+- 400: No file provided / unsupported file type / text extraction failed
+- 402: Tier document limit exceeded
 - 413: File size exceeds 10MB limit
 
 ### GET /
@@ -448,8 +493,8 @@ List documents for the workspace.
 - `Authorization: Bearer <token>`
 
 **Query Parameters:**
-- `status_filter`: Filter by status (pending, processing, completed, failed)
-- `limit`: Maximum number of documents (default: 50, max: 100)
+- `status_filter`: Filter by status (`pending` | `processing` | `completed` | `failed`)
+- `limit`: Maximum number of documents (default: 50)
 - `offset`: Offset for pagination (default: 0)
 
 **Response (200):**
@@ -458,15 +503,12 @@ List documents for the workspace.
   "documents": [
     {
       "id": "uuid",
-      "name": "document.pdf",
-      "original_filename": "document.pdf",
-      "file_size": 1024000,
-      "content_type": "application/pdf",
+      "name": "my-policy.pdf",
+      "file_path": "https://media.yourdomain.com/documents/workspace-uuid/uuid.pdf",
       "status": "completed",
+      "chunks_count": 24,
       "error_message": null,
-      "chunk_count": 25,
-      "created_at": "2024-01-01T00:00:00Z",
-      "updated_at": "2024-01-01T00:00:00Z"
+      "created_at": "2024-01-01T00:00:00Z"
     }
   ],
   "total_count": 1,
@@ -489,15 +531,12 @@ Get document by ID.
 ```json
 {
   "id": "uuid",
-  "name": "document.pdf",
-  "original_filename": "document.pdf",
-  "file_size": 1024000,
-  "content_type": "application/pdf",
+  "name": "my-policy.pdf",
+  "file_path": "https://media.yourdomain.com/documents/workspace-uuid/uuid.pdf",
   "status": "completed",
+  "chunks_count": 24,
   "error_message": null,
-  "chunk_count": 25,
-  "created_at": "2024-01-01T00:00:00Z",
-  "updated_at": "2024-01-01T00:00:00Z"
+  "created_at": "2024-01-01T00:00:00Z"
 }
 ```
 
@@ -506,7 +545,7 @@ Get document by ID.
 
 ### DELETE /{document_id}
 
-Delete a document and its chunks.
+Delete a document, its chunks, and the corresponding R2 object.
 
 **Headers:**
 - `Authorization: Bearer <token>`
@@ -518,9 +557,12 @@ Delete a document and its chunks.
 }
 ```
 
+**Notes:**
+- DB records are deleted first; R2 deletion is best-effort (failure is logged but does not cause a 500).
+
 ### POST /{document_id}/reprocess
 
-Reprocess a failed document.
+Re-download the document from R2, re-extract text, and regenerate all embeddings. The R2 file URL is preserved (no re-upload). Can be triggered on `failed` or `completed` documents.
 
 **Headers:**
 - `Authorization: Bearer <token>`
@@ -533,7 +575,7 @@ Reprocess a failed document.
 ```
 
 **Errors:**
-- 400: Document can only be reprocessed if failed or completed
+- 400: Document can only be reprocessed if `failed` or `completed`
 - 404: Document not found
 
 ### GET /stats/summary
@@ -564,6 +606,8 @@ Get document statistics for the workspace.
 ## Agent Management
 
 Base URL: `/api/agents`
+
+Invite and manage human support agents for the workspace. Agents are invited by email and must accept the invitation before they can log in. Owners can activate, deactivate, or remove agents. Agents can update their own availability status.
 
 All endpoints require authentication via Bearer token.
 
@@ -761,7 +805,7 @@ Delete an agent (only for pending invitations).
 
 ### GET /stats
 
-Get agent statistics for the workspace.
+Get agent statistics for the workspace, including per-agent performance metrics.
 
 **Headers:**
 - `Authorization: Bearer <token>`
@@ -777,9 +821,34 @@ Get agent statistics for the workspace.
     "current_tier": "free",
     "agent_limit": 5,
     "agents_remaining": 0
-  }
+  },
+  "per_agent": [
+    {
+      "agent_id": "uuid",
+      "name": "Alice Support",
+      "email": "alice@example.com",
+      "status": "online",
+      "conversations_active": 3,
+      "conversations_resolved_30d": 42,
+      "avg_csat": 4.7
+    },
+    {
+      "agent_id": "uuid",
+      "name": "Bob Support",
+      "email": "bob@example.com",
+      "status": "offline",
+      "conversations_active": 0,
+      "conversations_resolved_30d": 18,
+      "avg_csat": null
+    }
+  ]
 }
 ```
+
+**Per-agent fields:**
+- `conversations_active`: Conversations currently in `escalated` or `agent` status assigned to this agent
+- `conversations_resolved_30d`: Conversations resolved in the last 30 days assigned to this agent
+- `avg_csat`: Average CSAT rating (1-5) from customers on conversations handled by this agent. `null` if no ratings yet.
 
 ### GET /invitation/{invitation_token}
 
@@ -799,11 +868,56 @@ Validate agent invitation token (public endpoint).
 **Errors:**
 - 404: Invalid or expired invitation token
 
+### PUT /me/status
+
+Set the current agent's availability status. Updates heartbeat timestamp — agents with no heartbeat for 5+ minutes are automatically set to `offline` by a background task.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "status": "online"
+}
+```
+
+- `status`: `online` | `offline` | `busy`
+
+**Response (200):**
+```json
+{
+  "status": "online",
+  "last_heartbeat_at": "2024-01-01T12:00:00Z"
+}
+```
+
+**Errors:**
+- 403: Only active agents can update status
+- 422: Invalid status value
+
+### GET /me/status
+
+Get the current agent's status and last heartbeat time.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Response (200):**
+```json
+{
+  "status": "online",
+  "last_heartbeat_at": "2024-01-01T12:00:00Z"
+}
+```
+
 ---
 
 ## Conversation Management
 
 Base URL: `/api/conversations`
+
+Core conversation lifecycle management. Conversations are created automatically when a customer first messages through any channel. Agents can claim escalated conversations, update status, send messages, and view full message history. Supports search, export, and paginated listing.
 
 All endpoints require authentication via Bearer token.
 
@@ -1025,111 +1139,793 @@ Get active conversations assigned to the current agent.
 
 ---
 
-## Webhooks
+## Internal Notes
 
-Base URL: `/webhooks`
+Base URL: `/api/conversations/{conversation_id}/notes`
 
-All webhook endpoints are public and do not require authentication. They use platform-specific signature verification.
+Internal notes are visible only to agents and workspace owners — never to customers.
 
-### POST /telegram/{bot_token}
+### POST /
 
-Telegram webhook endpoint.
-
-**Path Parameters:**
-- `bot_token`: Telegram bot token for channel identification
-
-**Request Body:** Telegram Update object (JSON)
-
-**Response (200):** `OK`
-
-### POST /whatsapp/{phone_number_id}
-
-WhatsApp webhook endpoint.
-
-**Path Parameters:**
-- `phone_number_id`: WhatsApp phone number ID for channel identification
-
-**Request Body:** WhatsApp webhook payload (JSON)
-
-**Response (200):** `OK`
-
-### GET /whatsapp/{phone_number_id}
-
-WhatsApp webhook verification endpoint.
-
-**Path Parameters:**
-- `phone_number_id`: WhatsApp phone number ID
-
-**Query Parameters:**
-- `hub.challenge`: Verification challenge from Meta
-- `hub.verify_token`: Verification token
-
-**Response (200):** Challenge string
-
-### POST /instagram/{page_id}
-
-Instagram webhook endpoint.
-
-**Path Parameters:**
-- `page_id`: Instagram page ID for channel identification
-
-**Request Body:** Instagram webhook payload (JSON)
-
-**Response (200):** `OK`
-
-### GET /instagram/{page_id}
-
-Instagram webhook verification endpoint.
-
-**Path Parameters:**
-- `page_id`: Instagram page ID
-
-**Query Parameters:**
-- `hub.challenge`: Verification challenge from Meta
-- `hub.verify_token`: Verification token
-
-**Response (200):** Challenge string
-
-### GET /health
-
-Webhook service health check.
-
-**Response (200):**
-```json
-{
-  "status": "healthy",
-  "service": "webhook_processor",
-  "supported_channels": ["telegram", "whatsapp", "instagram"],
-  "timestamp": "2024-01-01T00:00:00Z"
-}
-```
-
-### POST /test/{channel_type}
-
-Test webhook processing (requires authentication).
+Create an internal note on a conversation.
 
 **Headers:**
 - `Authorization: Bearer <token>`
 
 **Path Parameters:**
-- `channel_type`: Channel type to test (telegram, whatsapp, instagram)
+- `conversation_id`: Conversation UUID
 
-**Request Body:** Test payload data (JSON)
+**Request Body:**
+```json
+{
+  "content": "Customer seems frustrated about billing. Check account history before responding."
+}
+```
 
 **Response (200):**
 ```json
 {
-  "test_result": "success",
-  "channel_type": "telegram",
-  "processing_result": {}
+  "id": "uuid",
+  "conversation_id": "uuid",
+  "agent_id": "uuid",
+  "content": "Customer seems frustrated about billing. Check account history before responding.",
+  "created_at": "2024-01-01T12:00:00Z"
 }
 ```
+
+**Errors:**
+- 404: Conversation not found
+
+### GET /
+
+List all internal notes for a conversation.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Response (200):**
+```json
+[
+  {
+    "id": "uuid",
+    "conversation_id": "uuid",
+    "agent_id": "uuid",
+    "content": "Note text",
+    "created_at": "2024-01-01T12:00:00Z"
+  }
+]
+```
+
+---
+
+## AI Response Feedback
+
+Base URL: `/api/conversations/{conversation_id}/messages/{message_id}/feedback`
+
+Thumbs-up / thumbs-down rating system for AI-generated responses. One feedback entry per message.
+
+### POST /
+
+Submit feedback on an AI message.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Path Parameters:**
+- `conversation_id`: Conversation UUID
+- `message_id`: Message UUID
+
+**Request Body:**
+```json
+{
+  "rating": "negative",
+  "comment": "The AI gave incorrect pricing information."
+}
+```
+
+- `rating`: `positive` | `negative`
+- `comment`: Optional, max 1000 chars
+
+**Response (200):**
+```json
+{
+  "id": "uuid",
+  "message_id": "uuid",
+  "rating": "negative",
+  "comment": "The AI gave incorrect pricing information.",
+  "created_at": "2024-01-01T12:00:00Z"
+}
+```
+
+**Errors:**
+- 404: Conversation or message not found
+- 409: Feedback already submitted for this message
+
+### GET /
+
+Get feedback for a specific message. Returns `null` if none submitted.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Response (200):**
+```json
+{
+  "id": "uuid",
+  "message_id": "uuid",
+  "rating": "positive",
+  "comment": null,
+  "created_at": "2024-01-01T12:00:00Z"
+}
+```
+
+---
+
+## Canned Responses
+
+Base URL: `/api/canned-responses`
+
+Pre-written responses agents can quickly insert. Tier limits: Free=5, Starter=10, Growth=50, Pro=unlimited.
+
+All endpoints require authentication.
+
+### POST /
+
+Create a canned response. Owner only.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "name": "Greeting",
+  "shortcut": "/hi",
+  "content": "Hello! Thank you for reaching out. How can I assist you today?"
+}
+```
+
+- `shortcut`: Must be unique per workspace
+
+**Response (200):**
+```json
+{
+  "id": "uuid",
+  "workspace_id": "uuid",
+  "name": "Greeting",
+  "shortcut": "/hi",
+  "content": "Hello! Thank you for reaching out. How can I assist you today?",
+  "created_at": "2024-01-01T00:00:00Z"
+}
+```
+
+**Errors:**
+- 402: Canned response tier limit reached
+- 409: Shortcut already exists for this workspace
+
+### GET /
+
+List all canned responses. Accessible by agents and owners.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Response (200):**
+```json
+[
+  {
+    "id": "uuid",
+    "name": "Greeting",
+    "shortcut": "/hi",
+    "content": "Hello! Thank you for reaching out.",
+    "created_at": "2024-01-01T00:00:00Z"
+  }
+]
+```
+
+### PUT /{canned_response_id}
+
+Update a canned response. Owner only.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Request Body:** (all fields optional)
+```json
+{
+  "name": "Updated Greeting",
+  "shortcut": "/hello",
+  "content": "Hi there! Welcome. How may I help you?"
+}
+```
+
+**Response (200):**
+```json
+{
+  "id": "uuid",
+  "name": "Updated Greeting",
+  "shortcut": "/hello",
+  "content": "Hi there! Welcome. How may I help you?",
+  "created_at": "2024-01-01T00:00:00Z",
+  "updated_at": "2024-01-02T00:00:00Z"
+}
+```
+
+### DELETE /{canned_response_id}
+
+Delete a canned response. Owner only.
+
+**Response (200):**
+```json
+{
+  "status": "deleted"
+}
+```
+
+---
+
+## Assignment Rules
+
+Base URL: `/api/assignment-rules`
+
+Automatic conversation routing rules. **Pro tier only.**
+
+All endpoints require owner authentication.
+
+### POST /
+
+Create a routing rule.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "name": "Route billing queries to senior agent",
+  "priority": 10,
+  "conditions": {
+    "keywords": ["refund", "billing", "invoice"],
+    "channel_type": "whatsapp"
+  },
+  "action": "specific_agent",
+  "target_agent_id": "uuid",
+  "is_active": true
+}
+```
+
+- `action`: `round_robin` | `specific_agent` | `least_loaded`
+- `target_agent_id`: Required when `action` is `specific_agent`
+- `priority`: Lower number = higher priority; evaluated in ascending order
+
+**Response (200):**
+```json
+{
+  "id": "uuid",
+  "name": "Route billing queries to senior agent",
+  "priority": 10,
+  "conditions": {"keywords": ["refund", "billing", "invoice"], "channel_type": "whatsapp"},
+  "action": "specific_agent",
+  "target_agent_id": "uuid",
+  "is_active": true,
+  "created_at": "2024-01-01T00:00:00Z"
+}
+```
+
+**Errors:**
+- 403: Assignment rules require Pro tier
+
+### GET /
+
+List all assignment rules ordered by priority.
+
+**Response (200):**
+```json
+[
+  {
+    "id": "uuid",
+    "name": "Route billing queries to senior agent",
+    "priority": 10,
+    "action": "specific_agent",
+    "is_active": true
+  }
+]
+```
+
+### PUT /{rule_id}
+
+Update an assignment rule.
+
+**Request Body:** (all fields optional)
+```json
+{
+  "is_active": false,
+  "priority": 20
+}
+```
+
+### DELETE /{rule_id}
+
+Delete an assignment rule.
+
+**Response (200):**
+```json
+{
+  "status": "deleted"
+}
+```
+
+---
+
+## Workspace
+
+Base URL: `/api/workspace`
+
+Workspace-level settings, AI configuration, and dashboard overview.
+
+All endpoints require owner authentication.
+
+### GET /overview
+
+Get workspace dashboard statistics.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Response (200):**
+```json
+{
+  "workspace_id": "uuid",
+  "name": "My Business",
+  "tier": "growth",
+  "conversations_today": 12,
+  "messages_this_month": 430,
+  "tier_quota_remaining": 570,
+  "tier_quota_total": 1000
+}
+```
+
+### PUT /settings
+
+Update workspace settings. All fields optional.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "fallback_msg": "Sorry, I couldn't understand that. A human agent will assist you shortly.",
+  "alert_email": "alerts@mycompany.com",
+  "agents_enabled": true,
+  "escalation_keywords": ["refund", "angry", "cancel", "lawsuit"],
+  "escalation_sensitivity": "medium"
+}
+```
+
+- `escalation_keywords`: List of words/phrases that trigger escalation to a human agent when detected in a message. Defaults to a built-in list if not set.
+- `escalation_sensitivity`: Controls how aggressively the AI escalates. One of `"low"` | `"medium"` | `"high"`. Default: `"medium"`.
+
+**Response (200):**
+```json
+{
+  "status": "updated"
+}
+```
+
+### GET /ai-config
+
+Get current AI provider and model configuration.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Response (200):**
+```json
+{
+  "ai_provider": "groq",
+  "ai_model": "llama3-8b-8192",
+  "has_api_key": true
+}
+```
+
+### PUT /ai-config
+
+Set workspace AI provider/model override. **Growth+ tier only.**
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "ai_provider": "groq",
+  "ai_model": "llama3-8b-8192",
+  "ai_api_key": "gsk_your_groq_api_key"
+}
+```
+
+- `ai_provider`: `google` | `openai` | `groq`
+- `ai_model`: Optional provider-specific model name
+- `ai_api_key`: Optional API key stored server-side; never returned
+
+**Response (200):**
+```json
+{
+  "status": "updated",
+  "ai_provider": "groq",
+  "ai_model": "llama3-8b-8192"
+}
+```
+
+**Errors:**
+- 403: Custom AI model requires Growth or Pro tier
+
+---
+
+## Outbound Webhooks
+
+Base URL: `/api/webhooks/outbound`
+
+Register external HTTPS endpoints to receive ChatSaaS events. **Growth+ tier only.**
+
+Outbound requests include:
+- `X-ChatSaaS-Signature: sha256=<hmac-sha256>` — HMAC of the JSON body using the webhook secret
+- `X-Event-Type: <event>` — event name
+
+Webhooks are auto-disabled after 5 consecutive delivery failures.
+
+### POST /
+
+Register an outbound webhook.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "url": "https://your-server.com/chatsaas-events",
+  "events": ["message.received", "conversation.escalated", "conversation.resolved", "conversation.created"],
+  "secret": "my_hmac_secret"
+}
+```
+
+**Supported events:**
+- `message.received` — fired for every incoming customer message
+- `conversation.created` — fired when a new conversation is started
+- `conversation.escalated` — fired when a conversation is escalated to a human
+- `conversation.resolved` — fired when a conversation is marked resolved
+
+**Response (200):**
+```json
+{
+  "id": "uuid",
+  "url": "https://your-server.com/chatsaas-events",
+  "events": ["message.received", "conversation.escalated"],
+  "is_active": true,
+  "created_at": "2024-01-01T00:00:00Z"
+}
+```
+
+**Errors:**
+- 403: Outbound webhooks require Growth or Pro tier
+
+### GET /
+
+List all registered outbound webhooks.
+
+**Response (200):**
+```json
+[
+  {
+    "id": "uuid",
+    "url": "https://your-server.com/chatsaas-events",
+    "events": ["message.received"],
+    "is_active": true,
+    "failure_count": 0,
+    "last_triggered_at": "2024-01-01T12:00:00Z",
+    "created_at": "2024-01-01T00:00:00Z"
+  }
+]
+```
+
+### PUT /{webhook_id}
+
+Update a webhook registration.
+
+**Request Body:** (all fields optional)
+```json
+{
+  "is_active": false,
+  "url": "https://new-endpoint.com/events",
+  "events": ["conversation.resolved"]
+}
+```
+
+### DELETE /{webhook_id}
+
+Delete a webhook registration.
+
+**Response (200):**
+```json
+{
+  "status": "deleted"
+}
+```
+
+---
+
+## API Keys
+
+Base URL: `/api/api-keys`
+
+Long-lived API keys for programmatic access. **Growth+ tier only.**
+
+API keys use the prefix `csk_` and can be used as Bearer tokens on any authenticated endpoint. The raw key is returned **only once** on creation — it cannot be retrieved again.
+
+### POST /
+
+Create a new API key.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "name": "CI/CD Pipeline Key",
+  "scopes": ["conversations:read", "conversations:write"]
+}
+```
+
+**Response (200):**
+```json
+{
+  "id": "uuid",
+  "name": "CI/CD Pipeline Key",
+  "key": "csk_a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+  "prefix": "csk_a1b2c3d4",
+  "scopes": ["conversations:read", "conversations:write"],
+  "created_at": "2024-01-01T00:00:00Z"
+}
+```
+
+> **Note:** The `key` field is only present in the creation response. Store it securely — it cannot be retrieved again.
+
+**Errors:**
+- 403: API keys require Growth or Pro tier
+
+### GET /
+
+List all API keys. The raw key is never returned; only prefix and metadata.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Response (200):**
+```json
+[
+  {
+    "id": "uuid",
+    "name": "CI/CD Pipeline Key",
+    "prefix": "csk_a1b2c3d4",
+    "scopes": ["conversations:read"],
+    "last_used_at": "2024-01-01T12:00:00Z",
+    "created_at": "2024-01-01T00:00:00Z"
+  }
+]
+```
+
+### DELETE /{api_key_id}
+
+Revoke and delete an API key. Immediately invalidates all requests using this key.
+
+**Response (200):**
+```json
+{
+  "status": "deleted"
+}
+```
+
+---
+
+## Billing
+
+Base URL: `/api/billing`
+
+Stripe-powered subscription management. All endpoints require owner authentication.
+
+### GET /status
+
+Get current subscription and billing status.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Response (200):**
+```json
+{
+  "tier": "growth",
+  "stripe_customer_id": "cus_xxxx",
+  "stripe_subscription_id": "sub_xxxx",
+  "subscription_status": "active"
+}
+```
+
+### POST /checkout
+
+Create a Stripe checkout session to upgrade tier.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "tier": "growth",
+  "success_url": "https://yourdashboard.com/billing/success",
+  "cancel_url": "https://yourdashboard.com/billing"
+}
+```
+
+- `tier`: `starter` | `growth` | `pro`
+
+**Response (200):**
+```json
+{
+  "checkout_url": "https://checkout.stripe.com/pay/cs_xxxx"
+}
+```
+
+### POST /portal
+
+Create a Stripe customer portal session to manage subscription and invoices.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "return_url": "https://yourdashboard.com/billing"
+}
+```
+
+**Response (200):**
+```json
+{
+  "portal_url": "https://billing.stripe.com/session/xxxx"
+}
+```
+
+---
+
+## Webhooks (Incoming)
+
+Base URL: `/webhooks`
+
+All incoming webhook endpoints are public — they do not require authentication. They use platform-specific signature verification to authenticate the sender.
+
+All POST routes always return HTTP 200 (even on errors) to prevent the platform from retrying deliveries.
+
+### POST /telegram/{bot_token}
+
+Receive message updates from Telegram.
+
+**Path Parameters:**
+- `bot_token`: Telegram bot token (used to identify the channel)
+
+**Headers:**
+- `X-Telegram-Bot-Api-Secret-Token`: Secret token set when registering the webhook with Telegram
+
+**Request Body:** Telegram [Update](https://core.telegram.org/bots/api#update) object (JSON)
+
+**Response (200):** `{"status": "ok"}`
+
+### GET /whatsapp/{phone_number_id}
+
+Meta webhook verification challenge for WhatsApp.
+
+**Path Parameters:**
+- `phone_number_id`: WhatsApp phone number ID from Meta
+
+**Query Parameters:**
+- `hub.mode`: `subscribe`
+- `hub.challenge`: Challenge string from Meta
+- `hub.verify_token`: Token configured in Meta for Developers
+
+**Response (200):** The `hub.challenge` value (plain text)
+
+### POST /whatsapp/{phone_number_id}
+
+Receive message events from WhatsApp Business.
+
+**Path Parameters:**
+- `phone_number_id`: WhatsApp phone number ID from Meta
+
+**Headers:**
+- `X-Hub-Signature-256: sha256=<hmac>` — HMAC-SHA256 of the body using the app secret
+
+**Request Body:** WhatsApp webhook payload (JSON)
+
+**Response (200):** `{"status": "ok"}`
+
+### GET /instagram/{page_id}
+
+Meta webhook verification challenge for Instagram DMs.
+
+**Path Parameters:**
+- `page_id`: Instagram Page ID from Meta
+
+**Query Parameters:**
+- `hub.mode`: `subscribe`
+- `hub.challenge`: Challenge string from Meta
+- `hub.verify_token`: Token configured in Meta for Developers
+
+**Response (200):** The `hub.challenge` value (plain text)
+
+### POST /instagram/{page_id}
+
+Receive DM events from Instagram.
+
+**Path Parameters:**
+- `page_id`: Instagram Page ID from Meta
+
+**Headers:**
+- `X-Hub-Signature-256: sha256=<hmac>` — HMAC-SHA256 of the body using the app secret
+
+**Request Body:** Instagram webhook payload (JSON)
+
+**Response (200):** `{"status": "ok"}`
+
+### POST /stripe
+
+Receive billing events from Stripe.
+
+**Headers:**
+- `Stripe-Signature`: Stripe webhook signature for verification
+
+**Handled events:**
+- `customer.subscription.updated` — updates workspace tier
+- `customer.subscription.deleted` — downgrades workspace to `free`
+
+**Response (200):** `{"status": "ok"}`
+
+**Errors:**
+- 400: Invalid Stripe signature
+
+### POST /resend
+
+Receive email event webhooks from [Resend](https://resend.com). Used for tracking email delivery status (e.g., CSAT prompt emails).
+
+**Headers:**
+- `svix-id`: Svix message ID
+- `svix-timestamp`: Svix message timestamp
+- `svix-signature`: Svix HMAC signature (verified against `RESEND_WEBHOOK_SECRET` if configured)
+
+**Handled events:**
+- `email.sent` — Email accepted by Resend
+- `email.delivered` — Email delivered to recipient
+- `email.delivery_delayed` — Delivery delayed
+- `email.complained` — Marked as spam
+- `email.bounced` — Hard or soft bounce
+- `email.opened` — Recipient opened the email
+- `email.clicked` — Recipient clicked a link
+
+**Response (200):** `{"status": "ok"}`
+
+**Errors:**
+- 401: Missing or invalid Svix signature
 
 ---
 
 ## WebSocket
 
 WebSocket URL: `ws://your-domain/ws/{workspace_id}?token=<jwt_token>`
+
+Real-time bidirectional event channel for workspace agents and owners. Delivers live conversation updates, new messages, escalation alerts, and agent status changes without polling. Each workspace has a single shared room; all connected clients in that workspace receive broadcasts. Authentication uses the same JWT token as REST endpoints, passed as a query parameter.
+
 
 ### Connection
 
@@ -1330,8 +2126,7 @@ Broadcast message to all connections in a workspace (requires authentication).
 
 Base URL: `/api/webchat`
 
-Public endpoints for website chat widget functionality. No authentication required.
-
+Public endpoints consumed by the embeddable website chat widget. No authentication required — requests are identified by workspace slug or session token. Handles widget configuration, message sending, file uploads, message history retrieval, and CSAT rating submission.
 
 ### GET /config/{workspace_slug}
 
@@ -1356,17 +2151,51 @@ Get WebChat widget configuration by workspace slug.
 
 ### POST /send
 
-Send a message through WebChat widget.
+Send a text or media message through the WebChat widget. Either `message` or `media_url` must be provided. For media messages, first upload the file via `POST /upload` to get the URL, then pass it here.
 
-**Request Body:**
+**Request Body (text message):**
 ```json
 {
   "widget_id": "widget-uuid",
   "session_token": "optional-session-token",
   "message": "Hello, I need help",
-  "contact_name": "John Doe"
+  "contact_name": "John Doe",
+  "contact_email": "john@example.com",
+  "contact_phone": "+919847000000",
+  "external_id": "usr_123",
+  "metadata": {
+    "plan": "premium",
+    "total_orders": 12,
+    "city": "Thrissur"
+  }
 }
 ```
+
+**Request Body (media message — after uploading via /upload):**
+```json
+{
+  "widget_id": "widget-uuid",
+  "session_token": "session-token-string",
+  "media_url": "https://media.yourdomain.com/media/workspace-uuid/uuid.jpg",
+  "media_mime_type": "image/jpeg",
+  "media_filename": "screenshot.jpg",
+  "media_size": 204800,
+  "message_type": "image"
+}
+```
+
+**Fields:**
+- `widget_id` *(required)*: Widget ID from `GET /config/{workspace_slug}`
+- `session_token` *(optional)*: Omit on first message — returned in response and must be passed on all subsequent messages
+- `message` *(optional)*: Text message (1–2000 chars). Required if `media_url` is not provided.
+- `media_url` *(optional)*: R2 URL from `POST /upload`. Required if `message` is not provided.
+- `media_mime_type` *(optional)*: MIME type of the uploaded file
+- `media_filename` *(optional)*: Original filename
+- `media_size` *(optional)*: File size in bytes
+- `message_type` *(optional)*: `text` | `image` | `video` | `audio` | `document`
+- `contact_name`, `contact_email`, `contact_phone` *(optional)*: Visitor identity
+- `external_id` *(optional)*: Your internal customer ID — use for logged-in users to maintain stable identity
+- `metadata` *(optional)*: Arbitrary key-value context visible to agents
 
 **Response (200):**
 ```json
@@ -1391,12 +2220,50 @@ Send a message through WebChat widget.
 ```
 
 **Errors:**
+- 400: Neither `message` nor `media_url` provided
 - 404: Widget not found or inactive
-- 429: Rate limit exceeded
+- 429: Rate limit exceeded (shared with `/upload`)
+
+### POST /upload
+
+Upload a file attachment from the widget and store it in Cloudflare R2. Returns the R2 URL to pass to `POST /send`. An active session (prior text message) is required.
+
+**Headers:**
+- `Content-Type: multipart/form-data`
+
+**Form Data:**
+- `widget_id` *(required)*: Widget ID
+- `session_token` *(required)*: Active session token
+- `file` *(required)*: File to upload
+
+**Supported file types:**
+| Type | MIME types | Max size |
+|---|---|---|
+| Image | `image/jpeg`, `image/png`, `image/webp` | 5 MB |
+| Video | `video/mp4` | 16 MB |
+| Audio | `audio/mpeg`, `audio/ogg`, `audio/aac` | 16 MB |
+| Document | `application/pdf` | 100 MB |
+
+**Response (200):**
+```json
+{
+  "url": "https://media.yourdomain.com/media/workspace-uuid/uuid.jpg",
+  "mime_type": "image/jpeg",
+  "size": 204800,
+  "filename": "screenshot.jpg",
+  "message_type": "image"
+}
+```
+
+**Errors:**
+- 401: No active session — send a text message first to start a conversation
+- 404: Widget not found or inactive
+- 422: Unsupported file type or file too large
+- 429: Rate limit exceeded (shared with `/send`)
 
 ### GET /messages
 
-Get messages for a WebChat session.
+Get messages for a WebChat session. Media messages include `media_url` and `msg_type` fields.
 
 **Query Parameters:**
 - `widget_id`: Widget ID (required)
@@ -1412,13 +2279,34 @@ Get messages for a WebChat session.
       "id": "uuid",
       "content": "Hello, I need help",
       "sender_type": "user",
-      "timestamp": "2024-01-01T00:00:00Z"
+      "timestamp": "2024-01-01T00:00:00Z",
+      "msg_type": "text",
+      "media_url": null,
+      "media_mime_type": null,
+      "media_filename": null,
+      "media_size": null
+    },
+    {
+      "id": "uuid",
+      "content": null,
+      "sender_type": "user",
+      "timestamp": "2024-01-01T00:00:05Z",
+      "msg_type": "image",
+      "media_url": "https://media.yourdomain.com/media/workspace-uuid/uuid.jpg",
+      "media_mime_type": "image/jpeg",
+      "media_filename": "screenshot.jpg",
+      "media_size": 204800
     },
     {
       "id": "uuid",
       "content": "How can I help you?",
       "sender_type": "assistant",
-      "timestamp": "2024-01-01T00:00:01Z"
+      "timestamp": "2024-01-01T00:00:06Z",
+      "msg_type": "text",
+      "media_url": null,
+      "media_mime_type": null,
+      "media_filename": null,
+      "media_size": null
     }
   ],
   "has_more": false,
@@ -1434,6 +2322,8 @@ Get messages for a WebChat session.
 ## Platform Administration
 
 Base URL: `/api/admin`
+
+Super-admin endpoints for managing the entire platform across all workspaces. Allows listing users and workspaces, suspending accounts, changing subscription tiers, and viewing platform-wide analytics and AI feedback statistics. Requires a super admin account — regular workspace owners cannot access these endpoints.
 
 All endpoints require super admin authentication.
 
@@ -1691,11 +2581,47 @@ Get analytics dashboard with message volume, signup trends, and escalation stati
 }
 ```
 
+### GET /feedback/stats
+
+Aggregate AI response feedback (thumbs-up/down) counts across all workspaces. Can be filtered to a single workspace.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Query Parameters:**
+- `workspace_id`: (optional) Filter results to a specific workspace UUID
+
+**Response (200):**
+```json
+{
+  "feedback_stats": [
+    {
+      "workspace_id": "uuid",
+      "positive": 142,
+      "negative": 23,
+      "total": 165
+    },
+    {
+      "workspace_id": "uuid",
+      "positive": 88,
+      "negative": 12,
+      "total": 100
+    }
+  ]
+}
+```
+
+**Errors:**
+- 403: Super admin access required
+
 ---
 
 ## Metrics & Monitoring
 
 Base URL: `/api/metrics`
+
+Operational health and performance metrics for the platform. Includes a public Prometheus scrape endpoint, detailed health checks, per-workspace stats, system-wide counters, alert thresholds, and a CSAT summary. Used by monitoring tools (Grafana, Prometheus) and the admin dashboard.
+
 
 ### GET /health/detailed
 
@@ -2081,6 +3007,928 @@ All resource IDs are UUIDs in string format:
 
 ---
 
+## Contact Management
+
+Base URL: `/api/contacts`
+
+**Auth:** `Authorization: Bearer <token>` (workspace owner or agent)
+
+Provides full CRUD for customer contacts, including search, tagging, blocking, and GDPR-compliant deletion. `custom_fields` requires Growth+ tier.
+
+### GET /
+
+List contacts with optional search and filters.
+
+**Query Parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `q` | string | ILIKE search across name, email, phone |
+| `tag` | string | Filter contacts that have this tag |
+| `is_blocked` | boolean | Filter by blocked status |
+| `limit` | int | Max results (1–100, default 50) |
+| `offset` | int | Pagination offset |
+
+**Response (200):**
+```json
+{
+  "contacts": [
+    {
+      "id": "uuid",
+      "external_id": "platform-specific-id",
+      "name": "Jane Doe",
+      "email": "jane@example.com",
+      "phone": "+1234567890",
+      "tags": ["vip", "billing"],
+      "custom_fields": {"crm_id": "SF-001"},
+      "source": "whatsapp",
+      "is_blocked": false,
+      "created_at": "2024-01-01T00:00:00Z"
+    }
+  ],
+  "total_count": 42,
+  "has_more": false
+}
+```
+
+### GET /{contact_id}
+
+Get contact detail with last 10 conversations.
+
+**Response (200):**
+```json
+{
+  "id": "uuid",
+  "name": "Jane Doe",
+  "email": "jane@example.com",
+  "phone": "+1234567890",
+  "tags": ["vip"],
+  "custom_fields": {},
+  "source": "telegram",
+  "is_blocked": false,
+  "created_at": "2024-01-01T00:00:00Z",
+  "recent_conversations": [
+    {
+      "id": "uuid",
+      "status": "resolved",
+      "channel_type": "telegram",
+      "created_at": "2024-01-01T00:00:00Z",
+      "updated_at": "2024-01-01T01:00:00Z"
+    }
+  ]
+}
+```
+
+### PATCH /{contact_id}
+
+Update contact fields. `custom_fields` requires Growth+ tier.
+
+**Request Body (all fields optional):**
+```json
+{
+  "name": "Jane Smith",
+  "email": "jane.smith@example.com",
+  "phone": "+1987654321",
+  "tags": ["vip", "priority"],
+  "custom_fields": {"crm_id": "SF-002", "segment": "enterprise"}
+}
+```
+
+**Response (200):** Updated contact object.
+
+**Errors:**
+- 403: `custom_fields` update attempted on free/starter tier
+
+### POST /{contact_id}/block
+
+Block a contact. Blocked contacts receive an auto-reply and are not processed through the AI pipeline. No usage is counted.
+
+**Response (200):**
+```json
+{"message": "Contact blocked", "contact_id": "uuid"}
+```
+
+### POST /{contact_id}/unblock
+
+Unblock a previously blocked contact.
+
+**Response (200):**
+```json
+{"message": "Contact unblocked", "contact_id": "uuid"}
+```
+
+### DELETE /{contact_id}
+
+Permanently delete a contact and all their data (conversations, messages). Use for GDPR compliance.
+
+**Response (204):** No content.
+
+**Outbound Webhook Event:** `contact.updated` is fired after a successful PATCH.
+
+---
+
+## Outbound Webhook Delivery Logs
+
+Base URL: `/api/webhooks/outbound/{webhook_id}/logs`
+
+**Auth:** `Authorization: Bearer <token>` | **Tier:** Growth+
+
+Every delivery attempt to a registered outbound webhook URL is logged for 30 days. Use these logs to debug integration issues.
+
+### GET /{webhook_id}/logs
+
+List delivery logs for a webhook (last 30 days, newest first).
+
+**Query Parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `success` | boolean | Filter by `true` (delivered) or `false` (failed) |
+| `limit` | int | Max results (1–200, default 50) |
+| `offset` | int | Pagination offset |
+
+**Response (200):**
+```json
+{
+  "logs": [
+    {
+      "id": "uuid",
+      "event_type": "conversation.resolved",
+      "payload": {"workspace_id": "uuid", "conversation_id": "uuid"},
+      "response_status_code": 200,
+      "response_body": "OK",
+      "duration_ms": 143,
+      "is_success": true,
+      "delivered_at": "2024-01-01T12:00:00Z"
+    }
+  ],
+  "total_count": 5,
+  "has_more": false
+}
+```
+
+### GET /{webhook_id}/logs/{log_id}
+
+Get a single delivery log entry (includes full payload and response body).
+
+**Response (200):** Single log object (same schema as above).
+
+**Notes:**
+- `response_status_code` is `null` on network-level failures (DNS error, timeout, connection refused)
+- `response_body` is truncated to 2000 characters
+- A webhook is automatically disabled after 5 consecutive failures (`is_active` → `false`)
+
+**Supported outbound event types:**
+
+| Event | Fired when |
+|---|---|
+| `conversation.created` | New conversation starts |
+| `conversation.escalated` | Conversation escalated to human |
+| `conversation.resolved` | Conversation marked resolved |
+| `message.received` | Customer message arrives |
+| `contact.updated` | Contact fields updated via API |
+| `csat.submitted` | Customer submits a CSAT rating |
+
+---
+
+## CSAT Ratings
+
+Customer satisfaction ratings collected after conversations are resolved.
+
+### Public Endpoints (no auth required)
+
+#### GET /api/webchat/csat/{token}
+
+Validate a CSAT token before showing the rating form.
+
+**Response (200):**
+```json
+{
+  "valid": true,
+  "conversation_id": "uuid",
+  "workspace_id": "uuid"
+}
+```
+
+Returns `{"valid": false}` if the token is expired (72h TTL) or invalid.
+
+#### POST /api/webchat/csat
+
+Submit a CSAT rating for a resolved conversation.
+
+**Request Body:**
+```json
+{
+  "token": "<csat-jwt-token>",
+  "rating": 5,
+  "comment": "Very helpful, resolved my issue quickly!"
+}
+```
+
+| Field | Type | Required | Notes |
+|---|---|---|---|
+| `token` | string | Yes | JWT token from `csat_prompt` WebSocket event |
+| `rating` | int | Yes | 1 (worst) – 5 (best) |
+| `comment` | string | No | Max 1000 chars |
+
+**Response (200):**
+```json
+{"success": true, "message": "Thank you for your feedback!"}
+```
+
+**Errors:**
+- 400: Invalid or expired token
+- 400: Conversation not in `resolved` status
+- 409: Rating already submitted for this conversation
+
+### Authenticated Endpoints
+
+#### GET /api/conversations/{conversation_id}/csat
+
+**Auth:** `Authorization: Bearer <token>`
+
+Get the CSAT rating for a conversation, if one has been submitted.
+
+**Response (200):**
+```json
+{
+  "id": "uuid",
+  "conversation_id": "uuid",
+  "rating": 4,
+  "comment": "Good support",
+  "submitted_at": "2024-01-01T13:00:00Z"
+}
+```
+
+Returns `null` if no rating has been submitted yet.
+
+#### GET /api/metrics/csat
+
+**Auth:** `Authorization: Bearer <token>`
+
+Workspace CSAT summary. Date-range trend data requires Growth+ tier.
+
+**Query Parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `date_from` | date | Filter start date (YYYY-MM-DD) |
+| `date_to` | date | Filter end date (YYYY-MM-DD) |
+
+**Response (200):**
+```json
+{
+  "total_ratings": 38,
+  "average_rating": 4.21,
+  "response_rate": 0.76,
+  "total_resolved_conversations": 50,
+  "trend": [
+    {"date": "2024-01-01", "count": 5, "avg_rating": 4.4},
+    {"date": "2024-01-02", "count": 8, "avg_rating": 4.1}
+  ]
+}
+```
+
+`trend` is only included when `date_from`/`date_to` are provided and the workspace is on Growth+ tier.
+
+**How CSAT works:**
+1. A conversation is marked `resolved` (via `POST /api/conversations/status`)
+2. If the channel is `webchat`, a `csat_prompt` WebSocket event is sent to the customer's session containing a signed JWT token
+3. The customer submits a rating via `POST /api/webchat/csat`
+4. A `csat.submitted` outbound webhook event fires
+
+---
+
+## Business Hours
+
+Base URL: `/api/workspace/business-hours`
+
+**Auth:** `Authorization: Bearer <token>` (workspace owner)
+
+Configure operating hours so customers receive an auto-reply when messaging outside those hours.
+
+### GET /
+
+Get the configured schedule for all 7 days.
+
+**Response (200):**
+```json
+[
+  {
+    "day_of_week": 0,
+    "is_closed": false,
+    "open_time": "09:00",
+    "close_time": "17:00",
+    "timezone": "America/New_York"
+  },
+  {
+    "day_of_week": 6,
+    "is_closed": true,
+    "open_time": null,
+    "close_time": null,
+    "timezone": "America/New_York"
+  }
+]
+```
+
+`day_of_week`: 0 = Monday … 6 = Sunday
+
+Returns an empty array if no hours have been configured (workspace is treated as always open).
+
+### PUT /
+
+Set operating hours. Pass 1–7 day configs (you don't need to include all 7 at once; unconfigured days are treated as open).
+
+**Request Body:**
+```json
+[
+  {
+    "day_of_week": 0,
+    "is_closed": false,
+    "open_time": "09:00",
+    "close_time": "18:00",
+    "timezone": "Europe/London"
+  },
+  {
+    "day_of_week": 5,
+    "is_closed": true,
+    "open_time": null,
+    "close_time": null,
+    "timezone": "Europe/London"
+  },
+  {
+    "day_of_week": 6,
+    "is_closed": true,
+    "open_time": null,
+    "close_time": null,
+    "timezone": "Europe/London"
+  }
+]
+```
+
+`timezone` must be a valid IANA timezone name (e.g. `"UTC"`, `"America/New_York"`, `"Asia/Kolkata"`).
+
+**Response (200):** Updated list of configured days (same schema as GET).
+
+**Errors:**
+- 400: Duplicate `day_of_week` values in request
+- 400: Invalid time format (expected `HH:MM`)
+- 400: More than 7 entries
+
+### PUT /outside-hours-settings
+
+Configure the auto-reply message and behavior when a message arrives outside hours.
+
+**Request Body (all fields optional):**
+```json
+{
+  "outside_hours_message": "We're closed right now. Our hours are Mon–Fri 9am–6pm EST. We'll respond on the next business day.",
+  "outside_hours_behavior": "inform_and_pause"
+}
+```
+
+| `outside_hours_behavior` | Effect |
+|---|---|
+| `inform_and_continue` | Sends the outside-hours message, then the AI also responds. Default. |
+| `inform_and_pause` | Sends the outside-hours message only; conversation is set to `paused` status and no AI response is generated. |
+
+**Response (200):**
+```json
+{
+  "outside_hours_message": "We're closed right now...",
+  "outside_hours_behavior": "inform_and_pause"
+}
+```
+
+**How business hours work:**
+- When a message arrives, the pipeline checks the current time against the workspace schedule (using the configured IANA timezone).
+- If no hours are configured, all messages are processed normally (always open).
+- The `paused` conversation status means no AI will respond until an agent or the workspace owner manually changes the status back to `active`.
+
+---
+
+## Conversation Search & Export
+
+Base URL: `/api/conversations`
+
+**Auth:** `Authorization: Bearer <token>`
+
+Full-text search across message content using PostgreSQL `tsvector`, with filters for status, channel, date range, and assigned agent. Export returns a CSV download of matching conversations for reporting or compliance purposes.
+
+
+### GET /search
+
+Full-text search across conversation message content with optional filters.
+
+**Query Parameters:**
+
+| Param | Type | Description |
+|---|---|---|
+| `q` | string | Full-text search across message content (PostgreSQL `tsvector`) |
+| `contact_name` | string | Filter by contact name (partial match) |
+| `channel_type` | string | Filter by channel: `telegram`, `whatsapp`, `instagram`, `webchat` |
+| `status` | string | Filter by status: `ai`, `escalated`, `agent`, `resolved`, `paused` |
+| `date_from` | date | Filter conversations created on or after (YYYY-MM-DD) |
+| `date_to` | date | Filter conversations created on or before (YYYY-MM-DD) |
+| `assigned_agent_id` | string | Filter by assigned agent UUID |
+| `limit` | int | Max results (1–100, default 50) |
+| `offset` | int | Pagination offset |
+
+**Response (200):**
+```json
+{
+  "results": [
+    {
+      "id": "uuid",
+      "status": "resolved",
+      "channel_type": "whatsapp",
+      "contact_name": "Jane Doe",
+      "created_at": "2024-01-01T10:00:00Z",
+      "updated_at": "2024-01-01T11:30:00Z",
+      "message_snippet": "...I need help with my <b>billing</b> invoice from last month..."
+    }
+  ],
+  "total_count": 3,
+  "has_more": false
+}
+```
+
+`message_snippet` contains a highlighted excerpt showing where the search query matched (HTML `<b>` tags from PostgreSQL `ts_headline`). `null` when `q` is not provided.
+
+### GET /export
+
+**Tier:** Growth+
+
+Export conversations as a streamed CSV file. Accepts the same filters as `/search`.
+
+**Query Parameters:** Same as `/search` (plus all filters above).
+
+**Response:** `text/csv` stream with `Content-Disposition: attachment; filename=conversations.csv`
+
+**CSV columns:**
+
+| Column | Description |
+|---|---|
+| `conversation_id` | Conversation UUID |
+| `contact_name` | Customer display name |
+| `channel_type` | Channel the conversation came from |
+| `status` | Current conversation status |
+| `created_at` | ISO 8601 timestamp |
+| `resolved_at` | ISO 8601 timestamp (empty if not resolved) |
+| `message_count` | Total messages in conversation |
+| `escalated` | `yes` if conversation was escalated, else `no` |
+| `assigned_agent_name` | Agent name if assigned |
+| `csat_rating` | Rating 1–5 if customer submitted CSAT (empty otherwise) |
+
+**Errors:**
+- 403: Export requires Growth or Pro tier
+
+---
+
+---
+
+## Flow Builder
+
+Base URL: `/api/flows`
+
+Interactive message flow automation for WhatsApp. Flows are multi-step sequences triggered by keywords or manually. When a conversation enters a flow, all incoming messages are handled by the flow engine instead of the AI — until the flow completes or hands off.
+
+**Flow step types:** `buttons`, `list`, `free_text`, `condition`, `handoff`, `end`
+
+All endpoints require `Authorization: Bearer <token>`.
+
+---
+
+### POST /api/flows
+
+Create a new flow.
+
+**Request Body:**
+```json
+{
+  "name": "Appointment Booking",
+  "trigger_type": "keyword",
+  "trigger_keywords": ["book", "appointment", "schedule"],
+  "is_active": true,
+  "steps": {
+    "start": "ask_service",
+    "steps": [
+      {
+        "id": "ask_service",
+        "type": "buttons",
+        "text": "What would you like to book?",
+        "buttons": [
+          { "id": "haircut", "title": "Haircut" },
+          { "id": "massage", "title": "Massage" }
+        ],
+        "transitions": {
+          "haircut": "ask_time",
+          "massage": "ask_time"
+        }
+      },
+      {
+        "id": "ask_time",
+        "type": "free_text",
+        "text": "What date and time works for you?",
+        "saves_as": "preferred_time",
+        "next": "confirm"
+      },
+      {
+        "id": "confirm",
+        "type": "free_text",
+        "text": "Got it! We'll confirm your booking shortly.",
+        "next": "end"
+      }
+    ]
+  }
+}
+```
+
+**Response (201):**
+```json
+{
+  "id": "uuid",
+  "workspace_id": "uuid",
+  "name": "Appointment Booking",
+  "trigger_type": "keyword",
+  "trigger_keywords": ["book", "appointment", "schedule"],
+  "is_active": true,
+  "steps": { ... },
+  "created_at": "2026-03-23T00:00:00Z",
+  "updated_at": "2026-03-23T00:00:00Z"
+}
+```
+
+---
+
+### GET /api/flows
+
+List all flows for the workspace, ordered by creation date descending.
+
+**Response (200):** Array of flow objects.
+
+---
+
+### GET /api/flows/{flow_id}
+
+Get a single flow including all steps.
+
+**Errors:**
+- 404: Flow not found
+
+---
+
+### PUT /api/flows/{flow_id}
+
+Update a flow. All fields are optional.
+
+**Request Body:**
+```json
+{
+  "name": "Updated Name",
+  "is_active": false,
+  "trigger_keywords": ["hi", "hello"],
+  "steps": { ... }
+}
+```
+
+**Errors:**
+- 404: Flow not found
+
+---
+
+### DELETE /api/flows/{flow_id}
+
+Delete a flow permanently.
+
+**Response (204):** No content.
+
+**Errors:**
+- 404: Flow not found
+
+---
+
+### POST /api/flows/{flow_id}/duplicate
+
+Clone a flow. The copy starts as inactive with the name `"<original> (copy)"`.
+
+**Response (201):** New flow object.
+
+---
+
+### GET /api/flows/{flow_id}/stats
+
+Completion and drop-off statistics for a flow.
+
+**Response (200):**
+```json
+{
+  "flow_id": "uuid",
+  "total_started": 142,
+  "completed": 98,
+  "abandoned": 12,
+  "completion_rate": 69.0
+}
+```
+
+---
+
+## WhatsApp Templates
+
+Base URL: `/api/templates`
+
+Manage WhatsApp message templates. Templates must be submitted to and approved by Meta before they can be used in broadcasts or re-engagement messages. Only `draft` and `rejected` templates can be edited or submitted.
+
+**Template statuses:** `draft` → `pending` (after submit) → `approved` or `rejected`
+
+All endpoints require `Authorization: Bearer <token>`.
+
+---
+
+### POST /api/templates
+
+Create a new template (starts in `draft` status).
+
+**Request Body:**
+```json
+{
+  "name": "order_confirmation",
+  "category": "UTILITY",
+  "language": "en",
+  "header_type": "text",
+  "header_content": "Order Confirmed",
+  "body": "Hi {{1}}, your order #{{2}} has been confirmed. Expected delivery: {{3}}.",
+  "footer": "Reply STOP to opt out",
+  "buttons": null
+}
+```
+
+**Fields:**
+| Field | Required | Description |
+|---|---|---|
+| `name` | Yes | Lowercase underscore only (e.g. `order_confirmation`) |
+| `category` | Yes | `MARKETING`, `UTILITY`, or `AUTHENTICATION` |
+| `language` | Yes | Language code: `en`, `hi`, `ml`, `ta`, etc. |
+| `header_type` | No | `none`, `text`, `image`, `video`, `document` |
+| `header_content` | No | Text content if `header_type` is `text` |
+| `body` | Yes | Template body. Use `{{1}}`, `{{2}}` for variables |
+| `footer` | No | Footer text |
+| `buttons` | No | Array of button objects |
+
+**Response (201):** Template object.
+
+---
+
+### GET /api/templates
+
+List all templates for the workspace.
+
+**Response (200):** Array of template objects.
+
+---
+
+### GET /api/templates/{template_id}
+
+Get a single template.
+
+**Errors:**
+- 404: Template not found
+
+---
+
+### PUT /api/templates/{template_id}
+
+Update a template. Only allowed when status is `draft` or `rejected`. Resets status to `draft`.
+
+**Errors:**
+- 400: Template is not in an editable state
+- 404: Template not found
+
+---
+
+### DELETE /api/templates/{template_id}
+
+Delete a template.
+
+**Response (204):** No content.
+
+---
+
+### POST /api/templates/{template_id}/submit
+
+Submit the template to Meta for approval. Requires `waba_id` to be configured on the WhatsApp channel.
+
+Updates status to `pending` and stores the Meta template ID. Status syncs automatically every hour via background task.
+
+**Response (200):**
+```json
+{
+  "status": "pending",
+  "meta_template_id": "1234567890"
+}
+```
+
+**Errors:**
+- 400: Template is not in `draft` or `rejected` state
+- 400 (from service): WhatsApp channel missing `access_token` or `waba_id`
+
+---
+
+### GET /api/templates/{template_id}/preview
+
+Preview a template's rendered structure without sending it.
+
+**Response (200):**
+```json
+{
+  "name": "order_confirmation",
+  "language": "en",
+  "header": { "type": "text", "content": "Order Confirmed" },
+  "body": "Hi {{1}}, your order #{{2}} has been confirmed.",
+  "footer": "Reply STOP to opt out",
+  "buttons": null
+}
+```
+
+---
+
+## Broadcasts
+
+Base URL: `/api/broadcasts`
+
+Send a WhatsApp template message to a filtered audience. Broadcasts are queued via Redis and processed by the arq worker at ~80 messages/second (WhatsApp Cloud API rate limit).
+
+**Broadcast statuses:** `draft` → `queued` or `scheduled` → `sending` → `sent`
+
+**Audience types:**
+- `all` — every opted-in contact with a phone number
+- `tag` — contacts whose tags overlap the filter
+- `manual` — specific contact IDs
+
+All endpoints require `Authorization: Bearer <token>`.
+
+---
+
+### POST /api/broadcasts
+
+Create a new broadcast in `draft` status.
+
+**Request Body:**
+```json
+{
+  "name": "March Sale",
+  "template_id": "uuid",
+  "variable_mapping": {
+    "{{1}}": "contact.name",
+    "{{2}}": "static:40% off"
+  },
+  "audience_type": "tag",
+  "audience_filter": { "tags": ["vip", "repeat"] },
+  "scheduled_at": null
+}
+```
+
+**Variable mapping sources:**
+| Source | Resolves to |
+|---|---|
+| `contact.name` | Contact's display name |
+| `contact.phone` | Contact's phone number |
+| `contact.email` | Contact's email address |
+| `static:<value>` | Literal string value |
+
+**Response (201):** Broadcast object.
+
+---
+
+### GET /api/broadcasts
+
+List all broadcasts for the workspace, ordered by creation date descending.
+
+**Response (200):** Array of broadcast objects.
+
+---
+
+### GET /api/broadcasts/{broadcast_id}
+
+Get a single broadcast.
+
+**Errors:**
+- 404: Broadcast not found
+
+---
+
+### PUT /api/broadcasts/{broadcast_id}
+
+Update a broadcast. Only allowed when status is `draft`.
+
+**Errors:**
+- 400: Broadcast is not in draft state
+
+---
+
+### POST /api/broadcasts/{broadcast_id}/send
+
+Enqueue the broadcast for sending. If `scheduled_at` is set, it will send at that time; otherwise it sends immediately.
+
+**Response (200):**
+```json
+{ "status": "queued" }
+```
+or
+```json
+{ "status": "scheduled" }
+```
+
+**Errors:**
+- 400: Broadcast is not in draft state
+
+---
+
+### POST /api/broadcasts/{broadcast_id}/cancel
+
+Cancel a broadcast before it completes.
+
+**Response (200):**
+```json
+{ "status": "cancelled" }
+```
+
+**Errors:**
+- 400: Cannot cancel a broadcast that is already `sent` or `cancelled`
+
+---
+
+### GET /api/broadcasts/{broadcast_id}/stats
+
+Delivery statistics for a broadcast.
+
+**Response (200):**
+```json
+{
+  "broadcast_id": "uuid",
+  "status": "sent",
+  "total": 1500,
+  "sent": 1498,
+  "delivered": 1350,
+  "read": 890,
+  "failed": 2,
+  "delivery_rate": 90.1,
+  "read_rate": 59.4
+}
+```
+
+---
+
+### GET /api/broadcasts/{broadcast_id}/recipients
+
+Paginated list of per-contact delivery records.
+
+**Query Parameters:**
+- `limit` (default: 50)
+- `offset` (default: 0)
+
+**Response (200):** Array of recipient objects:
+```json
+[
+  {
+    "id": "uuid",
+    "broadcast_id": "uuid",
+    "contact_id": "uuid",
+    "phone": "+919876543210",
+    "status": "read",
+    "whatsapp_message_id": "wamid.xxx",
+    "sent_at": "2026-03-23T10:00:00Z",
+    "delivered_at": "2026-03-23T10:00:05Z",
+    "read_at": "2026-03-23T10:02:14Z",
+    "failed_reason": null
+  }
+]
+```
+
+---
+
+## New WebSocket Event
+
+### message_status_update
+
+Fired when a WhatsApp delivery receipt arrives (sent → delivered → read → failed). Use this to update tick indicators in the chat UI.
+
+```json
+{
+  "type": "message_status_update",
+  "message_id": "uuid",
+  "whatsapp_message_id": "wamid.HBgMNjE...",
+  "status": "read",
+  "timestamp": "1711180800"
+}
+```
+
+**Status values:** `sent` | `delivered` | `read` | `failed`
+
+Status only moves forward — a `delivered` message will never revert to `sent`.
+
+---
+
 ## Support
 
 For API support and questions:
@@ -2090,6 +3938,6 @@ For API support and questions:
 
 ---
 
-**Last Updated:** 2024-01-01  
-**API Version:** 1.0  
+**Last Updated:** 2026-03-23
+**API Version:** 1.2
 **Base URL:** `https://your-domain.com`

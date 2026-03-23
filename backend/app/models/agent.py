@@ -24,12 +24,16 @@ class Agent(Base):
     invitation_token = Column(String, nullable=True)
     invitation_expires_at = Column(DateTime(timezone=True), nullable=True)
     invitation_accepted_at = Column(DateTime(timezone=True), nullable=True)
+    status = Column(String, nullable=False, default="offline")  # online | offline | busy
+    last_heartbeat_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
     workspace = relationship("Workspace", back_populates="agents")
     user = relationship("User", back_populates="agent_profile")
     assigned_conversations = relationship("Conversation", back_populates="assigned_agent")
+    internal_notes = relationship("InternalNote", back_populates="agent")
+    targeted_rules = relationship("AssignmentRule", back_populates="target_agent")
 
     # Constraints - unique email per workspace
     __table_args__ = (

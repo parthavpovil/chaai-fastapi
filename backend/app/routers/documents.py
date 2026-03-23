@@ -3,9 +3,7 @@ Document Management Router
 Handles document upload, processing, and management with authentication and tier limits
 """
 from typing import List, Optional
-from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
-from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
@@ -16,7 +14,6 @@ from app.models.workspace import Workspace
 from app.models.document import Document
 from app.services.document_processor import DocumentProcessor, DocumentProcessingError
 from app.services.tier_manager import TierManager, TierLimitError
-from app.services.file_storage import FileStorageService, FileStorageError
 
 
 router = APIRouter(prefix="/api/documents", tags=["documents"])
@@ -28,14 +25,11 @@ class DocumentResponse(BaseModel):
     """Response model for document information"""
     id: str
     name: str
-    original_filename: str
-    file_size: int
-    content_type: str
+    file_path: str        # R2 URL
     status: str
+    chunks_count: Optional[int] = None
     error_message: Optional[str] = None
-    chunk_count: Optional[int] = None
     created_at: str
-    updated_at: str
 
 
 class DocumentListResponse(BaseModel):
@@ -65,51 +59,32 @@ async def upload_document(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Upload and process a document for the workspace
-    
-    Args:
-        file: Uploaded file
-        name: Optional custom name for the document
-        current_user: Current authenticated user
-        current_workspace: Current workspace
-        db: Database session
-    
-    Returns:
-        Document information with processing status
-    
-    Raises:
-        HTTPException: If upload fails or tier limits exceeded
-    """
+    """Upload and process a document for the workspace knowledge base."""
     try:
         # Check tier limits before upload
         tier_manager = TierManager(db)
         await tier_manager.check_document_limit(current_workspace.id)
-        
-        # Validate file
+
         if not file.filename:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No file provided"
             )
-        
-        # Check file size (10MB limit)
+
         content = await file.read()
-        if len(content) > 10 * 1024 * 1024:  # 10MB
+        if len(content) > 10 * 1024 * 1024:
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 detail="File size exceeds 10MB limit"
             )
-        
-        # Check file type
+
         allowed_types = ["application/pdf", "text/plain"]
         if file.content_type not in allowed_types:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Only PDF and TXT files are supported"
             )
-        
-        # Process document
+
         processor = DocumentProcessor(db)
         document = await processor.upload_and_process_document(
             workspace_id=current_workspace.id,
@@ -117,32 +92,25 @@ async def upload_document(
             original_filename=file.filename,
             content=content,
             content_type=file.content_type,
-            uploaded_by_user_id=current_user.id
+            uploaded_by_user_id=current_user.id,
         )
-        
+
         return DocumentResponse(
             id=str(document.id),
             name=document.name,
-            original_filename=document.original_filename,
-            file_size=document.file_size,
-            content_type=document.content_type,
+            file_path=document.file_path,
             status=document.status,
+            chunks_count=document.chunks_count,
             error_message=document.error_message,
-            chunk_count=None,  # Will be populated after processing
             created_at=document.created_at.isoformat(),
-            updated_at=document.updated_at.isoformat()
         )
-        
+
     except TierLimitError as e:
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))
     except DocumentProcessingError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -159,70 +127,41 @@ async def list_documents(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    List documents for the workspace
-    
-    Args:
-        status_filter: Filter by status (pending, processing, completed, failed)
-        limit: Maximum number of documents to return
-        offset: Offset for pagination
-        current_user: Current authenticated user
-        current_workspace: Current workspace
-        db: Database session
-    
-    Returns:
-        List of documents with tier information
-    """
+    """List documents for the workspace."""
     try:
         from sqlalchemy import select, func
-        
-        # Build query
+
         query = select(Document).where(Document.workspace_id == current_workspace.id)
-        
         if status_filter:
             query = query.where(Document.status == status_filter)
-        
-        # Get total count
+
         count_query = select(func.count(Document.id)).where(Document.workspace_id == current_workspace.id)
         if status_filter:
             count_query = count_query.where(Document.status == status_filter)
-        
+
         total_result = await db.execute(count_query)
         total_count = total_result.scalar()
-        
-        # Get documents
+
         query = query.order_by(Document.created_at.desc()).limit(limit).offset(offset)
         result = await db.execute(query)
         documents = result.scalars().all()
-        
-        # Get chunk counts for completed documents
-        document_responses = []
-        for doc in documents:
-            chunk_count = None
-            if doc.status == "completed":
-                from app.models.document_chunk import DocumentChunk
-                chunk_result = await db.execute(
-                    select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == doc.id)
-                )
-                chunk_count = chunk_result.scalar()
-            
-            document_responses.append(DocumentResponse(
+
+        document_responses = [
+            DocumentResponse(
                 id=str(doc.id),
                 name=doc.name,
-                original_filename=doc.original_filename,
-                file_size=doc.file_size,
-                content_type=doc.content_type,
+                file_path=doc.file_path,
                 status=doc.status,
+                chunks_count=doc.chunks_count,
                 error_message=doc.error_message,
-                chunk_count=chunk_count,
                 created_at=doc.created_at.isoformat(),
-                updated_at=doc.updated_at.isoformat()
-            ))
-        
-        # Get tier information
+            )
+            for doc in documents
+        ]
+
         tier_manager = TierManager(db)
         tier_info = await tier_manager.get_workspace_tier_info(current_workspace.id)
-        
+
         return DocumentListResponse(
             documents=document_responses,
             total_count=total_count,
@@ -232,7 +171,7 @@ async def list_documents(
                 "documents_remaining": tier_info["remaining"]["documents"]
             }
         )
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -247,59 +186,30 @@ async def get_document(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get document by ID
-    
-    Args:
-        document_id: Document ID
-        current_user: Current authenticated user
-        current_workspace: Current workspace
-        db: Database session
-    
-    Returns:
-        Document information
-    
-    Raises:
-        HTTPException: If document not found
-    """
+    """Get document by ID."""
     try:
-        from sqlalchemy import select, func
-        
+        from sqlalchemy import select
+
         result = await db.execute(
             select(Document)
             .where(Document.id == document_id)
             .where(Document.workspace_id == current_workspace.id)
         )
         document = result.scalar_one_or_none()
-        
+
         if not document:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Document not found"
-            )
-        
-        # Get chunk count if completed
-        chunk_count = None
-        if document.status == "completed":
-            from app.models.document_chunk import DocumentChunk
-            chunk_result = await db.execute(
-                select(func.count(DocumentChunk.id)).where(DocumentChunk.document_id == document.id)
-            )
-            chunk_count = chunk_result.scalar()
-        
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
         return DocumentResponse(
             id=str(document.id),
             name=document.name,
-            original_filename=document.original_filename,
-            file_size=document.file_size,
-            content_type=document.content_type,
+            file_path=document.file_path,
             status=document.status,
+            chunks_count=document.chunks_count,
             error_message=document.error_message,
-            chunk_count=chunk_count,
             created_at=document.created_at.isoformat(),
-            updated_at=document.updated_at.isoformat()
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -316,43 +226,25 @@ async def delete_document(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Delete a document and its chunks
-    
-    Args:
-        document_id: Document ID
-        current_user: Current authenticated user
-        current_workspace: Current workspace
-        db: Database session
-    
-    Returns:
-        Success message
-    
-    Raises:
-        HTTPException: If document not found
-    """
+    """Delete a document and its chunks."""
     try:
         from sqlalchemy import select
-        
+
         result = await db.execute(
             select(Document)
             .where(Document.id == document_id)
             .where(Document.workspace_id == current_workspace.id)
         )
         document = result.scalar_one_or_none()
-        
+
         if not document:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Document not found"
-            )
-        
-        # Delete document and associated chunks
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
         processor = DocumentProcessor(db)
         await processor.delete_document(document.id)
-        
+
         return {"message": "Document deleted successfully"}
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -369,56 +261,35 @@ async def reprocess_document(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Reprocess a failed document
-    
-    Args:
-        document_id: Document ID
-        current_user: Current authenticated user
-        current_workspace: Current workspace
-        db: Database session
-    
-    Returns:
-        Success message
-    
-    Raises:
-        HTTPException: If document not found or not in failed state
-    """
+    """Reprocess a failed or completed document."""
     try:
         from sqlalchemy import select
-        
+
         result = await db.execute(
             select(Document)
             .where(Document.id == document_id)
             .where(Document.workspace_id == current_workspace.id)
         )
         document = result.scalar_one_or_none()
-        
+
         if not document:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Document not found"
-            )
-        
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
+
         if document.status not in ["failed", "completed"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Document can only be reprocessed if failed or completed"
             )
-        
-        # Reprocess document
+
         processor = DocumentProcessor(db)
         await processor.reprocess_document(document.id)
-        
+
         return {"message": "Document reprocessing started"}
-        
+
     except HTTPException:
         raise
     except DocumentProcessingError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -432,21 +303,10 @@ async def get_document_statistics(
     current_workspace: Workspace = Depends(get_current_workspace),
     db: AsyncSession = Depends(get_db)
 ):
-    """
-    Get document statistics for the workspace
-    
-    Args:
-        current_user: Current authenticated user
-        current_workspace: Current workspace
-        db: Database session
-    
-    Returns:
-        Document statistics
-    """
+    """Get document statistics for the workspace."""
     try:
         from sqlalchemy import select, func
-        
-        # Get document counts by status
+
         result = await db.execute(
             select(
                 Document.status,
@@ -455,38 +315,34 @@ async def get_document_statistics(
             .where(Document.workspace_id == current_workspace.id)
             .group_by(Document.status)
         )
-        
+
         stats = {
             "total_documents": 0,
             "processing_documents": 0,
             "completed_documents": 0,
             "failed_documents": 0
         }
-        
+
         for row in result:
-            status_name = row.status
             count = row.count
             stats["total_documents"] += count
-            
-            if status_name in ["pending", "processing"]:
+            if row.status in ["pending", "processing"]:
                 stats["processing_documents"] += count
-            elif status_name == "completed":
+            elif row.status == "completed":
                 stats["completed_documents"] += count
-            elif status_name == "failed":
+            elif row.status == "failed":
                 stats["failed_documents"] += count
-        
-        # Get total chunk count
+
         from app.models.document_chunk import DocumentChunk
         chunk_result = await db.execute(
             select(func.count(DocumentChunk.id))
             .where(DocumentChunk.workspace_id == current_workspace.id)
         )
         total_chunks = chunk_result.scalar() or 0
-        
-        # Get tier information
+
         tier_manager = TierManager(db)
         tier_info = await tier_manager.get_workspace_tier_info(current_workspace.id)
-        
+
         return DocumentStatsResponse(
             total_documents=stats["total_documents"],
             processing_documents=stats["processing_documents"],
@@ -499,7 +355,7 @@ async def get_document_statistics(
                 "documents_remaining": tier_info["remaining"]["documents"]
             }
         )
-        
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

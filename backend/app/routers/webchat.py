@@ -2,14 +2,15 @@
 WebChat Public API Router
 Public endpoints for website chat widget functionality
 """
+import mimetypes
 from typing import List, Optional, Dict, Any
 from uuid import UUID
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Form, File, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.database import get_db
 from app.models.workspace import Workspace
@@ -17,7 +18,10 @@ from app.models.channel import Channel
 from app.models.contact import Contact
 from app.models.conversation import Conversation
 from app.models.message import Message
-from app.services.message_processor import MessageProcessor, process_incoming_message, MessageProcessingError
+from app.services.message_processor import (
+    MessageProcessor, process_incoming_message, MessageProcessingError,
+    BlockedContactError, OutsideBusinessHoursError,
+)
 from app.services.escalation_router import check_and_escalate_message
 from app.services.rag_engine import generate_rag_response
 from app.services.usage_tracker import track_message_usage
@@ -36,8 +40,24 @@ class WebChatSendRequest(BaseModel):
     """Request schema for sending WebChat messages"""
     widget_id: str = Field(..., description="Widget ID for the WebChat channel")
     session_token: Optional[str] = Field(None, description="Session token for message threading")
-    message: str = Field(..., min_length=1, max_length=2000, description="Message content")
+    message: Optional[str] = Field(None, min_length=1, max_length=2000, description="Message content")
+    # Media fields (for pre-uploaded files)
+    media_url: Optional[str] = Field(None, description="Pre-uploaded R2 URL")
+    media_mime_type: Optional[str] = Field(None, description="MIME type of the media")
+    media_filename: Optional[str] = Field(None, max_length=255, description="Original filename")
+    media_size: Optional[int] = Field(None, description="File size in bytes")
+    message_type: Optional[str] = Field(None, description="text|image|video|audio|document")
     contact_name: Optional[str] = Field(None, max_length=100, description="Contact display name")
+    contact_email: Optional[str] = Field(None, max_length=254, description="Contact email address")
+    contact_phone: Optional[str] = Field(None, max_length=20, description="Contact phone number")
+    external_id: Optional[str] = Field(None, max_length=255, description="Business's internal customer ID")
+    metadata: Optional[Dict[str, Any]] = Field(None, description="Customer context (plan, orders, city, etc.)")
+
+    @model_validator(mode="after")
+    def require_message_or_media(self) -> "WebChatSendRequest":
+        if not self.message and not self.media_url:
+            raise ValueError("Either 'message' or 'media_url' must be provided")
+        return self
 
 
 class WebChatSendResponse(BaseModel):
@@ -49,13 +69,27 @@ class WebChatSendResponse(BaseModel):
     error: Optional[str] = None
 
 
+class WebChatUploadResponse(BaseModel):
+    """Response schema for WebChat file upload endpoint"""
+    url: str
+    mime_type: str
+    size: int
+    filename: str
+    message_type: str  # image | video | audio | document
+
+
 class WebChatMessage(BaseModel):
     """WebChat message schema"""
     id: str
-    content: str
+    content: Optional[str] = None
     sender_type: str  # "user" or "assistant"
     timestamp: datetime
-    
+    msg_type: Optional[str] = "text"
+    media_url: Optional[str] = None
+    media_mime_type: Optional[str] = None
+    media_filename: Optional[str] = None
+    media_size: Optional[int] = None
+
     class Config:
         from_attributes = True
 
@@ -146,7 +180,7 @@ async def get_webchat_conversation(
         select(Contact)
         .where(Contact.workspace_id == channel.workspace_id)
         .where(Contact.channel_id == channel.id)
-        .where(Contact.external_contact_id == session_token)
+        .where(Contact.external_id == session_token)
     )
     contact = result.scalar_one_or_none()
     
@@ -203,6 +237,14 @@ async def get_webchat_channel_by_workspace_slug(
         return None
     
     return channel, workspace
+
+
+def _infer_msg_type(mime_type: Optional[str]) -> str:
+    """Infer message type from MIME type."""
+    if not mime_type:
+        return "document"
+    prefix = mime_type.split("/")[0]
+    return prefix if prefix in ("image", "video", "audio") else "document"
 
 
 # ─── WebChat Endpoints ────────────────────────────────────────────────────────
@@ -330,22 +372,44 @@ async def send_webchat_message(
         
         # 4. Process message through complete pipeline
         try:
+            # Derive message type for media messages
+            msg_type = request.message_type or (
+                "text" if not request.media_url else _infer_msg_type(request.media_mime_type)
+            )
+            # For media-only messages, pass a placeholder so the AI has context
+            message_content = request.message or "[User sent a file]"
+
             # Step 1: Process incoming message
             processing_result = await process_incoming_message(
                 db=db,
                 workspace_id=str(channel.workspace_id),
                 channel_id=str(channel.id),
-                external_contact_id=session_token,
-                content=request.message,
+                external_contact_id=request.external_id or session_token,
+                content=message_content,
                 external_message_id=None,  # WebChat messages don't have external IDs
                 contact_name=request.contact_name or f"WebChat User {session_token[:8]}",
-                contact_data={"session_token": session_token},
+                contact_data={
+                    "session_token": session_token,
+                    "email": request.contact_email,
+                    "phone": request.contact_phone,
+                    "metadata": request.metadata,
+                },
                 message_metadata={"session_token": session_token}
             )
-            
+
             conversation_id = str(processing_result["conversation"].id)
             user_message_id = str(processing_result["message"].id)
-            
+
+            # Patch media fields onto the created message if media was uploaded
+            if request.media_url:
+                msg_obj = processing_result["message"]
+                msg_obj.media_url = request.media_url
+                msg_obj.media_mime_type = request.media_mime_type
+                msg_obj.media_filename = request.media_filename
+                msg_obj.media_size = request.media_size
+                msg_obj.msg_type = msg_type
+                await db.commit()
+
             # Send WebSocket notification for customer message
             from app.services.websocket_events import notify_new_message
             await notify_new_message(
@@ -354,24 +418,24 @@ async def send_webchat_message(
                 conversation_id=conversation_id,
                 message_id=user_message_id
             )
-            
+
             # Step 2: Check for escalation
             escalation_result = await check_and_escalate_message(
                 db=db,
                 conversation_id=conversation_id,
                 workspace_id=str(channel.workspace_id),
-                message_content=request.message
+                message_content=message_content
             )
-            
+
             response_content = None
-            
+
             if not escalation_result:
                 # Step 3: Generate RAG response (only if not escalated)
                 try:
                     rag_result = await generate_rag_response(
                         db=db,
                         workspace_id=str(channel.workspace_id),
-                        query=request.message,
+                        query=message_content,
                         conversation_id=conversation_id,
                         max_tokens=300
                     )
@@ -419,6 +483,23 @@ async def send_webchat_message(
                 # Message was escalated, provide escalation acknowledgment
                 response_content = "Thank you for your message. I've escalated your request to our support team who will get back to you shortly."
             
+        except BlockedContactError:
+            # Return a polite response without revealing the contact is blocked
+            return WebChatSendResponse(
+                success=True,
+                session_token=session_token,
+                message_id="",
+                response="We're unable to process your message at this time.",
+                error=None,
+            )
+        except OutsideBusinessHoursError as e:
+            return WebChatSendResponse(
+                success=True,
+                session_token=session_token,
+                message_id="",
+                response=e.outside_hours_message,
+                error=None,
+            )
         except MessageProcessingError as e:
             # Handle specific message processing errors
             if "maintenance" in str(e).lower():
@@ -451,6 +532,182 @@ async def send_webchat_message(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
         )
+
+
+@router.post("/upload", response_model=WebChatUploadResponse)
+async def upload_webchat_file(
+    widget_id: str = Form(...),
+    session_token: str = Form(...),
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Upload a file attachment through the WebChat widget.
+
+    Accepts multipart form data with widget_id, session_token, and a file.
+    Uploads the file to Cloudflare R2 and returns the public URL.
+    An active session (prior text message) is required before uploading.
+    """
+    from app.services.r2_storage import upload_webchat_media
+
+    # 1. Validate widget
+    channel = await get_webchat_channel_by_widget_id(db, widget_id)
+    if not channel:
+        raise HTTPException(status_code=404, detail="Widget not found or inactive")
+
+    # 2. Require an existing session
+    conversation = await get_webchat_conversation(db, channel, session_token)
+    if not conversation:
+        raise HTTPException(
+            status_code=401,
+            detail="No active session. Send a text message first to start a conversation."
+        )
+
+    # 3. Rate limit (shared bucket with /send)
+    try:
+        await check_webchat_rate_limit(
+            db=db,
+            session_token=session_token,
+            workspace_id=str(channel.workspace_id)
+        )
+    except RateLimitExceededError as e:
+        return JSONResponse(status_code=429, content={"detail": str(e)})
+
+    # 4. Read file bytes
+    file_bytes = await file.read()
+    if not file_bytes:
+        raise HTTPException(status_code=422, detail="Uploaded file is empty")
+
+    # 5. Determine MIME type
+    mime_type = file.content_type or ""
+    if not mime_type or mime_type == "application/octet-stream":
+        guessed, _ = mimetypes.guess_type(file.filename or "")
+        mime_type = guessed or "application/octet-stream"
+
+    # 6. Upload to R2
+    try:
+        result = await upload_webchat_media(
+            file_bytes=file_bytes,
+            mime_type=mime_type,
+            workspace_id=str(channel.workspace_id),
+            original_filename=file.filename or "",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+    return WebChatUploadResponse(
+        url=result["url"],
+        mime_type=result["mime_type"],
+        size=result["size_bytes"],
+        filename=result["filename"],
+        message_type=_infer_msg_type(result["mime_type"]),
+    )
+
+
+# ─── CSAT Endpoints (public, no auth) ────────────────────────────────────────
+
+class CSATSubmitRequest(BaseModel):
+    token: str = Field(..., description="CSAT JWT token from csat_prompt event")
+    rating: int = Field(..., ge=1, le=5, description="Satisfaction rating 1-5")
+    comment: Optional[str] = Field(None, max_length=1000)
+
+
+class CSATSubmitResponse(BaseModel):
+    success: bool
+    message: str
+
+
+class CSATTokenResponse(BaseModel):
+    valid: bool
+    conversation_id: Optional[str] = None
+    workspace_id: Optional[str] = None
+
+
+@router.post("/csat", response_model=CSATSubmitResponse)
+async def submit_csat_rating(
+    request: CSATSubmitRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    """Submit a CSAT rating for a resolved conversation (no auth required)."""
+    from app.services.csat_service import decode_csat_token
+    from app.models.csat_rating import CSATRating
+
+    payload = decode_csat_token(request.token)
+    if not payload:
+        raise HTTPException(status_code=400, detail="Invalid or expired CSAT token")
+
+    conversation_id = payload["sub"]
+    workspace_id = payload["workspace_id"]
+
+    # Verify conversation exists and is resolved
+    conv_result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == UUID(conversation_id))
+        .where(Conversation.workspace_id == UUID(workspace_id))
+    )
+    conversation = conv_result.scalar_one_or_none()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if conversation.status != "resolved":
+        raise HTTPException(status_code=400, detail="Conversation is not resolved")
+
+    # Check for duplicate rating
+    existing = await db.execute(
+        select(CSATRating).where(CSATRating.conversation_id == UUID(conversation_id))
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Rating already submitted for this conversation")
+
+    rating = CSATRating(
+        conversation_id=UUID(conversation_id),
+        workspace_id=UUID(workspace_id),
+        contact_id=conversation.contact_id,
+        rating=request.rating,
+        comment=request.comment,
+    )
+    db.add(rating)
+    await db.commit()
+
+    # Fire outbound webhook (fire-and-forget)
+    try:
+        import asyncio
+        from app.services.outbound_webhook_service import trigger_event
+        asyncio.create_task(trigger_event(
+            db=db,
+            workspace_id=workspace_id,
+            event_type="csat.submitted",
+            payload={
+                "workspace_id": workspace_id,
+                "conversation_id": conversation_id,
+                "rating": request.rating,
+                "comment": request.comment,
+            }
+        ))
+    except Exception:
+        pass
+
+    return CSATSubmitResponse(success=True, message="Thank you for your feedback!")
+
+
+@router.get("/csat/{token}", response_model=CSATTokenResponse)
+async def validate_csat_token(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Validate a CSAT token and return conversation context (no auth required)."""
+    from app.services.csat_service import decode_csat_token
+
+    payload = decode_csat_token(token)
+    if not payload:
+        return CSATTokenResponse(valid=False)
+
+    return CSATTokenResponse(
+        valid=True,
+        conversation_id=payload["sub"],
+        workspace_id=payload["workspace_id"],
+    )
 
 
 @router.get("/messages", response_model=WebChatMessagesResponse)
@@ -509,7 +766,12 @@ async def get_webchat_messages(
                 id=str(msg.id),
                 content=msg.content,
                 sender_type="user" if msg.role == "customer" else "assistant",
-                timestamp=msg.created_at
+                timestamp=msg.created_at,
+                msg_type=msg.msg_type or "text",
+                media_url=msg.media_url,
+                media_mime_type=msg.media_mime_type,
+                media_filename=msg.media_filename,
+                media_size=msg.media_size,
             )
             for msg in messages
         ]

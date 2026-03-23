@@ -43,11 +43,11 @@ class WebhookHandlers:
             Channel instance or None
         """
         if channel_type == "webchat":
-            # For WebChat, identifier is widget_id
+            # For WebChat, identifier is widget_id stored inside config JSONB
             result = await self.db.execute(
                 select(Channel)
-                .where(Channel.channel_type == "webchat")
-                .where(Channel.widget_id == identifier)
+                .where(Channel.type == "webchat")
+                .where(Channel.config["widget_id"].astext == identifier)
                 .where(Channel.is_active == True)
             )
         else:
@@ -56,7 +56,7 @@ class WebhookHandlers:
             # to store a hash of the identifier for faster lookups
             result = await self.db.execute(
                 select(Channel)
-                .where(Channel.channel_type == channel_type)
+                .where(Channel.type == channel_type)
                 .where(Channel.is_active == True)
             )
             channels = result.scalars().all()
@@ -84,21 +84,21 @@ class WebhookHandlers:
         Returns:
             True if matches
         """
-        if not channel.encrypted_config:
+        if not channel.config:
             return False
-        
+
         try:
-            if channel.channel_type == "telegram":
+            if channel.type == "telegram":
                 # For Telegram, identifier is bot token
-                encrypted_token = channel.encrypted_config.get("bot_token")
+                encrypted_token = channel.config.get("bot_token")
                 if encrypted_token:
                     decrypted_token = decrypt_credential(encrypted_token)
                     return decrypted_token == identifier
-            
-            elif channel.channel_type in ["whatsapp", "instagram"]:
+
+            elif channel.type in ["whatsapp", "instagram"]:
                 # For Meta platforms, identifier could be phone_number_id or page_id
                 for key in ["phone_number_id", "page_id"]:
-                    encrypted_id = channel.encrypted_config.get(key)
+                    encrypted_id = channel.config.get(key)
                     if encrypted_id:
                         decrypted_id = decrypt_credential(encrypted_id)
                         if decrypted_id == identifier:
@@ -215,15 +215,15 @@ class WebhookHandlers:
     ) -> Dict[str, Any]:
         """
         Handle WhatsApp webhook with HMAC-SHA256 verification
-        
+
         Args:
             payload: Raw webhook payload
             headers: Request headers
             phone_number_id: Phone number ID for channel identification
-        
+
         Returns:
             Processed webhook data
-        
+
         Raises:
             WebhookProcessingError: If processing fails
         """
@@ -233,27 +233,41 @@ class WebhookHandlers:
             if signature:
                 if not verify_webhook_signature("whatsapp", payload, signature=signature):
                     raise WebhookProcessingError("Invalid WhatsApp signature")
-            
+
             # Parse JSON payload
             try:
                 webhook_data = json.loads(payload.decode('utf-8'))
             except (json.JSONDecodeError, UnicodeDecodeError) as e:
                 raise WebhookProcessingError(f"Invalid JSON payload: {str(e)}")
-            
+
             # Handle Meta verification challenge
             if self._is_meta_verification(webhook_data):
                 return self._handle_meta_verification(webhook_data)
-            
+
+            # Check for delivery status updates first
+            statuses = self._extract_whatsapp_statuses(webhook_data)
+            if statuses:
+                channel = await self.get_channel_by_webhook_path("whatsapp", phone_number_id)
+                if not channel:
+                    raise WebhookProcessingError("Channel not found or inactive")
+                return {
+                    "status": "status_update",
+                    "channel_id": channel.id,
+                    "workspace_id": channel.workspace_id,
+                    "statuses": statuses,
+                    "platform": "whatsapp"
+                }
+
             # Extract message data
             message_data = self._extract_whatsapp_message(webhook_data, phone_number_id)
             if not message_data:
                 return {"status": "ignored", "reason": "No processable message"}
-            
+
             # Get channel
             channel = await self.get_channel_by_webhook_path("whatsapp", phone_number_id)
             if not channel:
                 raise WebhookProcessingError("Channel not found or inactive")
-            
+
             return {
                 "status": "success",
                 "channel_id": channel.id,
@@ -261,7 +275,7 @@ class WebhookHandlers:
                 "message_data": message_data,
                 "platform": "whatsapp"
             }
-            
+
         except WebhookSecurityError as e:
             raise WebhookProcessingError(f"Security verification failed: {str(e)}")
         except Exception as e:
@@ -270,63 +284,146 @@ class WebhookHandlers:
             raise WebhookProcessingError(f"WhatsApp webhook processing failed: {str(e)}")
     
     def _extract_whatsapp_message(
-        self, 
-        webhook_data: Dict[str, Any], 
+        self,
+        webhook_data: Dict[str, Any],
         phone_number_id: str
     ) -> Optional[Dict[str, Any]]:
         """
-        Extract message data from WhatsApp webhook
-        
+        Extract message data from WhatsApp webhook — handles all message types.
+
         Args:
             webhook_data: WhatsApp webhook payload
             phone_number_id: Phone number ID
-        
+
         Returns:
             Extracted message data or None
         """
         entry = webhook_data.get("entry", [])
         if not entry:
             return None
-        
+
         for entry_item in entry:
             changes = entry_item.get("changes", [])
             for change in changes:
                 if change.get("field") != "messages":
                     continue
-                
+
                 value = change.get("value", {})
                 if value.get("metadata", {}).get("phone_number_id") != phone_number_id:
                     continue
-                
+
                 messages = value.get("messages", [])
                 for message in messages:
                     message_type = message.get("type")
-                    if message_type != "text":
-                        continue  # Skip non-text messages for now
-                    
-                    text_data = message.get("text", {})
-                    text_body = text_data.get("body", "")
-                    
-                    if not text_body.strip():
-                        continue
-                    
-                    return {
-                        "external_message_id": message.get("id"),
-                        "content": text_body,
-                        "external_contact_id": message.get("from"),
-                        "contact_name": f"WhatsApp User {message.get('from', '')[-4:]}",
-                        "contact_data": {
-                            "phone_number": message.get("from"),
-                            "message_type": message_type
-                        },
+                    msg_id = message.get("id")
+                    from_number = message.get("from")
+
+                    base = {
+                        "external_contact_id": from_number,
+                        "contact_name": f"WhatsApp User {(from_number or '')[-4:]}",
+                        "contact_data": {"phone_number": from_number},
                         "message_metadata": {
                             "timestamp": message.get("timestamp"),
                             "phone_number_id": phone_number_id,
                             "platform": "whatsapp"
                         }
                     }
-        
+
+                    if message_type == "text":
+                        content = message.get("text", {}).get("body", "")
+                        if not content.strip():
+                            continue
+                        return {
+                            **base,
+                            "external_message_id": msg_id,
+                            "content": content,
+                            "msg_type": "text",
+                        }
+
+                    elif message_type in ("image", "video", "audio", "document", "sticker"):
+                        media_obj = message.get(message_type, {})
+                        return {
+                            **base,
+                            "external_message_id": msg_id,
+                            "content": media_obj.get("caption", ""),
+                            "msg_type": message_type,
+                            "media_id": media_obj.get("id"),
+                            "media_mime_type": media_obj.get("mime_type"),
+                            "media_filename": media_obj.get("filename"),
+                        }
+
+                    elif message_type == "location":
+                        loc = message.get("location", {})
+                        return {
+                            **base,
+                            "external_message_id": msg_id,
+                            "content": loc.get("name", "Location shared"),
+                            "msg_type": "location",
+                            "location_lat": loc.get("latitude"),
+                            "location_lng": loc.get("longitude"),
+                            "location_name": loc.get("name"),
+                        }
+
+                    elif message_type == "interactive":
+                        interactive = message.get("interactive", {})
+                        interactive_type = interactive.get("type")
+                        if interactive_type == "button_reply":
+                            btn = interactive.get("button_reply", {})
+                            return {
+                                **base,
+                                "external_message_id": msg_id,
+                                "content": btn.get("title", ""),
+                                "msg_type": "interactive",
+                                "interactive_id": btn.get("id"),
+                            }
+                        elif interactive_type == "list_reply":
+                            row = interactive.get("list_reply", {})
+                            return {
+                                **base,
+                                "external_message_id": msg_id,
+                                "content": row.get("title", ""),
+                                "msg_type": "interactive",
+                                "interactive_id": row.get("id"),
+                            }
+
+                    elif message_type == "reaction":
+                        reaction = message.get("reaction", {})
+                        return {
+                            **base,
+                            "external_message_id": msg_id,
+                            "content": reaction.get("emoji", ""),
+                            "msg_type": "reaction",
+                        }
+
         return None
+
+    def _extract_whatsapp_statuses(
+        self,
+        webhook_data: Dict[str, Any]
+    ) -> list:
+        """
+        Extract delivery status updates from WhatsApp webhook.
+
+        Args:
+            webhook_data: WhatsApp webhook payload
+
+        Returns:
+            List of status dicts
+        """
+        statuses = []
+        for entry in webhook_data.get("entry", []):
+            for change in entry.get("changes", []):
+                if change.get("field") != "messages":
+                    continue
+                for status in change.get("value", {}).get("statuses", []):
+                    statuses.append({
+                        "whatsapp_msg_id": status.get("id"),
+                        "status": status.get("status"),
+                        "timestamp": status.get("timestamp"),
+                        "recipient_id": status.get("recipient_id"),
+                        "error": status.get("errors", [{}])[0].get("title") if status.get("errors") else None
+                    })
+        return statuses
     
     async def handle_instagram_webhook(
         self,

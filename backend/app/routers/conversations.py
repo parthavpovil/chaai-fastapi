@@ -2,12 +2,16 @@
 Conversation Management Router
 Handles conversation listing, management, and agent assignment with authentication
 """
-from typing import List, Optional
+from typing import List, Optional, AsyncGenerator
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, or_, and_, text
 from pydantic import BaseModel, Field
-from datetime import datetime
+from datetime import datetime, date
+import csv
+import io
 
 from app.database import get_db
 from app.middleware.auth_middleware import get_current_user, get_current_workspace, get_current_agent
@@ -217,6 +221,268 @@ async def list_conversations(
         )
 
 
+# ─── Search & Export ─────────────────────────────────────────────────────────
+# IMPORTANT: These must be declared BEFORE /{conversation_id} to avoid FastAPI
+# treating "search" and "export" as conversation ID path params.
+
+class ConversationSearchResult(BaseModel):
+    id: str
+    status: str
+    channel_type: str
+    contact_name: Optional[str]
+    created_at: str
+    updated_at: str
+    message_snippet: Optional[str]
+
+
+class ConversationSearchResponse(BaseModel):
+    results: List[ConversationSearchResult]
+    total_count: int
+    has_more: bool
+
+
+@router.get("/search", response_model=ConversationSearchResponse)
+async def search_conversations(
+    q: Optional[str] = Query(None, description="Full-text search across message content"),
+    contact_name: Optional[str] = Query(None),
+    channel_type_filter: Optional[str] = Query(None, alias="channel_type"),
+    status_filter: Optional[str] = Query(None, alias="status"),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    assigned_agent_id: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """Search conversations by message content and filters."""
+    from sqlalchemy import select
+    from app.models.contact import Contact as ContactModel
+    from app.models.message import Message as MessageModel
+
+    base_filters = [Conversation.workspace_id == current_workspace.id]
+
+    if channel_type_filter:
+        base_filters.append(Conversation.channel_type == channel_type_filter)
+    if status_filter:
+        base_filters.append(Conversation.status == status_filter)
+    if date_from:
+        base_filters.append(Conversation.created_at >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        base_filters.append(Conversation.created_at <= datetime.combine(date_to, datetime.max.time()))
+    if assigned_agent_id:
+        base_filters.append(Conversation.assigned_agent_id == UUID(assigned_agent_id))
+
+    if q:
+        # Full-text search: join messages, filter by tsvector match
+        ts_query = func.plainto_tsquery("english", q)
+        ts_vector = func.to_tsvector("english", MessageModel.content)
+        headline = func.ts_headline(
+            "english",
+            MessageModel.content,
+            ts_query,
+            "MaxWords=20, MinWords=8, ShortWord=3",
+        ).label("snippet")
+
+        query = (
+            select(
+                Conversation,
+                func.min(headline).label("snippet"),
+            )
+            .join(MessageModel, MessageModel.conversation_id == Conversation.id)
+            .join(ContactModel, ContactModel.id == Conversation.contact_id)
+            .where(*base_filters)
+            .where(ts_vector.op("@@")(ts_query))
+        )
+        if contact_name:
+            query = query.where(ContactModel.name.ilike(f"%{contact_name}%"))
+        query = query.group_by(Conversation.id)
+    else:
+        query = (
+            select(Conversation, text("NULL").label("snippet"))
+            .join(ContactModel, ContactModel.id == Conversation.contact_id)
+            .where(*base_filters)
+        )
+        if contact_name:
+            query = query.where(ContactModel.name.ilike(f"%{contact_name}%"))
+
+    count_sq = query.subquery()
+    total_count_result = await db.execute(select(func.count()).select_from(count_sq))
+    total_count = total_count_result.scalar() or 0
+
+    query = query.order_by(Conversation.updated_at.desc()).limit(limit + 1).offset(offset)
+    rows = (await db.execute(query)).all()
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    # Load contact names
+    conv_ids = [r[0].id for r in rows]
+    contact_map: dict = {}
+    if conv_ids:
+        contact_results = await db.execute(
+            select(Conversation.id, ContactModel.name)
+            .join(ContactModel, ContactModel.id == Conversation.contact_id)
+            .where(Conversation.id.in_(conv_ids))
+        )
+        contact_map = {str(cid): name for cid, name in contact_results.all()}
+
+    return ConversationSearchResponse(
+        results=[
+            ConversationSearchResult(
+                id=str(row[0].id),
+                status=row[0].status,
+                channel_type=row[0].channel_type,
+                contact_name=contact_map.get(str(row[0].id)),
+                created_at=row[0].created_at.isoformat(),
+                updated_at=row[0].updated_at.isoformat(),
+                message_snippet=row[1] if row[1] != "NULL" else None,
+            )
+            for row in rows
+        ],
+        total_count=total_count,
+        has_more=has_more,
+    )
+
+
+@router.get("/export")
+async def export_conversations_csv(
+    q: Optional[str] = Query(None),
+    contact_name_filter: Optional[str] = Query(None, alias="contact_name"),
+    channel_type_filter: Optional[str] = Query(None, alias="channel_type"),
+    status_filter: Optional[str] = Query(None, alias="status"),
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    assigned_agent_id: Optional[str] = Query(None),
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Export conversations as CSV (Growth+ tier).
+    Streams rows to avoid memory issues on large datasets.
+    """
+    from app.config import TIER_LIMITS
+    from app.models.contact import Contact as ContactModel
+    from app.models.message import Message as MessageModel
+    from app.models.agent import Agent as AgentModel
+    from app.models.csat_rating import CSATRating
+
+    if not TIER_LIMITS.get(current_workspace.tier or "free", {}).get("has_api_access", False):
+        raise HTTPException(status_code=403, detail="CSV export requires Growth or Pro tier.")
+
+    base_filters = [Conversation.workspace_id == current_workspace.id]
+    if channel_type_filter:
+        base_filters.append(Conversation.channel_type == channel_type_filter)
+    if status_filter:
+        base_filters.append(Conversation.status == status_filter)
+    if date_from:
+        base_filters.append(Conversation.created_at >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        base_filters.append(Conversation.created_at <= datetime.combine(date_to, datetime.max.time()))
+    if assigned_agent_id:
+        base_filters.append(Conversation.assigned_agent_id == UUID(assigned_agent_id))
+
+    query = (
+        select(
+            Conversation,
+            ContactModel.name.label("contact_name"),
+            AgentModel.name.label("agent_name"),
+            CSATRating.rating.label("csat_rating"),
+            func.count(MessageModel.id).label("message_count"),
+        )
+        .join(ContactModel, ContactModel.id == Conversation.contact_id)
+        .outerjoin(AgentModel, AgentModel.id == Conversation.assigned_agent_id)
+        .outerjoin(CSATRating, CSATRating.conversation_id == Conversation.id)
+        .outerjoin(MessageModel, MessageModel.conversation_id == Conversation.id)
+        .where(*base_filters)
+        .group_by(Conversation.id, ContactModel.name, AgentModel.name, CSATRating.rating)
+        .order_by(Conversation.created_at.desc())
+    )
+
+    if contact_name_filter:
+        query = query.where(ContactModel.name.ilike(f"%{contact_name_filter}%"))
+
+    if q:
+        ts_q = func.plainto_tsquery("english", q)
+        query = query.where(
+            Conversation.id.in_(
+                select(MessageModel.conversation_id)
+                .where(func.to_tsvector("english", MessageModel.content).op("@@")(ts_q))
+            )
+        )
+
+    rows = (await db.execute(query)).all()
+
+    async def generate_csv():
+        buf = io.StringIO()
+        writer = csv.writer(buf)
+        writer.writerow([
+            "conversation_id", "contact_name", "channel_type", "status",
+            "created_at", "resolved_at", "message_count", "escalated",
+            "assigned_agent_name", "csat_rating",
+        ])
+        yield buf.getvalue()
+        buf.seek(0); buf.truncate(0)
+
+        for row in rows:
+            conv = row[0]
+            writer.writerow([
+                str(conv.id),
+                row.contact_name or "",
+                conv.channel_type,
+                conv.status,
+                conv.created_at.isoformat(),
+                conv.resolved_at.isoformat() if conv.resolved_at else "",
+                row.message_count or 0,
+                "yes" if conv.escalation_reason else "no",
+                row.agent_name or "",
+                row.csat_rating or "",
+            ])
+            yield buf.getvalue()
+            buf.seek(0); buf.truncate(0)
+
+    return StreamingResponse(
+        generate_csv(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=conversations.csv"},
+    )
+
+
+@router.get("/{conversation_id}/csat", response_model=Optional[dict])
+async def get_conversation_csat(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get the CSAT rating for a conversation, if submitted."""
+    from sqlalchemy import select
+    from app.models.csat_rating import CSATRating
+
+    conv_result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == UUID(conversation_id))
+        .where(Conversation.workspace_id == current_workspace.id)
+    )
+    if not conv_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    result = await db.execute(
+        select(CSATRating).where(CSATRating.conversation_id == UUID(conversation_id))
+    )
+    rating = result.scalar_one_or_none()
+    if not rating:
+        return None
+    return {
+        "id": str(rating.id),
+        "conversation_id": str(rating.conversation_id),
+        "rating": rating.rating,
+        "comment": rating.comment,
+        "submitted_at": rating.submitted_at.isoformat(),
+    }
+
+
 @router.get("/{conversation_id}", response_model=ConversationDetailResponse)
 async def get_conversation(
     conversation_id: str,
@@ -410,7 +676,45 @@ async def update_conversation_status(
             new_status=request.status,
             agent_id=str(agent_id) if agent_id else None
         )
-        
+
+        # Fire outbound webhook for resolved conversations (fire-and-forget)
+        if request.status == "resolved":
+            try:
+                import asyncio
+                from app.services.outbound_webhook_service import trigger_event
+                asyncio.create_task(trigger_event(
+                    db=db,
+                    workspace_id=str(current_workspace.id),
+                    event_type="conversation.resolved",
+                    payload={
+                        "workspace_id": str(current_workspace.id),
+                        "conversation_id": request.conversation_id,
+                        "resolved_by": str(current_user.id),
+                        "note": request.note,
+                    }
+                ))
+            except Exception:
+                pass
+
+            # Send CSAT prompt for webchat conversations (fire-and-forget)
+            try:
+                conv_result = await db.execute(
+                    select(Conversation)
+                    .where(Conversation.id == UUID(request.conversation_id))
+                    .where(Conversation.workspace_id == current_workspace.id)
+                )
+                resolved_conv = conv_result.scalar_one_or_none()
+                if resolved_conv and resolved_conv.channel_type == "webchat":
+                    import asyncio
+                    from app.services.csat_service import generate_and_send_csat_prompt
+                    asyncio.create_task(generate_and_send_csat_prompt(
+                        db=db,
+                        conversation_id=request.conversation_id,
+                        workspace_id=str(current_workspace.id),
+                    ))
+            except Exception:
+                pass
+
         return {"message": f"Conversation status updated to {request.status}"}
         
     except ConversationManagementError as e:
@@ -652,7 +956,7 @@ async def get_my_active_conversations(
             total_count=conversations_data["total_count"],
             has_more=conversations_data["has_more"]
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -660,3 +964,216 @@ async def get_my_active_conversations(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get agent conversations: {str(e)}"
         )
+
+
+# ─── Internal Notes ────────────────────────────────────────────────────────────
+
+class InternalNoteCreate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=5000)
+
+
+class InternalNoteResponse(BaseModel):
+    id: str
+    conversation_id: str
+    agent_id: Optional[str]
+    content: str
+    created_at: str
+
+
+@router.post("/{conversation_id}/notes", response_model=InternalNoteResponse)
+async def create_internal_note(
+    conversation_id: str,
+    request: InternalNoteCreate,
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db)
+):
+    """Create an internal agent note on a conversation (not visible to customers)."""
+    from sqlalchemy import select
+    from app.models.conversation import Conversation
+    from app.models.internal_note import InternalNote
+    from app.models.agent import Agent
+
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == UUID(conversation_id))
+        .where(Conversation.workspace_id == current_workspace.id)
+    )
+    conversation = result.scalar_one_or_none()
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    # Resolve agent_id if user is an agent
+    agent_result = await db.execute(
+        select(Agent)
+        .where(Agent.workspace_id == current_workspace.id)
+        .where(Agent.user_id == current_user.id)
+        .where(Agent.is_active == True)
+    )
+    agent = agent_result.scalar_one_or_none()
+
+    note = InternalNote(
+        conversation_id=UUID(conversation_id),
+        agent_id=agent.id if agent else None,
+        content=request.content
+    )
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
+
+    return InternalNoteResponse(
+        id=str(note.id),
+        conversation_id=str(note.conversation_id),
+        agent_id=str(note.agent_id) if note.agent_id else None,
+        content=note.content,
+        created_at=note.created_at.isoformat()
+    )
+
+
+@router.get("/{conversation_id}/notes", response_model=List[InternalNoteResponse])
+async def list_internal_notes(
+    conversation_id: str,
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db)
+):
+    """List internal notes for a conversation (agent/owner only)."""
+    from sqlalchemy import select
+    from app.models.conversation import Conversation
+    from app.models.internal_note import InternalNote
+
+    result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == UUID(conversation_id))
+        .where(Conversation.workspace_id == current_workspace.id)
+    )
+    if not result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    notes_result = await db.execute(
+        select(InternalNote)
+        .where(InternalNote.conversation_id == UUID(conversation_id))
+        .order_by(InternalNote.created_at.asc())
+    )
+    notes = notes_result.scalars().all()
+
+    return [
+        InternalNoteResponse(
+            id=str(n.id),
+            conversation_id=str(n.conversation_id),
+            agent_id=str(n.agent_id) if n.agent_id else None,
+            content=n.content,
+            created_at=n.created_at.isoformat()
+        )
+        for n in notes
+    ]
+
+
+# ─── AI Response Feedback ──────────────────────────────────────────────────────
+
+class FeedbackCreate(BaseModel):
+    rating: str = Field(..., pattern="^(positive|negative)$")
+    comment: Optional[str] = Field(None, max_length=1000)
+
+
+class FeedbackResponse(BaseModel):
+    id: str
+    message_id: str
+    rating: str
+    comment: Optional[str]
+    created_at: str
+
+
+@router.post("/{conversation_id}/messages/{message_id}/feedback", response_model=FeedbackResponse)
+async def submit_ai_feedback(
+    conversation_id: str,
+    message_id: str,
+    request: FeedbackCreate,
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db)
+):
+    """Submit thumbs-up/down feedback on an AI-generated message."""
+    from sqlalchemy import select
+    from app.models.message import Message
+    from app.models.conversation import Conversation
+    from app.models.ai_feedback import AIFeedback
+    from app.models.agent import Agent
+
+    conv_result = await db.execute(
+        select(Conversation)
+        .where(Conversation.id == UUID(conversation_id))
+        .where(Conversation.workspace_id == current_workspace.id)
+    )
+    if not conv_result.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    msg_result = await db.execute(
+        select(Message)
+        .where(Message.id == UUID(message_id))
+        .where(Message.conversation_id == UUID(conversation_id))
+    )
+    message = msg_result.scalar_one_or_none()
+    if not message:
+        raise HTTPException(status_code=404, detail="Message not found")
+
+    # Check for existing feedback
+    existing = await db.execute(
+        select(AIFeedback).where(AIFeedback.message_id == UUID(message_id))
+    )
+    if existing.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="Feedback already submitted for this message")
+
+    agent_result = await db.execute(
+        select(Agent)
+        .where(Agent.workspace_id == current_workspace.id)
+        .where(Agent.user_id == current_user.id)
+    )
+    agent = agent_result.scalar_one_or_none()
+
+    feedback = AIFeedback(
+        message_id=UUID(message_id),
+        workspace_id=current_workspace.id,
+        agent_id=agent.id if agent else None,
+        rating=request.rating,
+        comment=request.comment
+    )
+    db.add(feedback)
+    await db.commit()
+    await db.refresh(feedback)
+
+    return FeedbackResponse(
+        id=str(feedback.id),
+        message_id=str(feedback.message_id),
+        rating=feedback.rating,
+        comment=feedback.comment,
+        created_at=feedback.created_at.isoformat()
+    )
+
+
+@router.get("/{conversation_id}/messages/{message_id}/feedback", response_model=Optional[FeedbackResponse])
+async def get_ai_feedback(
+    conversation_id: str,
+    message_id: str,
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db)
+):
+    """Get feedback for a specific message."""
+    from sqlalchemy import select
+    from app.models.ai_feedback import AIFeedback
+
+    feedback_result = await db.execute(
+        select(AIFeedback).where(AIFeedback.message_id == UUID(message_id))
+    )
+    feedback = feedback_result.scalar_one_or_none()
+    if not feedback:
+        return None
+
+    return FeedbackResponse(
+        id=str(feedback.id),
+        message_id=str(feedback.message_id),
+        rating=feedback.rating,
+        comment=feedback.comment,
+        created_at=feedback.created_at.isoformat()
+    )

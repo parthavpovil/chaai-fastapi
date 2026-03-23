@@ -2,9 +2,9 @@
   "info": {
     "_postman_id": "chatsaas-backend-api-v1",
     "name": "ChatSaaS Backend API",
-    "description": "# ChatSaaS Backend API\n\nComplete API collection for the ChatSaaS Backend platform.\n\n## Environment Variables\n- `base_url`: API base URL (e.g. `http://localhost:8000`)\n- `access_token`: JWT token (auto-populated by login/register)\n- `workspace_id`: Current workspace ID (auto-populated)\n- `workspace_slug`: Current workspace slug (auto-populated)\n- `channel_id`: Channel ID (auto-populated)\n- `document_id`: Document ID (auto-populated)\n- `agent_id`: Agent ID (auto-populated)\n- `conversation_id`: Conversation ID (auto-populated)\n- `session_token`: WebChat session token (auto-populated)\n- `widget_id`: WebChat widget ID (auto-populated)\n- `invitation_token`: Agent invitation token (auto-populated)\n\n## Authentication\nMost endpoints require `Authorization: Bearer {{access_token}}`.\n\n## Trailing Slashes\nFastAPI routes are defined with trailing slashes. Always use `/api/channels/` not `/api/channels`.",
+    "description": "# ChatSaaS Backend API\n\nComplete API collection for the ChatSaaS Backend platform.\n\n## Environment Variables\n- `base_url`: API base URL (e.g. `http://localhost:8000`)\n- `access_token`: JWT token or API key `csk_xxx` (auto-populated by login/register)\n- `workspace_id`: Current workspace ID (auto-populated)\n- `workspace_slug`: Current workspace slug (auto-populated)\n- `channel_id`: Channel ID (auto-populated)\n- `document_id`: Document ID (auto-populated)\n- `agent_id`: Agent ID (auto-populated)\n- `conversation_id`: Conversation ID (auto-populated)\n- `message_id`: Message ID for feedback endpoints\n- `session_token`: WebChat session token (auto-populated)\n- `widget_id`: WebChat widget ID (auto-populated)\n- `invitation_token`: Agent invitation token (auto-populated)\n- `canned_response_id`: Canned response ID (auto-populated)\n- `rule_id`: Assignment rule ID (auto-populated)\n- `outbound_webhook_id`: Outbound webhook ID (auto-populated)\n- `webhook_log_id`: Webhook delivery log ID (auto-populated)\n- `api_key_id`: API key ID (auto-populated)\n- `api_key_raw`: Raw API key returned once on creation — store securely\n- `contact_id`: Contact ID for contact management endpoints\n- `csat_token`: JWT token from csat_prompt WebSocket event for CSAT submission\n\n## Authentication\nMost endpoints require `Authorization: Bearer {{access_token}}`.\nAPI keys (`csk_xxx`) can also be used as Bearer tokens on any authenticated endpoint.\n\n## Trailing Slashes\nFastAPI routes are defined with trailing slashes. Always use `/api/channels/` not `/api/channels`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "version": "2.0.0"
+    "version": "4.1.0"
   },
   "auth": {
     "type": "bearer",
@@ -161,6 +161,39 @@
             },
             "description": "Get current authenticated user and workspace info."
           },
+          "response": []
+        },
+        {
+          "name": "POST Refresh Token",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/auth/refresh",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "refresh"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"token\": \"{{access_token}}\"\n}"
+            },
+            "description": "Silently refresh a JWT before it expires. Pass a valid (non-expired) token and receive a new token with a fresh expiry. Call this proactively ~5 minutes before exp to avoid mid-session logouts."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set('access_token', pm.response.json().access_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
           "response": []
         }
       ]
@@ -474,12 +507,151 @@
             "description": "Get conversations assigned to the current agent."
           },
           "response": []
+        },
+        {
+          "name": "POST Create Internal Note",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/conversations/{{conversation_id}}/notes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", "{{conversation_id}}", "notes"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"content\": \"Customer seems frustrated about billing. Check account history before responding.\"\n}"
+            },
+            "description": "Create an internal note on a conversation. Only visible to agents/owners, never to customers."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Internal Notes",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/conversations/{{conversation_id}}/notes",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", "{{conversation_id}}", "notes"]
+            },
+            "description": "List all internal notes for a conversation."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Submit AI Feedback",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/conversations/{{conversation_id}}/messages/{{message_id}}/feedback",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", "{{conversation_id}}", "messages", "{{message_id}}", "feedback"],
+              "variable": [
+                { "key": "message_id", "value": "{{message_id}}", "description": "Message ID to rate." }
+              ]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"rating\": \"negative\",\n  \"comment\": \"The AI gave incorrect pricing information.\"\n}"
+            },
+            "description": "Submit thumbs-up (positive) or thumbs-down (negative) feedback on an AI response. One feedback per message."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set('feedback_id', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "GET AI Feedback for Message",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/conversations/{{conversation_id}}/messages/{{message_id}}/feedback",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", "{{conversation_id}}", "messages", "{{message_id}}", "feedback"]
+            },
+            "description": "Get feedback for a specific message. Returns null if none submitted."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Search Conversations",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/conversations/search?q=billing&status=resolved&limit=20&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", "search"],
+              "query": [
+                { "key": "q", "value": "billing", "description": "Full-text search query across message content (PostgreSQL tsvector)." },
+                { "key": "contact_name", "value": "", "description": "Filter by contact name (ILIKE). Optional." },
+                { "key": "channel_type", "value": "", "description": "Filter by channel: webchat, telegram, whatsapp, instagram. Optional." },
+                { "key": "status", "value": "resolved", "description": "Filter by status: active, escalated, agent, resolved, paused. Optional." },
+                { "key": "date_from", "value": "", "description": "ISO date filter start (inclusive). Optional." },
+                { "key": "date_to", "value": "", "description": "ISO date filter end (inclusive). Optional." },
+                { "key": "assigned_agent_id", "value": "", "description": "Filter by assigned agent UUID. Optional." },
+                { "key": "limit", "value": "20", "description": "Max results (1-100, default 20)." },
+                { "key": "offset", "value": "0", "description": "Pagination offset." }
+              ]
+            },
+            "description": "Full-text search across conversations using PostgreSQL tsvector. Returns matching conversations with a ts_headline snippet showing the matching context. Requires at least one filter parameter."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Export Conversations CSV",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/conversations/export?status=resolved&date_from=2026-01-01",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", "export"],
+              "query": [
+                { "key": "q", "value": "", "description": "Full-text search filter. Optional." },
+                { "key": "contact_name", "value": "", "description": "Filter by contact name. Optional." },
+                { "key": "channel_type", "value": "", "description": "Filter by channel type. Optional." },
+                { "key": "status", "value": "resolved", "description": "Filter by status. Optional." },
+                { "key": "date_from", "value": "2026-01-01", "description": "ISO date filter start. Optional." },
+                { "key": "date_to", "value": "", "description": "ISO date filter end. Optional." },
+                { "key": "assigned_agent_id", "value": "", "description": "Filter by assigned agent UUID. Optional." }
+              ]
+            },
+            "description": "Export conversations as a streaming CSV file. Growth+ tier required. CSV columns: conversation_id, contact_name, channel_type, status, created_at, resolved_at, message_count, escalated, assigned_agent_name, csat_rating. Response header: Content-Disposition: attachment; filename=conversations_export.csv"
+          },
+          "response": []
+        },
+        {
+          "name": "GET CSAT for Conversation",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/conversations/{{conversation_id}}/csat",
+              "host": ["{{base_url}}"],
+              "path": ["api", "conversations", "{{conversation_id}}", "csat"]
+            },
+            "description": "Get the CSAT rating submitted for a specific conversation. Returns 404 if no rating exists yet."
+          },
+          "response": []
         }
       ]
     },
     {
       "name": "Documents",
-      "description": "Upload and manage knowledge base documents for AI context.",
+      "description": "Upload and manage knowledge-base documents for AI RAG context. Files are stored in Cloudflare R2. Supported formats: PDF, TXT (max 10MB). The response `file_path` field is the public R2 URL.",
       "item": [
         {
           "name": "POST Upload Document",
@@ -498,17 +670,17 @@
                   "key": "file",
                   "type": "file",
                   "src": "",
-                  "description": "File to upload (max 10MB). Supported: PDF, TXT, DOCX, etc."
+                  "description": "File to upload (PDF or TXT, max 10MB). Stored in Cloudflare R2."
                 },
                 {
                   "key": "name",
                   "value": "My Knowledge Base Doc",
                   "type": "text",
-                  "description": "Optional custom name for the document."
+                  "description": "Optional custom display name for the document."
                 }
               ]
             },
-            "description": "Upload a document to the knowledge base. Max 10MB. Use form-data."
+            "description": "Upload a document to the knowledge base. Text is extracted in-memory then stored in R2. Response includes `file_path` (R2 URL) and `chunks_count`."
           },
           "event": [
             {
@@ -534,12 +706,12 @@
               "host": ["{{base_url}}"],
               "path": ["api", "documents", ""],
               "query": [
-                { "key": "status_filter", "value": "completed", "description": "Filter by status: processing, completed, failed. Optional." },
+                { "key": "status_filter", "value": "completed", "description": "Filter by status: pending, processing, completed, failed. Optional." },
                 { "key": "limit", "value": "50", "description": "Max results (default 50)." },
                 { "key": "offset", "value": "0", "description": "Pagination offset." }
               ]
             },
-            "description": "List all documents in the workspace knowledge base."
+            "description": "List all documents in the workspace knowledge base. Each document includes `file_path` (R2 URL) and `chunks_count`."
           },
           "response": []
         },
@@ -552,7 +724,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "documents", "{{document_id}}"]
             },
-            "description": "Get a specific document by ID."
+            "description": "Get a specific document by ID. Returns `file_path` (R2 URL), `status`, and `chunks_count`."
           },
           "response": []
         },
@@ -565,7 +737,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "documents", "{{document_id}}"]
             },
-            "description": "Delete a document from the knowledge base."
+            "description": "Delete a document and its chunks from the database, and delete the file from Cloudflare R2."
           },
           "response": []
         },
@@ -578,7 +750,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "documents", "{{document_id}}", "reprocess"]
             },
-            "description": "Reprocess a failed document (re-chunk and re-embed)."
+            "description": "Re-download the file from R2, re-extract text, and regenerate embeddings. R2 URL is preserved (no re-upload). Allowed for `failed` or `completed` documents."
           },
           "response": []
         },
@@ -591,7 +763,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "documents", "stats", "summary"]
             },
-            "description": "Get document statistics for the workspace."
+            "description": "Get document statistics for the workspace (counts by status, total chunks, tier info)."
           },
           "response": []
         }
@@ -693,7 +865,7 @@
               "host": ["{{base_url}}"],
               "path": ["api", "agents", "stats"]
             },
-            "description": "Get agent statistics: total, active, inactive, pending invitations."
+            "description": "Get agent statistics: totals plus per-agent performance breakdown (active conversations, 30-day resolved count, avg CSAT score)."
           },
           "response": []
         },
@@ -762,12 +934,44 @@
             "description": "Permanently delete an agent from the workspace."
           },
           "response": []
+        },
+        {
+          "name": "PUT Set Agent Status",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/agents/me/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "agents", "me", "status"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"status\": \"online\"\n}"
+            },
+            "description": "Set current agent availability status. Values: online, offline, busy. Updates heartbeat timestamp — agents are auto-set offline after 5 min of no heartbeat."
+          },
+          "response": []
+        },
+        {
+          "name": "GET My Agent Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/agents/me/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "agents", "me", "status"]
+            },
+            "description": "Get current agent's status and last heartbeat timestamp."
+          },
+          "response": []
         }
       ]
     },
     {
       "name": "WebChat (Public)",
-      "description": "Public WebChat endpoints — no auth required. Used by the widget embedded on customer websites.",
+      "description": "Public WebChat endpoints — no auth required. Used by the widget embedded on customer websites. Supports text and media messages. Files are uploaded to Cloudflare R2 via POST /upload, then referenced in POST /send.",
       "item": [
         {
           "name": "GET WebChat Config",
@@ -779,12 +983,12 @@
               "host": ["{{base_url}}"],
               "path": ["api", "webchat", "config", "{{workspace_slug}}"]
             },
-            "description": "Get WebChat widget config for a workspace (public). Used by the embedded widget."
+            "description": "Get WebChat widget config for a workspace (public). Returns widget_id, business_name, primary_color, position, welcome_message."
           },
           "response": []
         },
         {
-          "name": "POST WebChat Send Message",
+          "name": "POST WebChat Send Message (Text)",
           "request": {
             "auth": { "type": "noauth" },
             "method": "POST",
@@ -797,9 +1001,9 @@
             "body": {
               "mode": "raw",
               "options": { "raw": { "language": "json" } },
-              "raw": "{\n  \"widget_id\": \"{{widget_id}}\",\n  \"session_token\": \"{{session_token}}\",\n  \"message\": \"Hello, I need help with my order.\",\n  \"contact_name\": \"John Doe\"\n}"
+              "raw": "{\n  \"widget_id\": \"{{widget_id}}\",\n  \"session_token\": \"{{session_token}}\",\n  \"message\": \"Hello, I need help with my order.\",\n  \"contact_name\": \"John Doe\",\n  \"contact_email\": \"john@example.com\",\n  \"contact_phone\": \"+919847000000\",\n  \"external_id\": \"usr_123\",\n  \"metadata\": {\n    \"plan\": \"premium\",\n    \"total_orders\": 12,\n    \"city\": \"Thrissur\"\n  }\n}"
             },
-            "description": "Send a message via WebChat widget. `session_token` is optional on first message (auto-created). `contact_name` is optional. Rate limit: 10 msg/min per session."
+            "description": "Send a text message via WebChat widget. `session_token` is optional on first message (auto-created and returned). Use `external_id` as your internal customer ID for stable identity across sessions. Rate limit: 10 req/min per session (shared with /upload)."
           },
           "event": [
             {
@@ -810,6 +1014,77 @@
                   "if (pm.response.code === 200) {",
                   "  var j = pm.response.json();",
                   "  if (j.session_token) pm.environment.set('session_token', j.session_token);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "POST WebChat Send Message (Media)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/webchat/send",
+              "host": ["{{base_url}}"],
+              "path": ["api", "webchat", "send"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"widget_id\": \"{{widget_id}}\",\n  \"session_token\": \"{{session_token}}\",\n  \"media_url\": \"{{uploaded_media_url}}\",\n  \"media_mime_type\": \"image/jpeg\",\n  \"media_filename\": \"screenshot.jpg\",\n  \"media_size\": 204800,\n  \"message_type\": \"image\"\n}"
+            },
+            "description": "Send a media message after uploading via POST /upload. Set `media_url` from the upload response. Either `message` or `media_url` must be provided. `message_type` can be: image, video, audio, document."
+          },
+          "response": []
+        },
+        {
+          "name": "POST WebChat Upload File",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/webchat/upload",
+              "host": ["{{base_url}}"],
+              "path": ["api", "webchat", "upload"]
+            },
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "widget_id",
+                  "value": "{{widget_id}}",
+                  "type": "text",
+                  "description": "Widget ID (required)."
+                },
+                {
+                  "key": "session_token",
+                  "value": "{{session_token}}",
+                  "type": "text",
+                  "description": "Active session token (required — send a text message first to start a session)."
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "",
+                  "description": "File to upload. Supported: image/jpeg, image/png, image/webp (5MB), video/mp4 (16MB), audio/mpeg|ogg|aac (16MB), application/pdf (100MB)."
+                }
+              ]
+            },
+            "description": "Upload a file from the widget to Cloudflare R2. Returns the R2 URL (`url`), `mime_type`, `size`, `filename`, and `message_type`. Pass the `url` to POST /send as `media_url`. Requires an active session. Rate limit: shared 10 req/min bucket with /send."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.set('uploaded_media_url', pm.response.json().url);",
                   "}"
                 ]
               }
@@ -833,7 +1108,7 @@
                 { "key": "offset", "value": "0", "description": "Pagination offset." }
               ]
             },
-            "description": "Get message history for a WebChat session. Rate limit: 30 req/min per session."
+            "description": "Get message history for a WebChat session. Each message includes `msg_type`, `media_url`, `media_mime_type`, `media_filename`, `media_size` for media messages."
           },
           "response": []
         }
@@ -997,6 +1272,22 @@
             "description": "Get platform analytics: message volume, signup trends, escalation statistics."
           },
           "response": []
+        },
+        {
+          "name": "GET AI Feedback Stats",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/admin/feedback/stats",
+              "host": ["{{base_url}}"],
+              "path": ["api", "admin", "feedback", "stats"],
+              "query": [
+                { "key": "workspace_id", "value": "", "description": "Optional: filter by workspace UUID.", "disabled": true }
+              ]
+            },
+            "description": "Aggregate AI feedback (positive/negative) counts per workspace. Super admin only."
+          },
+          "response": []
         }
       ]
     },
@@ -1075,8 +1366,138 @@
     },
     {
       "name": "Webhooks",
-      "description": "Incoming webhooks from third-party services.",
+      "description": "Incoming webhooks from third-party services (Telegram, WhatsApp, Instagram, Stripe, Resend).",
       "item": [
+        {
+          "name": "POST Telegram Webhook",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "your_secret_token", "description": "Secret token set when registering the webhook with Telegram." }
+            ],
+            "url": {
+              "raw": "{{base_url}}/webhooks/telegram/{{channel_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhooks", "telegram", "{{channel_id}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"update_id\": 123456789,\n  \"message\": {\n    \"message_id\": 1,\n    \"from\": { \"id\": 987654321, \"first_name\": \"John\", \"username\": \"john_doe\" },\n    \"chat\": { \"id\": 987654321, \"type\": \"private\" },\n    \"date\": 1711234567,\n    \"text\": \"Hello, I need help with my order.\"\n  }\n}"
+            },
+            "description": "Receive message updates from Telegram. Always returns HTTP 200 to prevent retries."
+          },
+          "response": []
+        },
+        {
+          "name": "GET WhatsApp Webhook Verify",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/webhooks/whatsapp/{{channel_id}}?hub.mode=subscribe&hub.challenge=12345&hub.verify_token=your_verify_token",
+              "host": ["{{base_url}}"],
+              "path": ["webhooks", "whatsapp", "{{channel_id}}"],
+              "query": [
+                { "key": "hub.mode", "value": "subscribe" },
+                { "key": "hub.challenge", "value": "12345" },
+                { "key": "hub.verify_token", "value": "your_verify_token" }
+              ]
+            },
+            "description": "Meta webhook verification challenge. Used when registering the WhatsApp webhook URL in Meta for Developers."
+          },
+          "response": []
+        },
+        {
+          "name": "POST WhatsApp Webhook",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Hub-Signature-256", "value": "sha256=your_hmac_signature", "description": "HMAC-SHA256 of the raw body using the app secret." }
+            ],
+            "url": {
+              "raw": "{{base_url}}/webhooks/whatsapp/{{channel_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhooks", "whatsapp", "{{channel_id}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"object\": \"whatsapp_business_account\",\n  \"entry\": [{\n    \"id\": \"WHATSAPP_BUSINESS_ACCOUNT_ID\",\n    \"changes\": [{\n      \"value\": {\n        \"messaging_product\": \"whatsapp\",\n        \"metadata\": { \"display_phone_number\": \"15550000000\", \"phone_number_id\": \"PHONE_NUMBER_ID\" },\n        \"contacts\": [{ \"profile\": { \"name\": \"John Doe\" }, \"wa_id\": \"15551234567\" }],\n        \"messages\": [{\n          \"from\": \"15551234567\",\n          \"id\": \"wamid.xxxx\",\n          \"timestamp\": \"1711234567\",\n          \"text\": { \"body\": \"Hello, I need help.\" },\n          \"type\": \"text\"\n        }]\n      },\n      \"field\": \"messages\"\n    }]\n  }]\n}"
+            },
+            "description": "Receive message events from WhatsApp Business. Always returns HTTP 200."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Instagram Webhook Verify",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/webhooks/instagram/{{channel_id}}?hub.mode=subscribe&hub.challenge=12345&hub.verify_token=your_verify_token",
+              "host": ["{{base_url}}"],
+              "path": ["webhooks", "instagram", "{{channel_id}}"],
+              "query": [
+                { "key": "hub.mode", "value": "subscribe" },
+                { "key": "hub.challenge", "value": "12345" },
+                { "key": "hub.verify_token", "value": "your_verify_token" }
+              ]
+            },
+            "description": "Meta webhook verification challenge for Instagram DMs."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Instagram Webhook",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Hub-Signature-256", "value": "sha256=your_hmac_signature" }
+            ],
+            "url": {
+              "raw": "{{base_url}}/webhooks/instagram/{{channel_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["webhooks", "instagram", "{{channel_id}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"object\": \"instagram\",\n  \"entry\": [{\n    \"id\": \"INSTAGRAM_ACCOUNT_ID\",\n    \"messaging\": [{\n      \"sender\": { \"id\": \"USER_IGSID\" },\n      \"recipient\": { \"id\": \"PAGE_ID\" },\n      \"timestamp\": 1711234567,\n      \"message\": { \"mid\": \"m_xxxx\", \"text\": \"I need help with a return.\" }\n    }]\n  }]\n}"
+            },
+            "description": "Receive DM events from Instagram. Always returns HTTP 200."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Stripe Webhook",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "Stripe-Signature", "value": "t=1711234567,v1=xxxxxxxxxxxx", "description": "Stripe webhook signature for verification." }
+            ],
+            "url": {
+              "raw": "{{base_url}}/webhooks/stripe",
+              "host": ["{{base_url}}"],
+              "path": ["webhooks", "stripe"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"id\": \"evt_xxxx\",\n  \"type\": \"customer.subscription.updated\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"sub_xxxx\",\n      \"customer\": \"cus_xxxx\",\n      \"status\": \"active\",\n      \"items\": { \"data\": [{ \"price\": { \"id\": \"price_growth_monthly\" } }] }\n    }\n  }\n}"
+            },
+            "description": "Receive billing events from Stripe. Handles: customer.subscription.updated, customer.subscription.deleted."
+          },
+          "response": []
+        },
         {
           "name": "POST Resend Webhook",
           "request": {
@@ -1084,9 +1505,9 @@
             "method": "POST",
             "header": [
               { "key": "Content-Type", "value": "application/json" },
-              { "key": "svix-id", "value": "msg_xxxxxxxxxxxx", "description": "Svix message ID (sent by Resend)." },
-              { "key": "svix-timestamp", "value": "1234567890", "description": "Svix timestamp (sent by Resend)." },
-              { "key": "svix-signature", "value": "v1,xxxxxxxxxxxx", "description": "Svix signature for verification (sent by Resend)." }
+              { "key": "svix-id", "value": "msg_xxxxxxxxxxxx" },
+              { "key": "svix-timestamp", "value": "1234567890" },
+              { "key": "svix-signature", "value": "v1,xxxxxxxxxxxx" }
             ],
             "url": {
               "raw": "{{base_url}}/webhooks/resend",
@@ -1098,7 +1519,715 @@
               "options": { "raw": { "language": "json" } },
               "raw": "{\n  \"type\": \"email.delivered\",\n  \"data\": {\n    \"email_id\": \"email_xxxxxxxxxxxx\",\n    \"from\": \"noreply@example.com\",\n    \"to\": [\"agent@example.com\"],\n    \"subject\": \"You have been invited\",\n    \"created_at\": \"2026-03-20T12:00:00.000Z\"\n  }\n}"
             },
-            "description": "Incoming webhook from Resend email service. Event types: email.sent, email.delivered, email.delivery_delayed, email.complained, email.bounced, email.opened, email.clicked."
+            "description": "Incoming webhook from Resend email service."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Canned Responses",
+      "description": "Pre-written responses for quick agent replies. Free=5, Starter=10, Growth=50, Pro=unlimited.",
+      "item": [
+        {
+          "name": "POST Create Canned Response",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/canned-responses",
+              "host": ["{{base_url}}"],
+              "path": ["api", "canned-responses"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"name\": \"Greeting\",\n  \"shortcut\": \"/hi\",\n  \"content\": \"Hello! Thank you for reaching out. How can I assist you today?\"\n}"
+            },
+            "description": "Create a canned response. Owner only. Shortcut must be unique per workspace."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  pm.environment.set('canned_response_id', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "GET List Canned Responses",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/canned-responses",
+              "host": ["{{base_url}}"],
+              "path": ["api", "canned-responses"]
+            },
+            "description": "List all canned responses for the workspace. Accessible by owners and agents."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT Update Canned Response",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/canned-responses/{{canned_response_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "canned-responses", "{{canned_response_id}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"name\": \"Updated Greeting\",\n  \"content\": \"Hi there! Welcome. How may I help you?\"\n}"
+            },
+            "description": "Update a canned response. Owner only."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE Canned Response",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/canned-responses/{{canned_response_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "canned-responses", "{{canned_response_id}}"]
+            },
+            "description": "Delete a canned response. Owner only."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Assignment Rules",
+      "description": "Automatic conversation routing rules (Pro tier only).",
+      "item": [
+        {
+          "name": "POST Create Assignment Rule",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/assignment-rules",
+              "host": ["{{base_url}}"],
+              "path": ["api", "assignment-rules"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"name\": \"Route billing queries to senior agent\",\n  \"priority\": 10,\n  \"conditions\": {\n    \"keywords\": [\"refund\", \"billing\", \"invoice\"],\n    \"channel_type\": \"whatsapp\"\n  },\n  \"action\": \"specific_agent\",\n  \"target_agent_id\": \"{{agent_id}}\",\n  \"is_active\": true\n}"
+            },
+            "description": "Create a routing rule. Actions: round_robin, specific_agent, least_loaded. Pro tier only."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  pm.environment.set('rule_id', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "GET List Assignment Rules",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/assignment-rules",
+              "host": ["{{base_url}}"],
+              "path": ["api", "assignment-rules"]
+            },
+            "description": "List all assignment rules ordered by priority."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT Update Assignment Rule",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/assignment-rules/{{rule_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "assignment-rules", "{{rule_id}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"is_active\": false,\n  \"priority\": 20\n}"
+            },
+            "description": "Update an assignment rule."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE Assignment Rule",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/assignment-rules/{{rule_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "assignment-rules", "{{rule_id}}"]
+            },
+            "description": "Delete an assignment rule."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Workspace",
+      "description": "Workspace overview, settings, and AI model configuration.",
+      "item": [
+        {
+          "name": "GET Workspace Overview",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/workspace/overview",
+              "host": ["{{base_url}}"],
+              "path": ["api", "workspace", "overview"]
+            },
+            "description": "Get workspace dashboard stats: conversations today, messages this month, quota remaining."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT Workspace Settings",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/workspace/settings",
+              "host": ["{{base_url}}"],
+              "path": ["api", "workspace", "settings"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"fallback_msg\": \"Sorry, I couldn't understand that. A human agent will assist you shortly.\",\n  \"alert_email\": \"alerts@mycompany.com\",\n  \"agents_enabled\": true,\n  \"escalation_keywords\": [\"refund\", \"angry\", \"cancel\", \"lawsuit\"],\n  \"escalation_sensitivity\": \"medium\"\n}"
+            },
+            "description": "Update workspace settings. All fields optional."
+          },
+          "response": []
+        },
+        {
+          "name": "GET AI Config",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/workspace/ai-config",
+              "host": ["{{base_url}}"],
+              "path": ["api", "workspace", "ai-config"]
+            },
+            "description": "Get current AI provider and model configuration for the workspace."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT AI Config",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/workspace/ai-config",
+              "host": ["{{base_url}}"],
+              "path": ["api", "workspace", "ai-config"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"ai_provider\": \"groq\",\n  \"ai_model\": \"llama3-8b-8192\",\n  \"ai_api_key\": \"gsk_your_groq_api_key\"\n}"
+            },
+            "description": "Set workspace AI provider/model override. Growth+ tier only. Providers: google, openai, groq."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Outbound Webhooks",
+      "description": "Register external URLs to receive ChatSaaS events. Growth+ tier only.",
+      "item": [
+        {
+          "name": "POST Create Outbound Webhook",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/webhooks/outbound",
+              "host": ["{{base_url}}"],
+              "path": ["api", "webhooks", "outbound"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"url\": \"https://your-server.com/chatsaas-events\",\n  \"events\": [\"message.received\", \"conversation.escalated\", \"conversation.resolved\", \"conversation.created\"],\n  \"secret\": \"my_webhook_secret_for_hmac\"\n}"
+            },
+            "description": "Register an outbound webhook. Events: message.received, conversation.escalated, conversation.resolved, conversation.created. Requests are signed with X-ChatSaaS-Signature: sha256=<hmac>."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  pm.environment.set('outbound_webhook_id', pm.response.json().id);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "GET List Outbound Webhooks",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/webhooks/outbound",
+              "host": ["{{base_url}}"],
+              "path": ["api", "webhooks", "outbound"]
+            },
+            "description": "List all registered outbound webhooks for the workspace."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT Update Outbound Webhook",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/webhooks/outbound/{{outbound_webhook_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "webhooks", "outbound", "{{outbound_webhook_id}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"is_active\": false\n}"
+            },
+            "description": "Enable or disable an outbound webhook, or update its URL/events."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE Outbound Webhook",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/webhooks/outbound/{{outbound_webhook_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "webhooks", "outbound", "{{outbound_webhook_id}}"]
+            },
+            "description": "Delete an outbound webhook registration."
+          },
+          "response": []
+        },
+        {
+          "name": "GET List Webhook Delivery Logs",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/webhooks/outbound/{{outbound_webhook_id}}/logs?limit=20&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "webhooks", "outbound", "{{outbound_webhook_id}}", "logs"],
+              "query": [
+                { "key": "limit", "value": "20", "description": "Max results (1-100, default 20)." },
+                { "key": "offset", "value": "0", "description": "Pagination offset." },
+                { "key": "success", "value": "", "description": "Filter by success: true or false. Optional." }
+              ]
+            },
+            "description": "List delivery attempt logs for an outbound webhook. Returns up to 30 days of history, most recent first. Each log includes status code, response body (truncated to 2000 chars), duration_ms, and is_success flag."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  var j = pm.response.json();",
+                  "  if (j.logs && j.logs.length > 0) {",
+                  "    pm.environment.set('webhook_log_id', j.logs[0].id);",
+                  "  }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "GET Webhook Delivery Log Detail",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/webhooks/outbound/{{outbound_webhook_id}}/logs/{{webhook_log_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "webhooks", "outbound", "{{outbound_webhook_id}}", "logs", "{{webhook_log_id}}"]
+            },
+            "description": "Get full detail of a single delivery log entry, including complete payload and response body."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "API Keys",
+      "description": "Programmatic API access via long-lived API keys (csk_ prefix). Growth+ tier only.",
+      "item": [
+        {
+          "name": "POST Create API Key",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/api-keys",
+              "host": ["{{base_url}}"],
+              "path": ["api", "api-keys"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"name\": \"CI/CD Pipeline Key\",\n  \"scopes\": [\"conversations:read\", \"conversations:write\"]\n}"
+            },
+            "description": "Create an API key. The raw key (csk_xxx) is returned ONCE — store it securely. It cannot be retrieved again."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  var j = pm.response.json();",
+                  "  pm.environment.set('api_key_id', j.id);",
+                  "  if (j.key) pm.environment.set('api_key_raw', j.key);",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
+        },
+        {
+          "name": "GET List API Keys",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/api-keys",
+              "host": ["{{base_url}}"],
+              "path": ["api", "api-keys"]
+            },
+            "description": "List all API keys (shows prefix only, never the full key)."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE API Key",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/api-keys/{{api_key_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "api-keys", "{{api_key_id}}"]
+            },
+            "description": "Revoke and delete an API key."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Billing",
+      "description": "Stripe-powered subscription management.",
+      "item": [
+        {
+          "name": "GET Billing Status",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/billing/status",
+              "host": ["{{base_url}}"],
+              "path": ["api", "billing", "status"]
+            },
+            "description": "Get current subscription status, tier, and Stripe customer ID."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Create Checkout Session",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/billing/checkout",
+              "host": ["{{base_url}}"],
+              "path": ["api", "billing", "checkout"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"tier\": \"growth\",\n  \"success_url\": \"https://yourdashboard.com/billing/success\",\n  \"cancel_url\": \"https://yourdashboard.com/billing\"\n}"
+            },
+            "description": "Create a Stripe checkout session for upgrading tier. Returns checkout URL. Tiers: starter, growth, pro."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Create Customer Portal Session",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/billing/portal",
+              "host": ["{{base_url}}"],
+              "path": ["api", "billing", "portal"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"return_url\": \"https://yourdashboard.com/billing\"\n}"
+            },
+            "description": "Create a Stripe customer portal session for managing subscription, invoices, and payment methods."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Contacts",
+      "description": "Manage customer contacts — search, tag, block, and GDPR-delete. Custom fields gated to Growth+ tier.",
+      "item": [
+        {
+          "name": "GET List Contacts",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/contacts/?limit=50&offset=0",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contacts", ""],
+              "query": [
+                { "key": "q", "value": "", "description": "Search by name, email, or phone (ILIKE). Optional." },
+                { "key": "tag", "value": "", "description": "Filter by tag value. Optional." },
+                { "key": "is_blocked", "value": "", "description": "Filter by blocked status: true or false. Optional." },
+                { "key": "limit", "value": "50", "description": "Max results (1-100, default 50)." },
+                { "key": "offset", "value": "0", "description": "Pagination offset." }
+              ]
+            },
+            "description": "List contacts for the workspace with optional search and filters."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Contact Detail",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/contacts/{{contact_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contacts", "{{contact_id}}"]
+            },
+            "description": "Get contact detail including the last 10 conversations."
+          },
+          "response": []
+        },
+        {
+          "name": "PATCH Update Contact",
+          "request": {
+            "method": "PATCH",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/contacts/{{contact_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contacts", "{{contact_id}}"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"name\": \"John Smith\",\n  \"email\": \"john@example.com\",\n  \"phone\": \"+1-555-0100\",\n  \"tags\": [\"vip\", \"enterprise\"],\n  \"custom_fields\": {\n    \"account_id\": \"ACC-12345\",\n    \"plan\": \"enterprise\"\n  }\n}"
+            },
+            "description": "Update contact details. custom_fields requires Growth+ tier. Fires contact.updated outbound webhook event."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Block Contact",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/contacts/{{contact_id}}/block",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contacts", "{{contact_id}}", "block"]
+            },
+            "description": "Block a contact. Blocked contacts receive a polite auto-reply and no AI processing or usage counting occurs for their messages."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Unblock Contact",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/contacts/{{contact_id}}/unblock",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contacts", "{{contact_id}}", "unblock"]
+            },
+            "description": "Unblock a previously blocked contact."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE Contact (GDPR)",
+          "request": {
+            "method": "DELETE",
+            "url": {
+              "raw": "{{base_url}}/api/contacts/{{contact_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "contacts", "{{contact_id}}"]
+            },
+            "description": "Permanently delete a contact and all their conversations and messages (cascading delete). Use for GDPR erasure requests. This action is irreversible."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Business Hours",
+      "description": "Configure operating hours and outside-hours auto-response behavior per workspace.",
+      "item": [
+        {
+          "name": "GET Business Hours Schedule",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/workspace/business-hours/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "workspace", "business-hours", ""]
+            },
+            "description": "Get configured business hours for all 7 days of the week (Mon=0 to Sun=6). Returns empty array if not yet configured (treated as always open)."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT Update Business Hours Schedule",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/workspace/business-hours/",
+              "host": ["{{base_url}}"],
+              "path": ["api", "workspace", "business-hours", ""]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "[\n  { \"day_of_week\": 0, \"open_time\": \"09:00\", \"close_time\": \"17:00\", \"is_closed\": false, \"timezone\": \"America/New_York\" },\n  { \"day_of_week\": 1, \"open_time\": \"09:00\", \"close_time\": \"17:00\", \"is_closed\": false, \"timezone\": \"America/New_York\" },\n  { \"day_of_week\": 2, \"open_time\": \"09:00\", \"close_time\": \"17:00\", \"is_closed\": false, \"timezone\": \"America/New_York\" },\n  { \"day_of_week\": 3, \"open_time\": \"09:00\", \"close_time\": \"17:00\", \"is_closed\": false, \"timezone\": \"America/New_York\" },\n  { \"day_of_week\": 4, \"open_time\": \"09:00\", \"close_time\": \"17:00\", \"is_closed\": false, \"timezone\": \"America/New_York\" },\n  { \"day_of_week\": 5, \"open_time\": \"10:00\", \"close_time\": \"14:00\", \"is_closed\": false, \"timezone\": \"America/New_York\" },\n  { \"day_of_week\": 6, \"open_time\": \"00:00\", \"close_time\": \"00:00\", \"is_closed\": true, \"timezone\": \"America/New_York\" }\n]"
+            },
+            "description": "Upsert business hours for all 7 days. day_of_week: 0=Monday, 6=Sunday. is_closed=true marks the day as fully closed regardless of open/close times. timezone must be a valid IANA timezone (e.g. America/New_York, Europe/London, Asia/Kolkata)."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT Outside Hours Settings",
+          "request": {
+            "method": "PUT",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/workspace/business-hours/outside-hours-settings",
+              "host": ["{{base_url}}"],
+              "path": ["api", "workspace", "business-hours", "outside-hours-settings"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"outside_hours_message\": \"Thanks for reaching out! Our team is currently offline. We're available Mon–Fri 9am–5pm ET. We'll get back to you soon!\",\n  \"outside_hours_behavior\": \"inform_and_pause\"\n}"
+            },
+            "description": "Set the auto-reply message and behavior when a message arrives outside business hours. Behaviors: inform_and_continue (reply then continue to AI), inform_and_pause (reply and pause conversation until business hours)."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "CSAT - Public (No Auth)",
+      "description": "Customer-facing CSAT endpoints. No authentication required — secured via time-limited JWT in token parameter.",
+      "item": [
+        {
+          "name": "GET CSAT Rating Form (Validate Token)",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/webchat/csat/{{csat_token}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "webchat", "csat", "{{csat_token}}"]
+            },
+            "description": "Validate a CSAT token and get conversation context for the rating form. Token is a JWT with 72h expiry delivered via WebSocket csat_prompt event. Returns 400 if token is expired or invalid."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Submit CSAT Rating",
+          "request": {
+            "auth": { "type": "noauth" },
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "url": {
+              "raw": "{{base_url}}/api/webchat/csat",
+              "host": ["{{base_url}}"],
+              "path": ["api", "webchat", "csat"]
+            },
+            "body": {
+              "mode": "raw",
+              "options": { "raw": { "language": "json" } },
+              "raw": "{\n  \"token\": \"{{csat_token}}\",\n  \"rating\": 5,\n  \"comment\": \"Very helpful and fast response!\"\n}"
+            },
+            "description": "Submit a CSAT rating (1-5) for a resolved conversation. Token must be the JWT from the csat_prompt WebSocket event. One rating per conversation. Fires csat.submitted outbound webhook event."
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "CSAT Metrics",
+      "description": "Workspace-level CSAT analytics. Growth+ required for date-range trend.",
+      "item": [
+        {
+          "name": "GET CSAT Summary",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base_url}}/api/metrics/csat",
+              "host": ["{{base_url}}"],
+              "path": ["api", "metrics", "csat"],
+              "query": [
+                { "key": "date_from", "value": "", "description": "ISO date filter start. Optional, Growth+ only for trend data." },
+                { "key": "date_to", "value": "", "description": "ISO date filter end. Optional, Growth+ only for trend data." }
+              ]
+            },
+            "description": "Get CSAT metrics: average score (1-5), total_rated, total_resolved, response_rate (%). Growth+ tier additionally returns a daily/weekly trend array when date_from/date_to are provided."
           },
           "response": []
         }
@@ -1167,6 +2296,16 @@
     { "key": "conversation_id", "value": "", "type": "string" },
     { "key": "session_token", "value": "", "type": "string" },
     { "key": "widget_id", "value": "", "type": "string" },
-    { "key": "invitation_token", "value": "", "type": "string" }
+    { "key": "invitation_token", "value": "", "type": "string" },
+    { "key": "message_id", "value": "", "type": "string" },
+    { "key": "feedback_id", "value": "", "type": "string" },
+    { "key": "canned_response_id", "value": "", "type": "string" },
+    { "key": "rule_id", "value": "", "type": "string" },
+    { "key": "outbound_webhook_id", "value": "", "type": "string" },
+    { "key": "webhook_log_id", "value": "", "type": "string" },
+    { "key": "api_key_id", "value": "", "type": "string" },
+    { "key": "api_key_raw", "value": "", "type": "string" },
+    { "key": "contact_id", "value": "", "type": "string" },
+    { "key": "csat_token", "value": "", "type": "string" }
   ]
 }

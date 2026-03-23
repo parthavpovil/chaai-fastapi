@@ -34,7 +34,10 @@ class RAGEngine:
     MAX_CHUNKS = 5
     
     # Conversation history context (last N exchanges)
-    CONTEXT_MESSAGES = 3
+    CONTEXT_MESSAGES = 10
+
+    # Generate a conversation summary every N messages
+    SUMMARY_INTERVAL = 20
     
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -176,12 +179,75 @@ class RAGEngine:
         messages = result.scalars().all()
         return list(reversed(messages))  # Return in chronological order
     
+    async def maybe_generate_summary(
+        self,
+        conversation_id: str,
+        workspace_id: str
+    ) -> None:
+        """
+        Generate and store a conversation summary every SUMMARY_INTERVAL messages.
+        Runs as a fire-and-forget task — does not raise exceptions to callers.
+        """
+        try:
+            count_result = await self.db.execute(
+                select(Message)
+                .where(Message.conversation_id == conversation_id)
+                .order_by(Message.created_at.asc())
+            )
+            messages = count_result.scalars().all()
+            if len(messages) % self.SUMMARY_INTERVAL != 0:
+                return
+
+            # Check tier — only Growth+ gets auto-summaries
+            ws_result = await self.db.execute(
+                select(Workspace).where(Workspace.id == workspace_id)
+            )
+            workspace = ws_result.scalar_one_or_none()
+            if not workspace:
+                return
+            from app.config import TIER_LIMITS
+            if not TIER_LIMITS.get(workspace.tier or "free", {}).get("has_conversation_summary", False):
+                return
+
+            history_text = "\n".join(
+                f"{'Customer' if m.role in ('customer', 'user') else 'Assistant'}: {m.content}"
+                for m in messages
+            )
+            summary_prompt = (
+                "Summarize this customer support conversation in 3-5 bullet points. "
+                "Focus on the customer's main issues, key information shared, and resolutions so far.\n\n"
+                + history_text
+            )
+
+            response_text, _, _ = await self.generate_response(
+                prompt=summary_prompt, max_tokens=200, temperature=0.3
+            )
+
+            # Store summary in conversation.metadata
+            conv_result = await self.db.execute(
+                select(Conversation).where(Conversation.id == conversation_id)
+            )
+            conv = conv_result.scalar_one_or_none()
+            if conv:
+                from datetime import timezone
+                meta = conv.metadata or {}
+                meta["summary"] = response_text
+                meta["summary_generated_at"] = datetime.now(timezone.utc).isoformat()
+                conv.metadata = meta
+                await self.db.commit()
+
+        except Exception as e:
+            # Non-fatal — log and continue
+            import logging
+            logging.getLogger(__name__).warning(f"Summary generation failed: {e}")
+
     async def build_context_prompt(
         self,
         query: str,
         relevant_chunks: List[Tuple[DocumentChunk, float]],
         conversation_history: List[Message],
-        workspace_fallback_message: Optional[str] = None
+        workspace_fallback_message: Optional[str] = None,
+        conversation_summary: Optional[str] = None
     ) -> str:
         """
         Build context prompt for LLM with retrieved chunks and conversation history
@@ -196,7 +262,7 @@ class RAGEngine:
             Formatted prompt for LLM
         """
         prompt_parts = []
-        
+
         # System instruction
         prompt_parts.append(
             "You are a helpful customer support assistant. Use the provided context "
@@ -204,7 +270,11 @@ class RAGEngine:
             "doesn't contain relevant information, politely say so and provide the "
             "fallback message if available."
         )
-        
+
+        # Add conversation summary if available
+        if conversation_summary:
+            prompt_parts.append(f"\n--- CONVERSATION SUMMARY SO FAR ---\n{conversation_summary}")
+
         # Add relevant document context
         if relevant_chunks:
             prompt_parts.append("\n--- RELEVANT KNOWLEDGE BASE ---")
@@ -219,7 +289,7 @@ class RAGEngine:
         if conversation_history:
             prompt_parts.append("\n--- CONVERSATION HISTORY ---")
             for msg in conversation_history[-self.CONTEXT_MESSAGES * 2:]:
-                role = "Customer" if msg.message_type == "user" else "Assistant"
+                role = "Customer" if msg.role in ("customer", "user") else "Assistant"
                 prompt_parts.append(f"\n{role}: {msg.content}")
         
         # Add current query
@@ -309,24 +379,33 @@ class RAGEngine:
             
             # 3. Get conversation context if available
             conversation_history = []
+            conversation_summary = None
             if conversation_id:
                 conversation_history = await self.get_conversation_context(
                     conversation_id, workspace_id
                 )
-            
+                # Load any existing summary from conversation.metadata
+                conv_result = await self.db.execute(
+                    select(Conversation).where(Conversation.id == conversation_id)
+                )
+                conv = conv_result.scalar_one_or_none()
+                if conv and conv.metadata:
+                    conversation_summary = conv.metadata.get("summary")
+
             # 4. Get workspace fallback message
             workspace_result = await self.db.execute(
                 select(Workspace.fallback_msg)
                 .where(Workspace.id == workspace_id)
             )
             fallback_message = workspace_result.scalar_one_or_none()
-            
+
             # 5. Build context prompt
             context_prompt = await self.build_context_prompt(
                 query=query,
                 relevant_chunks=relevant_chunks,
                 conversation_history=conversation_history,
-                workspace_fallback_message=fallback_message
+                workspace_fallback_message=fallback_message,
+                conversation_summary=conversation_summary
             )
             
             # 6. Generate response
@@ -395,28 +474,22 @@ async def generate_rag_response(
     max_tokens: int = 300
 ) -> Dict[str, Any]:
     """
-    Convenience function to generate RAG response
-    
-    Args:
-        db: Database session
-        workspace_id: Workspace ID
-        query: User query
-        conversation_id: Optional conversation ID for context
-        max_tokens: Maximum response tokens
-    
-    Returns:
-        RAG processing results with response and metadata
-    
-    Raises:
-        RAGError: If processing fails
+    Convenience function to generate RAG response.
+    After generating, fires an async summary task if applicable.
     """
+    import asyncio
     rag_engine = RAGEngine(db)
-    return await rag_engine.process_rag_query(
+    result = await rag_engine.process_rag_query(
         workspace_id=workspace_id,
         query=query,
         conversation_id=conversation_id,
         max_tokens=max_tokens
     )
+    if conversation_id:
+        asyncio.create_task(
+            rag_engine.maybe_generate_summary(conversation_id, workspace_id)
+        )
+    return result
 
 
 async def search_knowledge_base(

@@ -54,20 +54,22 @@ class EscalationClassifier:
     def __init__(self, db: AsyncSession):
         self.db = db
     
-    def detect_explicit_keywords(self, message: str) -> Tuple[bool, List[str], float]:
+    def detect_explicit_keywords(self, message: str, custom_keywords: List[str] = None) -> Tuple[bool, List[str], float]:
         """
         Detect explicit escalation keywords in message
-        
+
         Args:
             message: Message content
-        
+            custom_keywords: Workspace-configured keywords (overrides defaults if provided)
+
         Returns:
             Tuple of (has_keywords, found_keywords, confidence_score)
         """
+        keyword_list = custom_keywords if custom_keywords else self.ESCALATION_KEYWORDS
         message_lower = message.lower()
         found_keywords = []
-        
-        for keyword in self.ESCALATION_KEYWORDS:
+
+        for keyword in keyword_list:
             if keyword in message_lower:
                 found_keywords.append(keyword)
         
@@ -176,26 +178,39 @@ class EscalationClassifier:
         except Exception as e:
             raise EscalationError(f"LLM classification error: {str(e)}")
     
+    # Sensitivity → confidence threshold multipliers
+    SENSITIVITY_THRESHOLDS = {
+        "low":    1.3,   # harder to trigger escalation
+        "medium": 1.0,   # default
+        "high":   0.7,   # easier to trigger escalation
+    }
+
     async def classify_message(
         self,
         message: str,
         conversation_id: Optional[str] = None,
-        use_llm: bool = True
+        use_llm: bool = True,
+        workspace_keywords: List[str] = None,
+        sensitivity: str = "medium"
     ) -> Dict[str, Any]:
         """
         Complete escalation classification pipeline
-        
+
         Args:
             message: Message to classify
             conversation_id: Optional conversation ID for context
             use_llm: Whether to use LLM classification (fallback to keywords only)
-        
+            workspace_keywords: Custom keywords from workspace settings (overrides defaults)
+            sensitivity: Workspace sensitivity setting ("low", "medium", "high")
+
         Returns:
             Classification result with escalation decision and metadata
         """
         try:
-            # 1. Keyword detection (always performed)
-            has_keywords, found_keywords, keyword_confidence = self.detect_explicit_keywords(message)
+            # 1. Keyword detection (always performed, using workspace keywords if set)
+            has_keywords, found_keywords, keyword_confidence = self.detect_explicit_keywords(
+                message, custom_keywords=workspace_keywords
+            )
             
             # 2. Get conversation context if available
             conversation_context = []
@@ -245,6 +260,14 @@ class EscalationClassifier:
                     # Frustration or urgency patterns
                     escalation_type = "implicit"
             
+            # Apply sensitivity: adjust effective threshold before final decision
+            sensitivity_multiplier = self.SENSITIVITY_THRESHOLDS.get(sensitivity, 1.0)
+            effective_threshold = self.MEDIUM_CONFIDENCE_THRESHOLD * sensitivity_multiplier
+            if should_escalate and confidence < effective_threshold:
+                should_escalate = False
+                reason = f"Below sensitivity threshold ({sensitivity}): {reason}"
+                escalation_type = None
+
             return {
                 'should_escalate': should_escalate,
                 'confidence': confidence,
@@ -255,6 +278,7 @@ class EscalationClassifier:
                 'keyword_confidence': keyword_confidence,
                 'llm_used': llm_result is not None,
                 'classification_method': 'hybrid' if llm_result else 'keywords_only',
+                'sensitivity': sensitivity,
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
             

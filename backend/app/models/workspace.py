@@ -5,7 +5,7 @@ Multi-tenant workspace management
 from uuid import UUID, uuid4
 from datetime import datetime
 from sqlalchemy import Column, String, Boolean, DateTime, Text, func, ForeignKey
-from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
+from sqlalchemy.dialects.postgresql import UUID as PostgresUUID, JSONB
 from sqlalchemy.orm import relationship
 
 from app.database import Base
@@ -26,6 +26,13 @@ class Workspace(Base):
     subscription_notes = Column(Text, nullable=True)
     tier_changed_at = Column(DateTime(timezone=True), nullable=True)
     tier_changed_by = Column(String, nullable=True)
+    metadata = Column(JSONB, default=dict, nullable=True)  # workspace-level settings (AI config, etc.)
+    outside_hours_message = Column(Text, nullable=True)
+    outside_hours_behavior = Column(String, nullable=True, default="inform_and_continue")
+    escalation_keywords = Column(JSONB, nullable=True)  # None = use built-in defaults
+    escalation_sensitivity = Column(String, nullable=False, default="medium")
+    stripe_customer_id = Column(String, nullable=True)
+    stripe_subscription_id = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
@@ -38,6 +45,16 @@ class Workspace(Base):
     document_chunks = relationship("DocumentChunk", back_populates="workspace", cascade="all, delete-orphan")
     usage_counters = relationship("UsageCounter", back_populates="workspace", cascade="all, delete-orphan")
     tier_changes = relationship("TierChange", back_populates="workspace", cascade="all, delete-orphan")
+    canned_responses = relationship("CannedResponse", back_populates="workspace", cascade="all, delete-orphan")
+    assignment_rules = relationship("AssignmentRule", back_populates="workspace", cascade="all, delete-orphan")
+    outbound_webhooks = relationship("OutboundWebhook", back_populates="workspace", cascade="all, delete-orphan")
+    outbound_webhook_logs = relationship("OutboundWebhookLog", back_populates="workspace", cascade="all, delete-orphan")
+    api_keys = relationship("APIKey", back_populates="workspace", cascade="all, delete-orphan")
+    csat_ratings = relationship("CSATRating", back_populates="workspace", cascade="all, delete-orphan")
+    business_hours = relationship("BusinessHours", back_populates="workspace", cascade="all, delete-orphan")
+    flows = relationship("Flow", back_populates="workspace", cascade="all, delete-orphan")
+    whatsapp_templates = relationship("WhatsAppTemplate", back_populates="workspace", cascade="all, delete-orphan")
+    broadcasts = relationship("Broadcast", back_populates="workspace", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Workspace(id={self.id}, name='{self.name}', slug='{self.slug}')>"

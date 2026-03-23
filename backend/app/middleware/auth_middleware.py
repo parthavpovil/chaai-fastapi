@@ -43,32 +43,44 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db)
 ) -> User:
     """
-    Dependency to get current authenticated user
-    Used on all protected endpoints
+    Dependency to get current authenticated user.
+    Accepts both JWT tokens and API keys (csk_* prefix).
     """
     token = credentials.credentials
-    
-    # Decode and validate token
+
+    # ── API Key path ────────────────────────────────────────────────────────
+    if token.startswith("csk_"):
+        from app.services.api_key_service import validate_api_key
+        result = await validate_api_key(token, db)
+        if not result:
+            raise AuthenticationError("Invalid or expired API key")
+        api_key, workspace = result
+        # Return the workspace owner as the "current user" for API key requests
+        owner_result = await db.execute(select(User).where(User.id == workspace.owner_id))
+        user = owner_result.scalar_one_or_none()
+        if not user or not user.is_active:
+            raise AuthenticationError("Workspace owner account is inactive")
+        return user
+
+    # ── JWT path ─────────────────────────────────────────────────────────────
     payload = auth_service.decode_access_token(token)
     if not payload:
         raise AuthenticationError("Invalid token")
-    
-    # Extract user ID
+
     try:
         user_id = UUID(payload["sub"])
     except (ValueError, KeyError):
         raise AuthenticationError("Invalid token payload")
-    
-    # Load user from database
+
     result = await db.execute(select(User).where(User.id == user_id))
     user = result.scalar_one_or_none()
-    
+
     if not user:
         raise AuthenticationError("User not found")
-    
+
     if not user.is_active:
         raise AuthenticationError("Inactive user")
-    
+
     return user
 
 

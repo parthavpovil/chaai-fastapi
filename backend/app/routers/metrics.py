@@ -4,15 +4,19 @@ Metrics API Router
 Provides endpoints for monitoring and metrics collection
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Response, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Dict, Any
+from sqlalchemy import select, func
+from typing import Dict, Any, Optional
+from datetime import date
 import logging
 
 from app.database import get_db
 from app.services.metrics_service import MetricsService
-from app.middleware.auth_middleware import get_current_user
+from app.middleware.auth_middleware import get_current_user, get_current_workspace
 from app.models.user import User
+from app.models.workspace import Workspace
+from app.config import TIER_LIMITS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/metrics", tags=["metrics"])
@@ -185,3 +189,77 @@ async def get_alert_status(
     except Exception as e:
         logger.error(f"Error getting alert status: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to get alert status: {str(e)}")
+
+
+@router.get("/csat")
+async def get_csat_metrics(
+    date_from: Optional[date] = Query(None),
+    date_to: Optional[date] = Query(None),
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Workspace CSAT summary: average score, response rate.
+    Date-range trend data requires Growth+ tier.
+    """
+    from app.models.csat_rating import CSATRating
+    from app.models.conversation import Conversation
+    from datetime import datetime, timezone
+
+    # Total resolved conversations (denominator for response rate)
+    total_resolved_q = select(func.count(Conversation.id)).where(
+        Conversation.workspace_id == current_workspace.id,
+        Conversation.status == "resolved",
+    )
+    if date_from:
+        total_resolved_q = total_resolved_q.where(Conversation.updated_at >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        total_resolved_q = total_resolved_q.where(Conversation.updated_at <= datetime.combine(date_to, datetime.max.time()))
+    total_resolved = (await db.execute(total_resolved_q)).scalar() or 0
+
+    # CSAT stats
+    csat_q = select(
+        func.count(CSATRating.id).label("total_ratings"),
+        func.avg(CSATRating.rating).label("avg_rating"),
+    ).where(CSATRating.workspace_id == current_workspace.id)
+    if date_from:
+        csat_q = csat_q.where(CSATRating.submitted_at >= datetime.combine(date_from, datetime.min.time()))
+    if date_to:
+        csat_q = csat_q.where(CSATRating.submitted_at <= datetime.combine(date_to, datetime.max.time()))
+    csat_result = (await db.execute(csat_q)).one()
+    total_ratings = csat_result.total_ratings or 0
+    avg_rating = round(float(csat_result.avg_rating), 2) if csat_result.avg_rating else None
+    response_rate = round(total_ratings / total_resolved, 4) if total_resolved > 0 else 0.0
+
+    summary = {
+        "total_ratings": total_ratings,
+        "average_rating": avg_rating,
+        "response_rate": response_rate,
+        "total_resolved_conversations": total_resolved,
+    }
+
+    # Trend data: Growth+ only
+    has_trends = TIER_LIMITS.get(current_workspace.tier or "free", {}).get("has_csat_trends", False)
+    if has_trends and (date_from or date_to):
+        trend_q = (
+            select(
+                func.date_trunc("day", CSATRating.submitted_at).label("day"),
+                func.count(CSATRating.id).label("count"),
+                func.avg(CSATRating.rating).label("avg"),
+            )
+            .where(CSATRating.workspace_id == current_workspace.id)
+            .group_by("day")
+            .order_by("day")
+        )
+        if date_from:
+            trend_q = trend_q.where(CSATRating.submitted_at >= datetime.combine(date_from, datetime.min.time()))
+        if date_to:
+            trend_q = trend_q.where(CSATRating.submitted_at <= datetime.combine(date_to, datetime.max.time()))
+        trend_rows = (await db.execute(trend_q)).all()
+        summary["trend"] = [
+            {"date": str(r.day.date()), "count": r.count, "avg_rating": round(float(r.avg), 2)}
+            for r in trend_rows
+        ]
+
+    return summary
