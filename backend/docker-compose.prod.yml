@@ -47,6 +47,7 @@ services:
     image: chatsaas-backend:latest
     container_name: chatsaas-backend
     environment:
+      - PYTHONUNBUFFERED=1
       - DEBUG=false
       - DATABASE_URL=postgresql+asyncpg://chatsaas_user:${POSTGRES_PASSWORD}@postgres:5432/chatsaas_prod
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
