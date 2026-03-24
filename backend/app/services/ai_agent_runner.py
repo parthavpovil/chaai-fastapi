@@ -90,8 +90,8 @@ class AIAgentRunner:
                 escalation_reason="max_turns_exceeded",
             )
 
-        # 4. Load conversation history
-        history = await self._load_history(db, conversation_id)
+        # 4. Load conversation history (skip in sandbox — no real conversation exists)
+        history = [] if sandbox else await self._load_history(db, conversation_id)
 
         # 5. Build tool schemas for LLM
         active_tools = [t for t in agent.tools if t.is_active]
