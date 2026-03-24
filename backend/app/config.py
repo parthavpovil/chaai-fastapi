@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     
     # Groq
     GROQ_API_KEY: str = Field(default="", description="Groq API key")
+
+    # Anthropic (Claude)
+    ANTHROPIC_API_KEY: str = Field(default="", description="Anthropic API key for Claude models")
     
     # Channel Secrets
     TELEGRAM_SECRET_TOKEN: str = Field(default="", description="Telegram webhook secret token")
@@ -119,6 +122,7 @@ TIER_LIMITS = {
     "free": {
         "channels": 1,
         "agents": 0,
+        "ai_agents": 0,
         "documents_max": 3,
         "monthly_messages": 500,
         "canned_responses": 5,
@@ -134,6 +138,7 @@ TIER_LIMITS = {
     "starter": {
         "channels": 2,
         "agents": 0,
+        "ai_agents": 1,
         "documents_max": 10,
         "monthly_messages": 2000,
         "canned_responses": 10,
@@ -149,6 +154,7 @@ TIER_LIMITS = {
     "growth": {
         "channels": 4,
         "agents": 0,
+        "ai_agents": 3,
         "documents_max": 25,
         "monthly_messages": 10000,
         "canned_responses": 50,
@@ -164,6 +170,7 @@ TIER_LIMITS = {
     "pro": {
         "channels": 4,
         "agents": 2,
+        "ai_agents": 10,
         "documents_max": 100,
         "monthly_messages": 50000,
         "canned_responses": -1,  # unlimited

@@ -72,8 +72,8 @@ async def init_db() -> None:
         # Import all models to ensure they are registered with Base
         from app.models import (
             user, workspace, channel, contact, conversation, message,
-            agent, document, document_chunk, usage_counter, 
-            platform_setting, tier_change, rate_limit
+            agent, document, document_chunk, usage_counter,
+            platform_setting, tier_change, rate_limit, ai_agent
         )
         
         # Create all tables

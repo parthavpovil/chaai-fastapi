@@ -1,10 +1,10 @@
 """
 AI Provider Abstraction Layer
-Unified interface for multiple AI providers (Google, OpenAI, Groq)
+Unified interface for multiple AI providers (Google, OpenAI, Groq, Anthropic)
 """
 import os
 import json
-from typing import Protocol, runtime_checkable, List, Dict, Any, Tuple
+from typing import Optional, Protocol, runtime_checkable, List, Dict, Any, Tuple
 from abc import ABC, abstractmethod
 
 from app.config import settings
@@ -13,11 +13,11 @@ from app.config import settings
 @runtime_checkable
 class AIProvider(Protocol):
     """Protocol defining the AI provider interface"""
-    
+
     async def generate_embedding(self, text: str) -> List[float]:
         """Generate embedding vector for text"""
         ...
-    
+
     async def generate_response(
         self,
         messages: List[Dict[str, str]],
@@ -26,14 +26,30 @@ class AIProvider(Protocol):
     ) -> Tuple[str, int, int]:
         """
         Generate LLM response
-        
+
         Returns:
             Tuple of (response_text, input_tokens, output_tokens)
         """
         ...
-    
+
     async def classify_json(self, prompt: str) -> Dict[str, Any]:
         """Generate structured JSON response for classification tasks"""
+        ...
+
+    async def generate_response_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        max_tokens: int = 1000,
+        temperature: float = 0.3,
+    ) -> Tuple[str, Optional[Dict[str, Any]], int, int]:
+        """
+        Generate LLM response with tool-calling support.
+
+        Returns:
+            Tuple of (text_response, tool_call_or_None, input_tokens, output_tokens)
+            tool_call = {"name": str, "params": dict} or None
+        """
         ...
 
 
@@ -165,6 +181,57 @@ class GoogleProvider:
             else:
                 raise AIProviderError(f"Google AI classification error: {str(e)}")
     
+    async def generate_response_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        max_tokens: int = 1000,
+        temperature: float = 0.3,
+    ) -> Tuple[str, Optional[Dict[str, Any]], int, int]:
+        """Generate response with Gemini function calling"""
+        try:
+            from google.generativeai.types import FunctionDeclaration, Tool as GeminiTool
+
+            # Build Gemini tool declarations
+            declarations = []
+            for tool in tools:
+                props = {}
+                required = []
+                for param in tool.get("parameters", []):
+                    props[param["name"]] = {"type": param.get("type", "string"), "description": param.get("description", "")}
+                    if param.get("required", True):
+                        required.append(param["name"])
+                declarations.append(FunctionDeclaration(
+                    name=tool["name"],
+                    description=tool["description"],
+                    parameters={"type": "object", "properties": props, "required": required},
+                ))
+
+            gemini_tool = GeminiTool(function_declarations=declarations)
+            model = self.genai.GenerativeModel(
+                self.llm_model,
+                tools=[gemini_tool],
+                generation_config={"max_output_tokens": max_tokens, "temperature": temperature},
+            )
+            gemini_messages = self._convert_messages_to_gemini(messages)
+            response = model.generate_content(gemini_messages)
+
+            input_tokens = response.usage_metadata.prompt_token_count
+            output_tokens = response.usage_metadata.candidates_token_count
+
+            # Check for function call
+            for part in response.candidates[0].content.parts:
+                if hasattr(part, "function_call") and part.function_call:
+                    fc = part.function_call
+                    return "", {"name": fc.name, "params": dict(fc.args)}, input_tokens, output_tokens
+
+            return response.text, None, input_tokens, output_tokens
+
+        except Exception as e:
+            if "quota" in str(e).lower() or "rate" in str(e).lower():
+                raise AIProviderRateLimitError(f"Google AI rate limit: {str(e)}")
+            raise AIProviderError(f"Google AI tool-calling error: {str(e)}")
+
     def _convert_messages_to_gemini(self, messages: List[Dict[str, str]]) -> List[Dict[str, Any]]:
         """Convert OpenAI message format to Gemini format"""
         gemini_messages = []
@@ -252,9 +319,9 @@ class OpenAIProvider:
                 max_tokens=150,
                 temperature=0.1
             )
-            
+
             return json.loads(response.choices[0].message.content)
-            
+
         except json.JSONDecodeError as e:
             raise AIProviderError(f"Invalid JSON response from OpenAI: {str(e)}")
         except Exception as e:
@@ -264,6 +331,57 @@ class OpenAIProvider:
                 raise AIProviderAuthError(f"OpenAI auth error: {str(e)}")
             else:
                 raise AIProviderError(f"OpenAI classification error: {str(e)}")
+
+    async def generate_response_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        max_tokens: int = 1000,
+        temperature: float = 0.3,
+    ) -> Tuple[str, Optional[Dict[str, Any]], int, int]:
+        """Generate response with OpenAI function calling"""
+        try:
+            openai_tools = []
+            for tool in tools:
+                props = {}
+                required = []
+                for param in tool.get("parameters", []):
+                    props[param["name"]] = {"type": param.get("type", "string"), "description": param.get("description", "")}
+                    if param.get("required", True):
+                        required.append(param["name"])
+                openai_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool["name"],
+                        "description": tool["description"],
+                        "parameters": {"type": "object", "properties": props, "required": required},
+                    },
+                })
+
+            response = await self.client.chat.completions.create(
+                model=self.llm_model,
+                messages=messages,
+                tools=openai_tools,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+            message = response.choices[0].message
+            input_tokens = response.usage.prompt_tokens
+            output_tokens = response.usage.completion_tokens
+
+            if message.tool_calls:
+                tc = message.tool_calls[0]
+                return "", {"name": tc.function.name, "params": json.loads(tc.function.arguments)}, input_tokens, output_tokens
+
+            return message.content or "", None, input_tokens, output_tokens
+
+        except Exception as e:
+            if "rate_limit" in str(e).lower():
+                raise AIProviderRateLimitError(f"OpenAI rate limit: {str(e)}")
+            elif "auth" in str(e).lower() or "key" in str(e).lower():
+                raise AIProviderAuthError(f"OpenAI auth error: {str(e)}")
+            raise AIProviderError(f"OpenAI tool-calling error: {str(e)}")
 
 
 # ─── Groq Provider ────────────────────────────────────────────────────────────
@@ -332,9 +450,9 @@ class GroqProvider:
                 max_tokens=150,
                 temperature=0.1
             )
-            
+
             return json.loads(response.choices[0].message.content)
-            
+
         except json.JSONDecodeError as e:
             raise AIProviderError(f"Invalid JSON response from Groq: {str(e)}")
         except Exception as e:
@@ -345,21 +463,220 @@ class GroqProvider:
             else:
                 raise AIProviderError(f"Groq classification error: {str(e)}")
 
+    async def generate_response_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        max_tokens: int = 1000,
+        temperature: float = 0.3,
+    ) -> Tuple[str, Optional[Dict[str, Any]], int, int]:
+        """Groq supports OpenAI-compatible tool calling"""
+        try:
+            openai_tools = []
+            for tool in tools:
+                props = {}
+                required = []
+                for param in tool.get("parameters", []):
+                    props[param["name"]] = {"type": param.get("type", "string"), "description": param.get("description", "")}
+                    if param.get("required", True):
+                        required.append(param["name"])
+                openai_tools.append({
+                    "type": "function",
+                    "function": {
+                        "name": tool["name"],
+                        "description": tool["description"],
+                        "parameters": {"type": "object", "properties": props, "required": required},
+                    },
+                })
+
+            response = await self.client.chat.completions.create(
+                model=self.llm_model,
+                messages=messages,
+                tools=openai_tools,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
+
+            message = response.choices[0].message
+            input_tokens = response.usage.prompt_tokens
+            output_tokens = response.usage.completion_tokens
+
+            if message.tool_calls:
+                tc = message.tool_calls[0]
+                return "", {"name": tc.function.name, "params": json.loads(tc.function.arguments)}, input_tokens, output_tokens
+
+            return message.content or "", None, input_tokens, output_tokens
+
+        except Exception as e:
+            if "rate_limit" in str(e).lower():
+                raise AIProviderRateLimitError(f"Groq rate limit: {str(e)}")
+            raise AIProviderError(f"Groq tool-calling error: {str(e)}")
+
+
+# ─── Anthropic Provider ───────────────────────────────────────────────────────
+
+class AnthropicProvider:
+    """
+    Anthropic Provider
+    LLM: claude-haiku-4-5 (default)
+    Embeddings: NOT SUPPORTED — falls back to Google embeddings
+    """
+
+    def __init__(self, api_key: str = "", model: str = "claude-haiku-4-5"):
+        try:
+            import anthropic as anthropic_lib
+            self.client = anthropic_lib.AsyncAnthropic(api_key=api_key or settings.ANTHROPIC_API_KEY)
+            self.llm_model = model
+        except ImportError:
+            raise AIProviderError("anthropic package not installed — run: pip install anthropic>=0.40.0")
+        except Exception as e:
+            raise AIProviderAuthError(f"Failed to initialize Anthropic: {str(e)}")
+
+    async def generate_embedding(self, text: str) -> List[float]:
+        """Anthropic has no embeddings API — delegate to Google"""
+        embedding_provider = get_embedding_provider()
+        return await embedding_provider.generate_embedding(text)
+
+    async def generate_response(
+        self,
+        messages: List[Dict[str, str]],
+        max_tokens: int = 300,
+        temperature: float = 0.7,
+    ) -> Tuple[str, int, int]:
+        """Generate response using Claude model"""
+        try:
+            # Extract system message if present
+            system_content = ""
+            chat_messages = []
+            for msg in messages:
+                if msg["role"] == "system":
+                    system_content = msg["content"]
+                else:
+                    chat_messages.append({"role": msg["role"], "content": msg["content"]})
+
+            kwargs: Dict[str, Any] = {
+                "model": self.llm_model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "messages": chat_messages,
+            }
+            if system_content:
+                kwargs["system"] = system_content
+
+            response = await self.client.messages.create(**kwargs)
+
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+            text = response.content[0].text if response.content else ""
+            return text, input_tokens, output_tokens
+
+        except Exception as e:
+            if "rate_limit" in str(e).lower() or "overloaded" in str(e).lower():
+                raise AIProviderRateLimitError(f"Anthropic rate limit: {str(e)}")
+            elif "auth" in str(e).lower() or "api_key" in str(e).lower():
+                raise AIProviderAuthError(f"Anthropic auth error: {str(e)}")
+            raise AIProviderError(f"Anthropic response error: {str(e)}")
+
+    async def classify_json(self, prompt: str) -> Dict[str, Any]:
+        """Generate structured JSON response for classification"""
+        try:
+            response = await self.client.messages.create(
+                model=self.llm_model,
+                max_tokens=150,
+                temperature=0.1,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            text = response.content[0].text.strip()
+            if text.startswith("```json"):
+                text = text[7:]
+            if text.startswith("```"):
+                text = text[3:]
+            if text.endswith("```"):
+                text = text[:-3]
+            return json.loads(text.strip())
+        except json.JSONDecodeError as e:
+            raise AIProviderError(f"Invalid JSON response from Anthropic: {str(e)}")
+        except Exception as e:
+            raise AIProviderError(f"Anthropic classification error: {str(e)}")
+
+    async def generate_response_with_tools(
+        self,
+        messages: List[Dict[str, Any]],
+        tools: List[Dict[str, Any]],
+        max_tokens: int = 1000,
+        temperature: float = 0.3,
+    ) -> Tuple[str, Optional[Dict[str, Any]], int, int]:
+        """Generate response with Anthropic tool_use blocks"""
+        try:
+            # Build Anthropic tool schemas
+            anthropic_tools = []
+            for tool in tools:
+                props = {}
+                required = []
+                for param in tool.get("parameters", []):
+                    props[param["name"]] = {"type": param.get("type", "string"), "description": param.get("description", "")}
+                    if param.get("required", True):
+                        required.append(param["name"])
+                anthropic_tools.append({
+                    "name": tool["name"],
+                    "description": tool["description"],
+                    "input_schema": {"type": "object", "properties": props, "required": required},
+                })
+
+            system_content = ""
+            chat_messages = []
+            for msg in messages:
+                if msg["role"] == "system":
+                    system_content = msg["content"]
+                else:
+                    chat_messages.append({"role": msg["role"], "content": msg["content"]})
+
+            kwargs: Dict[str, Any] = {
+                "model": self.llm_model,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "messages": chat_messages,
+                "tools": anthropic_tools,
+            }
+            if system_content:
+                kwargs["system"] = system_content
+
+            response = await self.client.messages.create(**kwargs)
+
+            input_tokens = response.usage.input_tokens
+            output_tokens = response.usage.output_tokens
+
+            for block in response.content:
+                if block.type == "tool_use":
+                    return "", {"name": block.name, "params": dict(block.input)}, input_tokens, output_tokens
+
+            text_blocks = [b.text for b in response.content if hasattr(b, "text")]
+            return " ".join(text_blocks), None, input_tokens, output_tokens
+
+        except Exception as e:
+            if "rate_limit" in str(e).lower() or "overloaded" in str(e).lower():
+                raise AIProviderRateLimitError(f"Anthropic rate limit: {str(e)}")
+            elif "auth" in str(e).lower() or "api_key" in str(e).lower():
+                raise AIProviderAuthError(f"Anthropic auth error: {str(e)}")
+            raise AIProviderError(f"Anthropic tool-calling error: {str(e)}")
+
 
 # ─── Factory Functions ────────────────────────────────────────────────────────
 
 def get_llm_provider() -> AIProvider:
     """Returns the LLM provider based on AI_PROVIDER env variable."""
     provider = settings.AI_PROVIDER.lower()
-    
+
     if provider == "google":
         return GoogleProvider()
     elif provider == "openai":
         return OpenAIProvider()
     elif provider == "groq":
         return GroqProvider()
+    elif provider == "anthropic":
+        return AnthropicProvider()
     else:
-        raise ValueError(f"Unknown AI_PROVIDER: '{provider}'. Valid: google, openai, groq")
+        raise ValueError(f"Unknown AI_PROVIDER: '{provider}'. Valid: google, openai, groq, anthropic")
 
 
 def get_embedding_provider() -> AIProvider:
@@ -412,7 +729,7 @@ def get_llm_provider_for_workspace(workspace_metadata: dict) -> AIProvider:
         try:
             import openai as openai_lib
             p.client = openai_lib.AsyncOpenAI(api_key=api_key or settings.OPENAI_API_KEY)
-            p.model = workspace_metadata.get("ai_model", "gpt-3.5-turbo")
+            p.llm_model = workspace_metadata.get("ai_model", "gpt-4o-mini")
             p.embedding_model = "text-embedding-3-small"
         except Exception as e:
             raise AIProviderAuthError(f"Failed to initialize workspace OpenAI provider: {e}")
@@ -421,12 +738,21 @@ def get_llm_provider_for_workspace(workspace_metadata: dict) -> AIProvider:
     elif provider_name == "groq":
         p = GroqProvider.__new__(GroqProvider)
         try:
-            from groq import AsyncGroq
-            p.client = AsyncGroq(api_key=api_key or settings.GROQ_API_KEY)
-            p.model = workspace_metadata.get("ai_model", "llama-3.3-70b-versatile")
+            from openai import AsyncOpenAI
+            p.client = AsyncOpenAI(
+                api_key=api_key or settings.GROQ_API_KEY,
+                base_url="https://api.groq.com/openai/v1",
+            )
+            p.llm_model = workspace_metadata.get("ai_model", "llama-3.3-70b-versatile")
         except Exception as e:
             raise AIProviderAuthError(f"Failed to initialize workspace Groq provider: {e}")
         return p
+
+    elif provider_name == "anthropic":
+        return AnthropicProvider(
+            api_key=api_key or settings.ANTHROPIC_API_KEY,
+            model=workspace_metadata.get("ai_model", "claude-haiku-4-5"),
+        )
 
     # No workspace override — use global default
     return get_llm_provider()
