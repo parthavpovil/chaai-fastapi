@@ -62,22 +62,23 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """
-    Initialize database - create all tables
-    Used during application startup
+    Initialize database - run alembic migrations to head.
+    Used during application startup.
     """
+    import asyncio
+    from alembic.config import Config
+    from alembic import command
+
+    # Enable pgvector extension (required for VECTOR columns)
     async with engine.begin() as conn:
-        # Enable pgvector extension (required for VECTOR columns)
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
 
-        # Import all models to ensure they are registered with Base
-        from app.models import (
-            user, workspace, channel, contact, conversation, message,
-            agent, document, document_chunk, usage_counter,
-            platform_setting, tier_change, rate_limit, ai_agent
-        )
-        
-        # Create all tables
-        await conn.run_sync(Base.metadata.create_all)
+    # Run migrations in a thread (alembic is synchronous)
+    def run_migrations():
+        alembic_cfg = Config("alembic.ini")
+        command.upgrade(alembic_cfg, "head")
+
+    await asyncio.to_thread(run_migrations)
 
 
 async def close_db() -> None:
