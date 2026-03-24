@@ -61,9 +61,8 @@ Thumbs.db
 storage/documents/*
 !storage/documents/.gitkeep
 
-# Alembic
-alembic/versions/*.py
-!alembic/versions/.gitkeep
+# Alembic — track migration files so CI/CD deploys them
+# (previously ignored, causing schema drift on deployed servers)
 
 # Testing
 .pytest_cache/
