@@ -44,8 +44,9 @@ RUN mkdir -p /var/chatsaas/storage/documents && \
     mkdir -p /var/run/chatsaas && \
     mkdir -p /var/log/chatsaas
 
-# Set ownership
-RUN chown -R chatsaas:chatsaas /app /var/chatsaas /var/run/chatsaas /var/log/chatsaas
+# Make entrypoint executable and set ownership
+RUN chmod +x /app/entrypoint.sh && \
+    chown -R chatsaas:chatsaas /app /var/chatsaas /var/run/chatsaas /var/log/chatsaas
 
 # Switch to non-root user
 USER chatsaas
@@ -58,4 +59,4 @@ HEALTHCHECK --interval=10s --timeout=10s --start-period=20s --retries=5 \
     CMD curl -f http://localhost:8000/health || exit 1
 
 # Default command
-CMD ["gunicorn", "--config", "gunicorn.conf.py", "main:app"]
+CMD ["/app/entrypoint.sh"]

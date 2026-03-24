@@ -8,8 +8,8 @@ import os
 bind = "0.0.0.0:8000"
 backlog = 2048
 
-# Worker processes
-workers = multiprocessing.cpu_count() * 2 + 1
+# Worker processes - keep low to avoid DB connection exhaustion
+workers = min(multiprocessing.cpu_count() * 2 + 1, 4)
 worker_class = "uvicorn.workers.UvicornWorker"
 worker_connections = 1000
 max_requests = 1000

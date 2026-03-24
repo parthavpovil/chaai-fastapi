@@ -62,23 +62,12 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
 
 async def init_db() -> None:
     """
-    Initialize database - run alembic migrations to head.
-    Used during application startup.
+    Initialize database connection - enables pgvector extension.
+    Migrations are run via entrypoint.sh before workers start.
     """
-    import asyncio
-    from alembic.config import Config
-    from alembic import command
-
     # Enable pgvector extension (required for VECTOR columns)
     async with engine.begin() as conn:
         await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-
-    # Run migrations in a thread (alembic is synchronous)
-    def run_migrations():
-        alembic_cfg = Config("alembic.ini")
-        command.upgrade(alembic_cfg, "head")
-
-    await asyncio.to_thread(run_migrations)
 
 
 async def close_db() -> None:
