@@ -1,7 +1,7 @@
 """fix missing columns in contacts and conversations
 
 Revision ID: 014_fix_missing_columns
-Revises: 013_add_ai_agent_tables
+Revises: 013
 Create Date: 2026-03-24
 
 Adds columns that may be missing in DBs originally created via create_all
@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import JSONB, ARRAY
 
 
 revision = '014_fix_missing_columns'
-down_revision = '013_add_ai_agent_tables'
+down_revision = '013'
 branch_labels = None
 depends_on = None
 
