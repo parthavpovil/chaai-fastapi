@@ -17,7 +17,7 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column('conversations', sa.Column('metadata', JSONB(), nullable=True))
+    op.execute(sa.text("ALTER TABLE conversations ADD COLUMN IF NOT EXISTS metadata JSONB"))
 
 
 def downgrade() -> None:

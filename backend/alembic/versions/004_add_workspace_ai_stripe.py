@@ -16,10 +16,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column('workspaces', sa.Column('metadata', JSONB(), nullable=True))
-    op.add_column('workspaces', sa.Column('stripe_customer_id', sa.String(), nullable=True))
-    op.add_column('workspaces', sa.Column('stripe_subscription_id', sa.String(), nullable=True))
-    op.create_index('ix_workspaces_stripe_customer', 'workspaces', ['stripe_customer_id'])
+    op.execute(sa.text("ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS metadata JSONB"))
+    op.execute(sa.text("ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS stripe_customer_id VARCHAR"))
+    op.execute(sa.text("ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS stripe_subscription_id VARCHAR"))
+    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_workspaces_stripe_customer ON workspaces (stripe_customer_id)"))
 
 
 def downgrade() -> None:

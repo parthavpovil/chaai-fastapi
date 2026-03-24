@@ -6,7 +6,6 @@ Create Date: 2026-03-22
 """
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects.postgresql import JSONB
 
 revision = '011'
 down_revision = '010'
@@ -15,13 +14,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column('workspaces', sa.Column('escalation_keywords', JSONB, nullable=True))
-    op.add_column('workspaces', sa.Column(
-        'escalation_sensitivity',
-        sa.String,
-        nullable=False,
-        server_default='medium'
-    ))
+    op.execute(sa.text("ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS escalation_keywords JSONB"))
+    op.execute(sa.text("ALTER TABLE workspaces ADD COLUMN IF NOT EXISTS escalation_sensitivity VARCHAR NOT NULL DEFAULT 'medium'"))
 
 
 def downgrade() -> None:

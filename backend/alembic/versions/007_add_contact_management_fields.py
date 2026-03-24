@@ -15,16 +15,16 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column('contacts', sa.Column('email', sa.String(), nullable=True))
-    op.add_column('contacts', sa.Column('phone', sa.String(), nullable=True))
-    op.add_column('contacts', sa.Column('tags', postgresql.ARRAY(sa.String()), nullable=False, server_default='{}'))
-    op.add_column('contacts', sa.Column('custom_fields', postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default='{}'))
-    op.add_column('contacts', sa.Column('source', sa.String(), nullable=True))
-    op.add_column('contacts', sa.Column('is_blocked', sa.Boolean(), nullable=False, server_default='false'))
-    op.add_column('contacts', sa.Column('metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=True, server_default='{}'))
+    op.execute(sa.text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS email VARCHAR"))
+    op.execute(sa.text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS phone VARCHAR"))
+    op.execute(sa.text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS tags TEXT[] NOT NULL DEFAULT '{}'"))
+    op.execute(sa.text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS custom_fields JSONB NOT NULL DEFAULT '{}'"))
+    op.execute(sa.text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS source VARCHAR"))
+    op.execute(sa.text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS is_blocked BOOLEAN NOT NULL DEFAULT false"))
+    op.execute(sa.text("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'"))
 
-    op.create_index('ix_contacts_tags', 'contacts', ['tags'], postgresql_using='gin')
-    op.create_index('ix_contacts_workspace_blocked', 'contacts', ['workspace_id', 'is_blocked'])
+    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_contacts_tags ON contacts USING GIN (tags)"))
+    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_contacts_workspace_blocked ON contacts (workspace_id, is_blocked)"))
 
 
 def downgrade() -> None:

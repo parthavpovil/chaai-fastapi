@@ -24,9 +24,9 @@ def upgrade() -> None:
     )
 
     # Index resolved_at for CSV export date filters
-    op.create_index('ix_conversations_resolved_at', 'conversations', ['resolved_at'])
+    op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_conversations_resolved_at ON conversations (resolved_at)"))
 
 
 def downgrade() -> None:
-    op.drop_index('ix_conversations_resolved_at', table_name='conversations')
     op.execute("DROP INDEX CONCURRENTLY IF EXISTS ix_messages_fts")
+    op.execute(sa.text("DROP INDEX IF EXISTS ix_conversations_resolved_at"))
