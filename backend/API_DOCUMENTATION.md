@@ -30,6 +30,7 @@ Complete API reference for all REST endpoints, WebSocket connections, and webhoo
 24. [Flow Builder](#flow-builder)
 25. [WhatsApp Templates](#whatsapp-templates)
 26. [Broadcasts](#broadcasts)
+27. [AI Agents](#ai-agents)
 
 ---
 
@@ -3929,6 +3930,432 @@ Status only moves forward — a `delivered` message will never revert to `sent`.
 
 ---
 
+---
+
+## AI Agents
+
+Base URL: `/api/ai-agents`
+
+Autonomous bots that call external tools and APIs to handle customer queries — as a third option alongside RAG and human agents. Requires **Starter tier or above**.
+
+**Tier limits:** Free: 0 | Starter: 1 | Growth: 3 | Pro: 10
+
+### How it fits into the pipeline
+
+```
+Incoming message
+  → Flow Engine (if WhatsApp)
+  → AI Agent Runner  ← new (if workspace.meta.ai_mode = "ai_agent")
+  → Escalation check + RAG  ← existing fallback
+```
+
+Enable via `PUT /api/workspace/ai-pipeline` (see [Workspace](#workspace)).
+
+---
+
+### POST /api/ai-agents
+
+Create a new agent (starts as draft — must be published before it handles live traffic).
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "name": "Order Support Bot",
+  "system_prompt": "You are a helpful order support assistant. Use the available tools to look up order status and resolve issues.",
+  "persona_name": "Aria",
+  "persona_tone": "friendly",
+  "first_message": "Hi! I'm Aria, your order support assistant. How can I help?",
+  "escalation_trigger": "low_confidence",
+  "escalation_message": "Let me connect you with a team member who can help.",
+  "confidence_threshold": 0.7,
+  "max_turns": 10,
+  "token_budget": 8000
+}
+```
+
+**Response (201):**
+```json
+{
+  "id": "uuid",
+  "workspace_id": "uuid",
+  "name": "Order Support Bot",
+  "system_prompt": "...",
+  "persona_name": "Aria",
+  "persona_tone": "friendly",
+  "first_message": "...",
+  "escalation_trigger": "low_confidence",
+  "escalation_message": "Let me connect you with a team member who can help.",
+  "confidence_threshold": 0.7,
+  "max_turns": 10,
+  "token_budget": 8000,
+  "is_active": true,
+  "is_draft": true,
+  "created_at": "2026-03-24T10:00:00Z",
+  "updated_at": "2026-03-24T10:00:00Z",
+  "tools": [],
+  "guardrails": []
+}
+```
+
+**Errors:** 403 (tier limit reached)
+
+---
+
+### GET /api/ai-agents
+
+List all agents in the workspace.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response (200):** Array of agent objects (same shape as above).
+
+---
+
+### GET /api/ai-agents/{agent_id}
+
+Get full agent details including tools and guardrails.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response (200):** Agent object with nested `tools` and `guardrails` arrays.
+
+**Errors:** 404
+
+---
+
+### PUT /api/ai-agents/{agent_id}
+
+Update agent settings. Only provided fields are updated.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:** Any subset of the create fields, e.g.:
+```json
+{
+  "name": "Updated Bot Name",
+  "max_turns": 15
+}
+```
+
+**Response (200):** Updated agent object.
+
+---
+
+### DELETE /api/ai-agents/{agent_id}
+
+Delete an agent and all its tools, guardrails, and channel assignments.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response (204):** No content.
+
+---
+
+### POST /api/ai-agents/{agent_id}/publish
+
+Validate and mark an agent live (sets `is_draft = false`). Validates: system_prompt not empty, escalation_message set, at least one active tool.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response (200):** Updated agent object with `"is_draft": false`.
+
+**Errors:** 400 with validation details if requirements not met.
+
+---
+
+### POST /api/ai-agents/{agent_id}/tools
+
+Add a tool (external HTTP endpoint) the agent can call.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "name": "get_order_status",
+  "display_name": "Get Order Status",
+  "description": "Look up the current status of a customer order by order ID.",
+  "method": "GET",
+  "endpoint_url": "https://api.example.com/orders/{order_id}",
+  "headers": {
+    "Authorization": "Bearer sk-secret-key"
+  },
+  "parameters": [
+    {
+      "name": "order_id",
+      "type": "string",
+      "required": true,
+      "description": "The order ID to look up"
+    }
+  ],
+  "response_path": "order.status",
+  "requires_confirmation": false,
+  "is_read_only": true
+}
+```
+
+**Notes:**
+- `name` must be `snake_case` — the LLM uses this identifier
+- `endpoint_url` supports `{variable}` substitution from tool parameters
+- `headers` values are encrypted at rest
+- `response_path` uses dot-notation to extract a nested field (e.g. `order.status`)
+
+**Response (201):** Tool object.
+
+---
+
+### GET /api/ai-agents/{agent_id}/tools
+
+List all tools for an agent.
+
+**Response (200):** Array of tool objects.
+
+---
+
+### PUT /api/ai-agents/{agent_id}/tools/{tool_id}
+
+Update a tool. Partial updates supported.
+
+**Response (200):** Updated tool object.
+
+---
+
+### DELETE /api/ai-agents/{agent_id}/tools/{tool_id}
+
+Delete a tool.
+
+**Response (204):** No content.
+
+---
+
+### POST /api/ai-agents/{agent_id}/tools/{tool_id}/test
+
+Dry-run a tool call without quota charges. Use this to verify your endpoint works before going live.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "params": {
+    "order_id": "ORD-12345"
+  }
+}
+```
+
+**Response (200):**
+```json
+{
+  "success": true,
+  "data": { "status": "shipped", "tracking": "1Z999..." },
+  "error": null,
+  "latency_ms": 142,
+  "status_code": 200
+}
+```
+
+---
+
+### POST /api/ai-agents/{agent_id}/guardrails
+
+Add a safety guardrail rule.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "rule_type": "forbidden_topic",
+  "description": "Do not discuss competitor pricing or products"
+}
+```
+
+`rule_type` values: `forbidden_topic` | `forbidden_action` | `required_escalation`
+
+**Response (201):** Guardrail object.
+
+---
+
+### GET /api/ai-agents/{agent_id}/guardrails
+
+List all guardrails for an agent.
+
+---
+
+### DELETE /api/ai-agents/{agent_id}/guardrails/{guardrail_id}
+
+Delete a guardrail.
+
+**Response (204):** No content.
+
+---
+
+### POST /api/ai-agents/{agent_id}/channels/{channel_id}
+
+Assign an agent to a channel. Only one published agent can serve a channel at a time (highest priority wins).
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response (201):**
+```json
+{
+  "id": "uuid",
+  "agent_id": "uuid",
+  "channel_id": "uuid",
+  "priority": 0,
+  "is_active": true,
+  "created_at": "2026-03-24T10:00:00Z"
+}
+```
+
+**Errors:** 404 if channel not found in workspace.
+
+---
+
+### DELETE /api/ai-agents/{agent_id}/channels/{channel_id}
+
+Unassign an agent from a channel. The channel falls back to RAG mode.
+
+**Response (204):** No content.
+
+---
+
+### POST /api/ai-agents/{agent_id}/sandbox/message
+
+Test the agent interactively without affecting quotas or live conversations. The `debug` block shows exactly what happened under the hood.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "message": "Where is my order ORD-12345?",
+  "conversation_id": "sandbox-session-1"
+}
+```
+
+`conversation_id` is optional — omit to start a fresh session, or reuse the same value to continue a multi-turn conversation.
+
+**Response (200):**
+```json
+{
+  "reply": "Your order ORD-12345 is currently shipped and on its way!",
+  "escalated": false,
+  "escalation_reason": null,
+  "debug": {
+    "tool_called": "get_order_status",
+    "tool_params": { "order_id": "ORD-12345" },
+    "tool_result": { "status": "shipped", "tracking": "1Z999..." },
+    "tool_success": true,
+    "tool_latency_ms": 142,
+    "model_used": "gpt-4o-mini",
+    "input_tokens": 312,
+    "output_tokens": 48,
+    "cost_usd": 0.000075,
+    "turn_count": 1,
+    "escalated": false
+  }
+}
+```
+
+---
+
+### DELETE /api/ai-agents/{agent_id}/sandbox/reset
+
+Clear the sandbox session history for this agent.
+
+**Response (204):** No content.
+
+---
+
+### GET /api/ai-agents/{agent_id}/analytics
+
+Token usage and cost breakdown for the agent.
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Response (200):**
+```json
+{
+  "agent_id": "uuid",
+  "total_conversations": 142,
+  "active_conversations": 3,
+  "escalated_conversations": 18,
+  "resolved_conversations": 121,
+  "total_turns": 876,
+  "total_input_tokens": 412000,
+  "total_output_tokens": 98000,
+  "total_cost_usd": 0.1234,
+  "tool_calls_total": 203,
+  "tool_calls_success": 198,
+  "model_breakdown": [
+    {
+      "model": "gpt-4o-mini",
+      "input_tokens": 412000,
+      "output_tokens": 98000,
+      "cost_usd": 0.1234
+    }
+  ]
+}
+```
+
+---
+
+### PUT /api/workspace/ai-pipeline
+
+Configure the full AI pipeline for the workspace. **Requires Growth or Pro tier.**
+
+**Headers:** `Authorization: Bearer <token>`
+
+**Request Body:**
+```json
+{
+  "ai_mode": "ai_agent",
+  "ai_provider": "openai",
+  "ai_model": "gpt-4o-mini",
+  "ai_api_key": "sk-..."
+}
+```
+
+| Field | Values | Notes |
+|-------|--------|-------|
+| `ai_mode` | `rag` \| `ai_agent` | Switches the whole pipeline |
+| `ai_provider` | `google` \| `openai` \| `anthropic` \| `groq` | Which LLM backend |
+| `ai_model` | e.g. `gpt-4o-mini`, `claude-haiku-4-5`, `gemini-2.0-flash` | Optional model override |
+| `ai_api_key` | Your API key | Optional — uses platform key if omitted |
+
+**Response (200):**
+```json
+{
+  "status": "updated",
+  "ai_mode": "ai_agent",
+  "ai_provider": "openai",
+  "ai_model": "gpt-4o-mini"
+}
+```
+
+**Errors:** 403 (requires Growth+ tier)
+
+---
+
+### GET /api/workspace/ai-pipeline
+
+Get current AI pipeline configuration.
+
+**Response (200):**
+```json
+{
+  "ai_mode": "rag",
+  "ai_provider": "google",
+  "ai_model": "gemini-2.0-flash",
+  "has_api_key": false
+}
+```
+
+---
+
 ## Support
 
 For API support and questions:
@@ -3938,6 +4365,6 @@ For API support and questions:
 
 ---
 
-**Last Updated:** 2026-03-23
-**API Version:** 1.2
+**Last Updated:** 2026-03-24
+**API Version:** 1.3
 **Base URL:** `https://your-domain.com`

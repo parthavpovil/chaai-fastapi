@@ -1,0 +1,44 @@
+# Docker Compose for local development
+services:
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: chatsaas-dev-postgres
+    environment:
+      POSTGRES_DB: chatsaas
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    ports:
+      - "5434:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d chatsaas"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - chatsaas-dev
+
+  redis:
+    image: redis:7-alpine
+    container_name: chatsaas-dev-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - dev_redis_data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - chatsaas-dev
+
+volumes:
+  dev_postgres_data:
+    driver: local
+  dev_redis_data:
+    driver: local
+
+networks:
+  chatsaas-dev:
+    driver: bridge

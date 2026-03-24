@@ -17,6 +17,7 @@ from app.routers import auth, webchat, admin, agents, channels, webhooks, websoc
 from app.routers import canned_responses, assignment_rules as assignment_rules_router, outbound_webhooks as outbound_webhooks_router, api_keys as api_keys_router, billing as billing_router, workspace as workspace_router
 from app.routers import contacts as contacts_router, business_hours as business_hours_router
 from app.routers import flows as flows_router, templates as templates_router, broadcasts as broadcasts_router
+from app.routers import ai_agents as ai_agents_router
 from app.middleware.maintenance_middleware import maintenance_mode_middleware
 from app.middleware.monitoring_middleware import init_monitoring_middleware, MonitoringMiddleware
 
@@ -103,6 +104,7 @@ app.include_router(business_hours_router.router)
 app.include_router(flows_router.router)
 app.include_router(templates_router.router)
 app.include_router(broadcasts_router.router)
+app.include_router(ai_agents_router.router)
 
 @app.get("/health")
 async def health_check():

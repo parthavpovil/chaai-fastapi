@@ -23,9 +23,16 @@ router = APIRouter(prefix="/api/workspace", tags=["workspace"])
 # ─── Schemas ──────────────────────────────────────────────────────────────────
 
 class AIConfigUpdate(BaseModel):
-    ai_provider: str = Field(..., pattern="^(google|openai|groq)$")
+    ai_provider: str = Field(..., pattern="^(google|openai|groq|anthropic)$")
     ai_model: Optional[str] = Field(None, max_length=100)
     ai_api_key: Optional[str] = Field(None, max_length=500)  # plaintext — will be encrypted
+
+
+class AIPipelineConfigUpdate(BaseModel):
+    ai_mode: str = Field(..., pattern="^(rag|ai_agent)$")
+    ai_provider: Optional[str] = Field(None, pattern="^(anthropic|openai|google|groq)$")
+    ai_model: Optional[str] = Field(None, max_length=100)
+    ai_api_key: Optional[str] = Field(None, max_length=500)
 
 
 class WorkspaceSettingsUpdate(BaseModel):
@@ -83,6 +90,55 @@ async def get_ai_config(
     """Get current workspace AI configuration."""
     meta = current_workspace.meta or {}
     return {
+        "ai_provider": meta.get("ai_provider"),
+        "ai_model": meta.get("ai_model"),
+        "has_api_key": bool(meta.get("ai_api_key")),
+    }
+
+
+@router.put("/ai-pipeline")
+async def update_ai_pipeline(
+    request: AIPipelineConfigUpdate,
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+    db: AsyncSession = Depends(get_db),
+):
+    """Configure the full AI pipeline (mode + model + provider). Growth+ tier required."""
+    tier = current_workspace.tier or "free"
+    if not TIER_LIMITS.get(tier, {}).get("has_custom_ai", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="AI pipeline configuration requires Growth or Pro tier.",
+        )
+
+    meta = current_workspace.meta or {}
+    meta["ai_mode"] = request.ai_mode
+    if request.ai_provider:
+        meta["ai_provider"] = request.ai_provider
+    if request.ai_model:
+        meta["ai_model"] = request.ai_model
+    if request.ai_api_key:
+        meta["ai_api_key"] = request.ai_api_key
+
+    current_workspace.meta = meta
+    await db.commit()
+    return {
+        "status": "updated",
+        "ai_mode": request.ai_mode,
+        "ai_provider": meta.get("ai_provider"),
+        "ai_model": meta.get("ai_model"),
+    }
+
+
+@router.get("/ai-pipeline")
+async def get_ai_pipeline(
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+):
+    """Get current AI pipeline configuration."""
+    meta = current_workspace.meta or {}
+    return {
+        "ai_mode": meta.get("ai_mode", "rag"),
         "ai_provider": meta.get("ai_provider"),
         "ai_model": meta.get("ai_model"),
         "has_api_key": bool(meta.get("ai_api_key")),

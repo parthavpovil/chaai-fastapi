@@ -329,6 +329,47 @@ async def _run_message_pipeline(
         except Exception as e:
             logger.error(f"Flow engine error: {e}")
 
+    # AI Agent routing — runs after flow engine, before escalation check + RAG
+    from sqlalchemy import select as _select
+    from app.models.workspace import Workspace as _Workspace
+    workspace_result = await db.execute(
+        _select(_Workspace).where(_Workspace.id == workspace_id)
+    )
+    _workspace = workspace_result.scalar_one_or_none()
+    _ai_mode = (_workspace.meta or {}).get("ai_mode", "rag") if _workspace else "rag"
+
+    if _ai_mode == "ai_agent":
+        try:
+            from app.services.ai_agent_runner import ai_agent_runner
+            from app.services.websocket_events import notify_new_message
+            from app.services.message_processor import MessageProcessor
+
+            agent_result = await ai_agent_runner.run(
+                db=db,
+                conversation_id=conversation_id,
+                new_message=text_content,
+                workspace_id=workspace_id,
+                channel_id=channel_id,
+            )
+            if agent_result.handled:
+                processor = MessageProcessor(db)
+                ai_msg = await processor.create_message(
+                    conversation_id=conversation_id,
+                    content=agent_result.reply,
+                    role="ai",
+                    channel_type=channel_type,
+                    metadata={"ai_agent": True, "escalated": agent_result.escalated},
+                )
+                await notify_new_message(
+                    db=db,
+                    workspace_id=workspace_id,
+                    conversation_id=conversation_id,
+                    message_id=str(ai_msg.id),
+                )
+                return
+        except Exception as e:
+            logger.error(f"AI agent runner error for conversation {conversation_id}: {e}")
+
     escalation_result = await check_and_escalate_message(
         db=db,
         conversation_id=conversation_id,

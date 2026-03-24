@@ -55,6 +55,7 @@ class Workspace(Base):
     flows = relationship("Flow", back_populates="workspace", cascade="all, delete-orphan")
     whatsapp_templates = relationship("WhatsAppTemplate", back_populates="workspace", cascade="all, delete-orphan")
     broadcasts = relationship("Broadcast", back_populates="workspace", cascade="all, delete-orphan")
+    ai_agents = relationship("AIAgent", back_populates="workspace", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Workspace(id={self.id}, name='{self.name}', slug='{self.slug}')>"

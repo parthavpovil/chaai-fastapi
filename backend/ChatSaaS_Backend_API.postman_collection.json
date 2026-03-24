@@ -2,7 +2,7 @@
   "info": {
     "_postman_id": "chatsaas-backend-api-v1",
     "name": "ChatSaaS Backend API",
-    "description": "# ChatSaaS Backend API\n\nComplete API collection for the ChatSaaS Backend platform.\n\n## Environment Variables\n- `base_url`: API base URL (e.g. `http://localhost:8000`)\n- `access_token`: JWT token or API key `csk_xxx` (auto-populated by login/register)\n- `workspace_id`: Current workspace ID (auto-populated)\n- `workspace_slug`: Current workspace slug (auto-populated)\n- `channel_id`: Channel ID (auto-populated)\n- `document_id`: Document ID (auto-populated)\n- `agent_id`: Agent ID (auto-populated)\n- `conversation_id`: Conversation ID (auto-populated)\n- `message_id`: Message ID for feedback endpoints\n- `session_token`: WebChat session token (auto-populated)\n- `widget_id`: WebChat widget ID (auto-populated)\n- `invitation_token`: Agent invitation token (auto-populated)\n- `canned_response_id`: Canned response ID (auto-populated)\n- `rule_id`: Assignment rule ID (auto-populated)\n- `outbound_webhook_id`: Outbound webhook ID (auto-populated)\n- `webhook_log_id`: Webhook delivery log ID (auto-populated)\n- `api_key_id`: API key ID (auto-populated)\n- `api_key_raw`: Raw API key returned once on creation — store securely\n- `contact_id`: Contact ID for contact management endpoints\n- `csat_token`: JWT token from csat_prompt WebSocket event for CSAT submission\n\n## Authentication\nMost endpoints require `Authorization: Bearer {{access_token}}`.\nAPI keys (`csk_xxx`) can also be used as Bearer tokens on any authenticated endpoint.\n\n## Trailing Slashes\nFastAPI routes are defined with trailing slashes. Always use `/api/channels/` not `/api/channels`.",
+    "description": "# ChatSaaS Backend API\n\nComplete API collection for the ChatSaaS Backend platform.\n\n## Environment Variables\n- `base_url`: API base URL (e.g. `http://localhost:8000`)\n- `access_token`: JWT token or API key `csk_xxx` (auto-populated by login/register)\n- `workspace_id`: Current workspace ID (auto-populated)\n- `workspace_slug`: Current workspace slug (auto-populated)\n- `channel_id`: Channel ID (auto-populated)\n- `document_id`: Document ID (auto-populated)\n- `agent_id`: Agent ID (auto-populated)\n- `conversation_id`: Conversation ID (auto-populated)\n- `message_id`: Message ID for feedback endpoints\n- `session_token`: WebChat session token (auto-populated)\n- `widget_id`: WebChat widget ID (auto-populated)\n- `invitation_token`: Agent invitation token (auto-populated)\n- `canned_response_id`: Canned response ID (auto-populated)\n- `rule_id`: Assignment rule ID (auto-populated)\n- `outbound_webhook_id`: Outbound webhook ID (auto-populated)\n- `webhook_log_id`: Webhook delivery log ID (auto-populated)\n- `api_key_id`: API key ID (auto-populated)\n- `api_key_raw`: Raw API key returned once on creation \u2014 store securely\n- `contact_id`: Contact ID for contact management endpoints\n- `csat_token`: JWT token from csat_prompt WebSocket event for CSAT submission\n\n## Authentication\nMost endpoints require `Authorization: Bearer {{access_token}}`.\nAPI keys (`csk_xxx`) can also be used as Bearer tokens on any authenticated endpoint.\n\n## Trailing Slashes\nFastAPI routes are defined with trailing slashes. Always use `/api/channels/` not `/api/channels`.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
     "version": "4.1.0"
   },
@@ -24,17 +24,34 @@
         {
           "name": "POST Register",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/auth/register",
-              "host": ["{{base_url}}"],
-              "path": ["api", "auth", "register"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "register"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"email\": \"owner@example.com\",\n  \"password\": \"securepassword123\",\n  \"business_name\": \"My Business\"\n}"
             },
             "description": "Register a new user and create a workspace. Returns JWT access token."
@@ -62,17 +79,34 @@
         {
           "name": "POST Login",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/auth/login",
-              "host": ["{{base_url}}"],
-              "path": ["api", "auth", "login"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "login"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"email\": \"owner@example.com\",\n  \"password\": \"securepassword123\"\n}"
             },
             "description": "Login as a workspace owner. Returns JWT access token."
@@ -100,17 +134,34 @@
         {
           "name": "POST Agent Login",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/auth/agent-login",
-              "host": ["{{base_url}}"],
-              "path": ["api", "auth", "agent-login"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "agent-login"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"email\": \"agent@example.com\",\n  \"password\": \"agentpassword123\"\n}"
             },
             "description": "Login as an agent. Returns JWT access token."
@@ -133,17 +184,34 @@
         {
           "name": "POST Accept Invite",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/auth/accept-invite",
-              "host": ["{{base_url}}"],
-              "path": ["api", "auth", "accept-invite"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "accept-invite"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"token\": \"{{invitation_token}}\",\n  \"password\": \"agentpassword123\"\n}"
             },
             "description": "Accept an agent invitation and set password."
@@ -156,8 +224,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/auth/me",
-              "host": ["{{base_url}}"],
-              "path": ["api", "auth", "me"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "me"
+              ]
             },
             "description": "Get current authenticated user and workspace info."
           },
@@ -166,17 +240,34 @@
         {
           "name": "POST Refresh Token",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/auth/refresh",
-              "host": ["{{base_url}}"],
-              "path": ["api", "auth", "refresh"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "refresh"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"token\": \"{{access_token}}\"\n}"
             },
             "description": "Silently refresh a JWT before it expires. Pass a valid (non-expired) token and receive a new token with a fresh expiry. Call this proactively ~5 minutes before exp to avoid mid-session logouts."
@@ -206,15 +297,30 @@
           "name": "POST Create Channel (WebChat)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/channels/",
-              "host": ["{{base_url}}"],
-              "path": ["api", "channels", ""]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                ""
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"channel_type\": \"webchat\",\n  \"name\": \"My Website Chat\",\n  \"is_active\": true,\n  \"credentials\": {\n    \"primary_color\": \"#007bff\",\n    \"position\": \"bottom-right\",\n    \"welcome_message\": \"Hello! How can we help you today?\"\n  }\n}"
             },
             "description": "Create a new WebChat channel. Trailing slash is required."
@@ -240,15 +346,30 @@
           "name": "POST Create Channel (Telegram)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/channels/",
-              "host": ["{{base_url}}"],
-              "path": ["api", "channels", ""]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                ""
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"channel_type\": \"telegram\",\n  \"name\": \"My Telegram Bot\",\n  \"is_active\": true,\n  \"credentials\": {\n    \"bot_token\": \"123456789:AABBCCDDEEFFaabbccddeeff-1234567890\"\n  }\n}"
             },
             "description": "Create a Telegram bot channel."
@@ -259,15 +380,30 @@
           "name": "POST Create Channel (WhatsApp)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/channels/",
-              "host": ["{{base_url}}"],
-              "path": ["api", "channels", ""]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                ""
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"channel_type\": \"whatsapp\",\n  \"name\": \"My WhatsApp Business\",\n  \"is_active\": true,\n  \"credentials\": {\n    \"phone_number_id\": \"1234567890\",\n    \"access_token\": \"EAABxxxxxx\",\n    \"verify_token\": \"my_verify_token\"\n  }\n}"
             },
             "description": "Create a WhatsApp Business channel."
@@ -278,15 +414,30 @@
           "name": "POST Create Channel (Instagram)",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/channels/",
-              "host": ["{{base_url}}"],
-              "path": ["api", "channels", ""]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                ""
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"channel_type\": \"instagram\",\n  \"name\": \"My Instagram DMs\",\n  \"is_active\": true,\n  \"credentials\": {\n    \"page_access_token\": \"EAABxxxxxx\",\n    \"instagram_account_id\": \"1234567890\",\n    \"verify_token\": \"my_verify_token\"\n  }\n}"
             },
             "description": "Create an Instagram channel."
@@ -299,8 +450,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/channels/",
-              "host": ["{{base_url}}"],
-              "path": ["api", "channels", ""]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                ""
+              ]
             },
             "description": "List all channels for the workspace."
           },
@@ -312,8 +469,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/channels/{{channel_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "channels", "{{channel_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                "{{channel_id}}"
+              ]
             },
             "description": "Get a specific channel by ID."
           },
@@ -323,15 +486,30 @@
           "name": "PUT Update Channel",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/channels/{{channel_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "channels", "{{channel_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                "{{channel_id}}"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"name\": \"Updated Channel Name\",\n  \"is_active\": true\n}"
             },
             "description": "Update channel name and/or active status. All fields optional."
@@ -344,8 +522,14 @@
             "method": "DELETE",
             "url": {
               "raw": "{{base_url}}/api/channels/{{channel_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "channels", "{{channel_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                "{{channel_id}}"
+              ]
             },
             "description": "Delete a channel by ID."
           },
@@ -355,15 +539,31 @@
           "name": "POST Validate Channel Credentials",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/channels/validate/telegram",
-              "host": ["{{base_url}}"],
-              "path": ["api", "channels", "validate", "telegram"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                "validate",
+                "telegram"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"bot_token\": \"123456789:AABBCCDDEEFFaabbccddeeff-1234567890\"\n}"
             },
             "description": "Validate credentials for a channel type before creating. Replace 'telegram' in path with: webchat, telegram, whatsapp, instagram."
@@ -376,8 +576,15 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/channels/stats/summary",
-              "host": ["{{base_url}}"],
-              "path": ["api", "channels", "stats", "summary"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "channels",
+                "stats",
+                "summary"
+              ]
             },
             "description": "Get channel statistics summary for the workspace."
           },
@@ -395,13 +602,35 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/conversations/?status_filter=active&assigned_to_me=false&limit=50&offset=0",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", ""],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                ""
+              ],
               "query": [
-                { "key": "status_filter", "value": "active", "description": "Filter by status: active, escalated, agent, resolved. Optional." },
-                { "key": "assigned_to_me", "value": "false", "description": "Only show conversations assigned to current agent (bool, default false)." },
-                { "key": "limit", "value": "50", "description": "Max results (1-100, default 50)." },
-                { "key": "offset", "value": "0", "description": "Pagination offset (default 0)." }
+                {
+                  "key": "status_filter",
+                  "value": "active",
+                  "description": "Filter by status: active, escalated, agent, resolved. Optional."
+                },
+                {
+                  "key": "assigned_to_me",
+                  "value": "false",
+                  "description": "Only show conversations assigned to current agent (bool, default false)."
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Max results (1-100, default 50)."
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Pagination offset (default 0)."
+                }
               ]
             },
             "description": "List conversations with optional filters."
@@ -414,8 +643,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/conversations/{{conversation_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", "{{conversation_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "{{conversation_id}}"
+              ]
             },
             "description": "Get full conversation detail including all messages."
           },
@@ -425,15 +660,30 @@
           "name": "POST Claim Conversation",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/conversations/claim",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", "claim"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "claim"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\"\n}"
             },
             "description": "Agent claims an escalated conversation."
@@ -444,15 +694,30 @@
           "name": "POST Update Conversation Status",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/conversations/status",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", "status"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "status"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"conversation_id\": \"{{conversation_id}}\",\n  \"status\": \"resolved\",\n  \"note\": \"Issue resolved by agent\"\n}"
             },
             "description": "Update conversation status. Possible statuses: active, escalated, agent, resolved."
@@ -463,15 +728,31 @@
           "name": "POST Send Agent Message",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/conversations/{{conversation_id}}/messages",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", "{{conversation_id}}", "messages"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "{{conversation_id}}",
+                "messages"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"content\": \"Hello! I'm here to help you. Could you please describe your issue in more detail?\"\n}"
             },
             "description": "Agent sends a message in a conversation (max 2000 chars)."
@@ -484,8 +765,15 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/conversations/stats/summary",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", "stats", "summary"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "stats",
+                "summary"
+              ]
             },
             "description": "Get conversation statistics for the workspace."
           },
@@ -497,11 +785,26 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/conversations/my/active?limit=50&offset=0",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", "my", "active"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "my",
+                "active"
+              ],
               "query": [
-                { "key": "limit", "value": "50", "description": "Max results (1-100, default 50)." },
-                { "key": "offset", "value": "0", "description": "Pagination offset." }
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Max results (1-100, default 50)."
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Pagination offset."
+                }
               ]
             },
             "description": "Get conversations assigned to the current agent."
@@ -512,15 +815,31 @@
           "name": "POST Create Internal Note",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/conversations/{{conversation_id}}/notes",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", "{{conversation_id}}", "notes"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "{{conversation_id}}",
+                "notes"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"content\": \"Customer seems frustrated about billing. Check account history before responding.\"\n}"
             },
             "description": "Create an internal note on a conversation. Only visible to agents/owners, never to customers."
@@ -533,8 +852,15 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/conversations/{{conversation_id}}/notes",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", "{{conversation_id}}", "notes"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "{{conversation_id}}",
+                "notes"
+              ]
             },
             "description": "List all internal notes for a conversation."
           },
@@ -544,18 +870,40 @@
           "name": "POST Submit AI Feedback",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/conversations/{{conversation_id}}/messages/{{message_id}}/feedback",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", "{{conversation_id}}", "messages", "{{message_id}}", "feedback"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "{{conversation_id}}",
+                "messages",
+                "{{message_id}}",
+                "feedback"
+              ],
               "variable": [
-                { "key": "message_id", "value": "{{message_id}}", "description": "Message ID to rate." }
+                {
+                  "key": "message_id",
+                  "value": "{{message_id}}",
+                  "description": "Message ID to rate."
+                }
               ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"rating\": \"negative\",\n  \"comment\": \"The AI gave incorrect pricing information.\"\n}"
             },
             "description": "Submit thumbs-up (positive) or thumbs-down (negative) feedback on an AI response. One feedback per message."
@@ -581,8 +929,17 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/conversations/{{conversation_id}}/messages/{{message_id}}/feedback",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", "{{conversation_id}}", "messages", "{{message_id}}", "feedback"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "{{conversation_id}}",
+                "messages",
+                "{{message_id}}",
+                "feedback"
+              ]
             },
             "description": "Get feedback for a specific message. Returns null if none submitted."
           },
@@ -594,18 +951,60 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/conversations/search?q=billing&status=resolved&limit=20&offset=0",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", "search"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "search"
+              ],
               "query": [
-                { "key": "q", "value": "billing", "description": "Full-text search query across message content (PostgreSQL tsvector)." },
-                { "key": "contact_name", "value": "", "description": "Filter by contact name (ILIKE). Optional." },
-                { "key": "channel_type", "value": "", "description": "Filter by channel: webchat, telegram, whatsapp, instagram. Optional." },
-                { "key": "status", "value": "resolved", "description": "Filter by status: active, escalated, agent, resolved, paused. Optional." },
-                { "key": "date_from", "value": "", "description": "ISO date filter start (inclusive). Optional." },
-                { "key": "date_to", "value": "", "description": "ISO date filter end (inclusive). Optional." },
-                { "key": "assigned_agent_id", "value": "", "description": "Filter by assigned agent UUID. Optional." },
-                { "key": "limit", "value": "20", "description": "Max results (1-100, default 20)." },
-                { "key": "offset", "value": "0", "description": "Pagination offset." }
+                {
+                  "key": "q",
+                  "value": "billing",
+                  "description": "Full-text search query across message content (PostgreSQL tsvector)."
+                },
+                {
+                  "key": "contact_name",
+                  "value": "",
+                  "description": "Filter by contact name (ILIKE). Optional."
+                },
+                {
+                  "key": "channel_type",
+                  "value": "",
+                  "description": "Filter by channel: webchat, telegram, whatsapp, instagram. Optional."
+                },
+                {
+                  "key": "status",
+                  "value": "resolved",
+                  "description": "Filter by status: active, escalated, agent, resolved, paused. Optional."
+                },
+                {
+                  "key": "date_from",
+                  "value": "",
+                  "description": "ISO date filter start (inclusive). Optional."
+                },
+                {
+                  "key": "date_to",
+                  "value": "",
+                  "description": "ISO date filter end (inclusive). Optional."
+                },
+                {
+                  "key": "assigned_agent_id",
+                  "value": "",
+                  "description": "Filter by assigned agent UUID. Optional."
+                },
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Max results (1-100, default 20)."
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Pagination offset."
+                }
               ]
             },
             "description": "Full-text search across conversations using PostgreSQL tsvector. Returns matching conversations with a ts_headline snippet showing the matching context. Requires at least one filter parameter."
@@ -618,16 +1017,50 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/conversations/export?status=resolved&date_from=2026-01-01",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", "export"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "export"
+              ],
               "query": [
-                { "key": "q", "value": "", "description": "Full-text search filter. Optional." },
-                { "key": "contact_name", "value": "", "description": "Filter by contact name. Optional." },
-                { "key": "channel_type", "value": "", "description": "Filter by channel type. Optional." },
-                { "key": "status", "value": "resolved", "description": "Filter by status. Optional." },
-                { "key": "date_from", "value": "2026-01-01", "description": "ISO date filter start. Optional." },
-                { "key": "date_to", "value": "", "description": "ISO date filter end. Optional." },
-                { "key": "assigned_agent_id", "value": "", "description": "Filter by assigned agent UUID. Optional." }
+                {
+                  "key": "q",
+                  "value": "",
+                  "description": "Full-text search filter. Optional."
+                },
+                {
+                  "key": "contact_name",
+                  "value": "",
+                  "description": "Filter by contact name. Optional."
+                },
+                {
+                  "key": "channel_type",
+                  "value": "",
+                  "description": "Filter by channel type. Optional."
+                },
+                {
+                  "key": "status",
+                  "value": "resolved",
+                  "description": "Filter by status. Optional."
+                },
+                {
+                  "key": "date_from",
+                  "value": "2026-01-01",
+                  "description": "ISO date filter start. Optional."
+                },
+                {
+                  "key": "date_to",
+                  "value": "",
+                  "description": "ISO date filter end. Optional."
+                },
+                {
+                  "key": "assigned_agent_id",
+                  "value": "",
+                  "description": "Filter by assigned agent UUID. Optional."
+                }
               ]
             },
             "description": "Export conversations as a streaming CSV file. Growth+ tier required. CSV columns: conversation_id, contact_name, channel_type, status, created_at, resolved_at, message_count, escalated, assigned_agent_name, csat_rating. Response header: Content-Disposition: attachment; filename=conversations_export.csv"
@@ -640,8 +1073,15 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/conversations/{{conversation_id}}/csat",
-              "host": ["{{base_url}}"],
-              "path": ["api", "conversations", "{{conversation_id}}", "csat"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "conversations",
+                "{{conversation_id}}",
+                "csat"
+              ]
             },
             "description": "Get the CSAT rating submitted for a specific conversation. Returns 404 if no rating exists yet."
           },
@@ -660,8 +1100,14 @@
             "header": [],
             "url": {
               "raw": "{{base_url}}/api/documents/upload",
-              "host": ["{{base_url}}"],
-              "path": ["api", "documents", "upload"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "documents",
+                "upload"
+              ]
             },
             "body": {
               "mode": "formdata",
@@ -703,12 +1149,30 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/documents/?status_filter=completed&limit=50&offset=0",
-              "host": ["{{base_url}}"],
-              "path": ["api", "documents", ""],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "documents",
+                ""
+              ],
               "query": [
-                { "key": "status_filter", "value": "completed", "description": "Filter by status: pending, processing, completed, failed. Optional." },
-                { "key": "limit", "value": "50", "description": "Max results (default 50)." },
-                { "key": "offset", "value": "0", "description": "Pagination offset." }
+                {
+                  "key": "status_filter",
+                  "value": "completed",
+                  "description": "Filter by status: pending, processing, completed, failed. Optional."
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Max results (default 50)."
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Pagination offset."
+                }
               ]
             },
             "description": "List all documents in the workspace knowledge base. Each document includes `file_path` (R2 URL) and `chunks_count`."
@@ -721,8 +1185,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/documents/{{document_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "documents", "{{document_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "documents",
+                "{{document_id}}"
+              ]
             },
             "description": "Get a specific document by ID. Returns `file_path` (R2 URL), `status`, and `chunks_count`."
           },
@@ -734,8 +1204,14 @@
             "method": "DELETE",
             "url": {
               "raw": "{{base_url}}/api/documents/{{document_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "documents", "{{document_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "documents",
+                "{{document_id}}"
+              ]
             },
             "description": "Delete a document and its chunks from the database, and delete the file from Cloudflare R2."
           },
@@ -747,8 +1223,15 @@
             "method": "POST",
             "url": {
               "raw": "{{base_url}}/api/documents/{{document_id}}/reprocess",
-              "host": ["{{base_url}}"],
-              "path": ["api", "documents", "{{document_id}}", "reprocess"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "documents",
+                "{{document_id}}",
+                "reprocess"
+              ]
             },
             "description": "Re-download the file from R2, re-extract text, and regenerate embeddings. R2 URL is preserved (no re-upload). Allowed for `failed` or `completed` documents."
           },
@@ -760,8 +1243,15 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/documents/stats/summary",
-              "host": ["{{base_url}}"],
-              "path": ["api", "documents", "stats", "summary"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "documents",
+                "stats",
+                "summary"
+              ]
             },
             "description": "Get document statistics for the workspace (counts by status, total chunks, tier info)."
           },
@@ -777,15 +1267,30 @@
           "name": "POST Invite Agent",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/agents/invite",
-              "host": ["{{base_url}}"],
-              "path": ["api", "agents", "invite"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "agents",
+                "invite"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"email\": \"agent@example.com\",\n  \"name\": \"Support Agent Name\"\n}"
             },
             "description": "Invite a new agent to the workspace. Sends invitation email."
@@ -810,17 +1315,34 @@
         {
           "name": "POST Accept Agent Invitation",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/agents/accept",
-              "host": ["{{base_url}}"],
-              "path": ["api", "agents", "accept"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "agents",
+                "accept"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"invitation_token\": \"{{invitation_token}}\"\n}"
             },
             "description": "Accept an agent invitation using the token from the email."
@@ -833,10 +1355,20 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/agents/?include_inactive=false",
-              "host": ["{{base_url}}"],
-              "path": ["api", "agents", ""],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "agents",
+                ""
+              ],
               "query": [
-                { "key": "include_inactive", "value": "false", "description": "Include deactivated agents (bool, default false)." }
+                {
+                  "key": "include_inactive",
+                  "value": "false",
+                  "description": "Include deactivated agents (bool, default false)."
+                }
               ]
             },
             "description": "List all agents in the workspace."
@@ -849,8 +1381,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/agents/pending",
-              "host": ["{{base_url}}"],
-              "path": ["api", "agents", "pending"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "agents",
+                "pending"
+              ]
             },
             "description": "List pending (not yet accepted) agent invitations."
           },
@@ -862,8 +1400,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/agents/stats",
-              "host": ["{{base_url}}"],
-              "path": ["api", "agents", "stats"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "agents",
+                "stats"
+              ]
             },
             "description": "Get agent statistics: totals plus per-agent performance breakdown (active conversations, 30-day resolved count, avg CSAT score)."
           },
@@ -872,12 +1416,21 @@
         {
           "name": "GET Invitation Info",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/agents/invitation/{{invitation_token}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "agents", "invitation", "{{invitation_token}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "agents",
+                "invitation",
+                "{{invitation_token}}"
+              ]
             },
             "description": "Get info about an invitation token (validity, email, workspace)."
           },
@@ -889,8 +1442,15 @@
             "method": "POST",
             "url": {
               "raw": "{{base_url}}/api/agents/{{agent_id}}/activate",
-              "host": ["{{base_url}}"],
-              "path": ["api", "agents", "{{agent_id}}", "activate"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "agents",
+                "{{agent_id}}",
+                "activate"
+              ]
             },
             "description": "Reactivate a previously deactivated agent."
           },
@@ -902,8 +1462,15 @@
             "method": "POST",
             "url": {
               "raw": "{{base_url}}/api/agents/{{agent_id}}/deactivate",
-              "host": ["{{base_url}}"],
-              "path": ["api", "agents", "{{agent_id}}", "deactivate"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "agents",
+                "{{agent_id}}",
+                "deactivate"
+              ]
             },
             "description": "Deactivate an agent (soft disable, not delete)."
           },
@@ -915,8 +1482,15 @@
             "method": "POST",
             "url": {
               "raw": "{{base_url}}/api/agents/{{agent_id}}/resend",
-              "host": ["{{base_url}}"],
-              "path": ["api", "agents", "{{agent_id}}", "resend"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "agents",
+                "{{agent_id}}",
+                "resend"
+              ]
             },
             "description": "Resend the invitation email to a pending agent."
           },
@@ -928,8 +1502,14 @@
             "method": "DELETE",
             "url": {
               "raw": "{{base_url}}/api/agents/{{agent_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "agents", "{{agent_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "agents",
+                "{{agent_id}}"
+              ]
             },
             "description": "Permanently delete an agent from the workspace."
           },
@@ -939,18 +1519,34 @@
           "name": "PUT Set Agent Status",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/agents/me/status",
-              "host": ["{{base_url}}"],
-              "path": ["api", "agents", "me", "status"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "agents",
+                "me",
+                "status"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"status\": \"online\"\n}"
             },
-            "description": "Set current agent availability status. Values: online, offline, busy. Updates heartbeat timestamp — agents are auto-set offline after 5 min of no heartbeat."
+            "description": "Set current agent availability status. Values: online, offline, busy. Updates heartbeat timestamp \u2014 agents are auto-set offline after 5 min of no heartbeat."
           },
           "response": []
         },
@@ -960,8 +1556,15 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/agents/me/status",
-              "host": ["{{base_url}}"],
-              "path": ["api", "agents", "me", "status"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "agents",
+                "me",
+                "status"
+              ]
             },
             "description": "Get current agent's status and last heartbeat timestamp."
           },
@@ -971,17 +1574,26 @@
     },
     {
       "name": "WebChat (Public)",
-      "description": "Public WebChat endpoints — no auth required. Used by the widget embedded on customer websites. Supports text and media messages. Files are uploaded to Cloudflare R2 via POST /upload, then referenced in POST /send.",
+      "description": "Public WebChat endpoints \u2014 no auth required. Used by the widget embedded on customer websites. Supports text and media messages. Files are uploaded to Cloudflare R2 via POST /upload, then referenced in POST /send.",
       "item": [
         {
           "name": "GET WebChat Config",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/webchat/config/{{workspace_slug}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "webchat", "config", "{{workspace_slug}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "webchat",
+                "config",
+                "{{workspace_slug}}"
+              ]
             },
             "description": "Get WebChat widget config for a workspace (public). Returns widget_id, business_name, primary_color, position, welcome_message."
           },
@@ -990,17 +1602,34 @@
         {
           "name": "POST WebChat Send Message (Text)",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/webchat/send",
-              "host": ["{{base_url}}"],
-              "path": ["api", "webchat", "send"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "webchat",
+                "send"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"widget_id\": \"{{widget_id}}\",\n  \"session_token\": \"{{session_token}}\",\n  \"message\": \"Hello, I need help with my order.\",\n  \"contact_name\": \"John Doe\",\n  \"contact_email\": \"john@example.com\",\n  \"contact_phone\": \"+919847000000\",\n  \"external_id\": \"usr_123\",\n  \"metadata\": {\n    \"plan\": \"premium\",\n    \"total_orders\": 12,\n    \"city\": \"Thrissur\"\n  }\n}"
             },
             "description": "Send a text message via WebChat widget. `session_token` is optional on first message (auto-created and returned). Use `external_id` as your internal customer ID for stable identity across sessions. Rate limit: 10 req/min per session (shared with /upload)."
@@ -1024,17 +1653,34 @@
         {
           "name": "POST WebChat Send Message (Media)",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/webchat/send",
-              "host": ["{{base_url}}"],
-              "path": ["api", "webchat", "send"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "webchat",
+                "send"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"widget_id\": \"{{widget_id}}\",\n  \"session_token\": \"{{session_token}}\",\n  \"media_url\": \"{{uploaded_media_url}}\",\n  \"media_mime_type\": \"image/jpeg\",\n  \"media_filename\": \"screenshot.jpg\",\n  \"media_size\": 204800,\n  \"message_type\": \"image\"\n}"
             },
             "description": "Send a media message after uploading via POST /upload. Set `media_url` from the upload response. Either `message` or `media_url` must be provided. `message_type` can be: image, video, audio, document."
@@ -1044,13 +1690,21 @@
         {
           "name": "POST WebChat Upload File",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [],
             "url": {
               "raw": "{{base_url}}/api/webchat/upload",
-              "host": ["{{base_url}}"],
-              "path": ["api", "webchat", "upload"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "webchat",
+                "upload"
+              ]
             },
             "body": {
               "mode": "formdata",
@@ -1065,7 +1719,7 @@
                   "key": "session_token",
                   "value": "{{session_token}}",
                   "type": "text",
-                  "description": "Active session token (required — send a text message first to start a session)."
+                  "description": "Active session token (required \u2014 send a text message first to start a session)."
                 },
                 {
                   "key": "file",
@@ -1095,17 +1749,41 @@
         {
           "name": "GET WebChat Messages",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/webchat/messages?widget_id={{widget_id}}&session_token={{session_token}}&limit=50&offset=0",
-              "host": ["{{base_url}}"],
-              "path": ["api", "webchat", "messages"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "webchat",
+                "messages"
+              ],
               "query": [
-                { "key": "widget_id", "value": "{{widget_id}}", "description": "Widget ID (required)." },
-                { "key": "session_token", "value": "{{session_token}}", "description": "Session token (required)." },
-                { "key": "limit", "value": "50", "description": "Max messages (1-100, default 50)." },
-                { "key": "offset", "value": "0", "description": "Pagination offset." }
+                {
+                  "key": "widget_id",
+                  "value": "{{widget_id}}",
+                  "description": "Widget ID (required)."
+                },
+                {
+                  "key": "session_token",
+                  "value": "{{session_token}}",
+                  "description": "Session token (required)."
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Max messages (1-100, default 50)."
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Pagination offset."
+                }
               ]
             },
             "description": "Get message history for a WebChat session. Each message includes `msg_type`, `media_url`, `media_mime_type`, `media_filename`, `media_size` for media messages."
@@ -1124,8 +1802,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/admin/overview",
-              "host": ["{{base_url}}"],
-              "path": ["api", "admin", "overview"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "overview"
+              ]
             },
             "description": "Get platform-wide stats: total workspaces, users, tier breakdown, recent activity."
           },
@@ -1137,12 +1821,30 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/admin/workspaces?limit=50&offset=0&tier=free",
-              "host": ["{{base_url}}"],
-              "path": ["api", "admin", "workspaces"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "workspaces"
+              ],
               "query": [
-                { "key": "limit", "value": "50", "description": "Max results (1-100, default 50)." },
-                { "key": "offset", "value": "0", "description": "Pagination offset." },
-                { "key": "tier", "value": "free", "description": "Filter by tier: free, starter, growth, pro. Optional." }
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Max results (1-100, default 50)."
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Pagination offset."
+                },
+                {
+                  "key": "tier",
+                  "value": "free",
+                  "description": "Filter by tier: free, starter, growth, pro. Optional."
+                }
               ]
             },
             "description": "List all workspaces on the platform."
@@ -1155,12 +1857,30 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/admin/users?limit=50&offset=0&active_only=false",
-              "host": ["{{base_url}}"],
-              "path": ["api", "admin", "users"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users"
+              ],
               "query": [
-                { "key": "limit", "value": "50", "description": "Max results (1-100, default 50)." },
-                { "key": "offset", "value": "0", "description": "Pagination offset." },
-                { "key": "active_only", "value": "false", "description": "Only return active users (bool, default false)." }
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Max results (1-100, default 50)."
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Pagination offset."
+                },
+                {
+                  "key": "active_only",
+                  "value": "false",
+                  "description": "Only return active users (bool, default false)."
+                }
               ]
             },
             "description": "List all users on the platform."
@@ -1171,15 +1891,31 @@
           "name": "POST Suspend User",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/admin/users/suspend",
-              "host": ["{{base_url}}"],
-              "path": ["api", "admin", "users", "suspend"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "suspend"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"user_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
             "description": "Suspend a user account. Provide the user's UUID."
@@ -1190,15 +1926,31 @@
           "name": "POST Unsuspend User",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/admin/users/unsuspend",
-              "host": ["{{base_url}}"],
-              "path": ["api", "admin", "users", "unsuspend"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "users",
+                "unsuspend"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"user_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
             "description": "Unsuspend a previously suspended user account."
@@ -1209,15 +1961,31 @@
           "name": "POST Change Workspace Tier",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/admin/workspaces/change-tier",
-              "host": ["{{base_url}}"],
-              "path": ["api", "admin", "workspaces", "change-tier"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "workspaces",
+                "change-tier"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"new_tier\": \"growth\",\n  \"reason\": \"Manual upgrade by admin\"\n}"
             },
             "description": "Change a workspace's subscription tier. Tiers: free, starter, growth, pro. `reason` is optional."
@@ -1230,11 +1998,25 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/admin/tier-changes?workspace_id={{workspace_id}}&limit=50",
-              "host": ["{{base_url}}"],
-              "path": ["api", "admin", "tier-changes"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "tier-changes"
+              ],
               "query": [
-                { "key": "workspace_id", "value": "{{workspace_id}}", "description": "Filter by workspace UUID. Optional." },
-                { "key": "limit", "value": "50", "description": "Max results (1-100, default 50)." }
+                {
+                  "key": "workspace_id",
+                  "value": "{{workspace_id}}",
+                  "description": "Filter by workspace UUID. Optional."
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Max results (1-100, default 50)."
+                }
               ]
             },
             "description": "Get tier change history, optionally filtered by workspace."
@@ -1245,15 +2027,31 @@
           "name": "DELETE Workspace",
           "request": {
             "method": "DELETE",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/admin/workspaces/delete",
-              "host": ["{{base_url}}"],
-              "path": ["api", "admin", "workspaces", "delete"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "workspaces",
+                "delete"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\",\n  \"confirmation_name\": \"My Business\"\n}"
             },
             "description": "Permanently delete a workspace. `confirmation_name` must match the workspace name exactly."
@@ -1266,8 +2064,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/admin/analytics",
-              "host": ["{{base_url}}"],
-              "path": ["api", "admin", "analytics"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "analytics"
+              ]
             },
             "description": "Get platform analytics: message volume, signup trends, escalation statistics."
           },
@@ -1279,10 +2083,22 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/admin/feedback/stats",
-              "host": ["{{base_url}}"],
-              "path": ["api", "admin", "feedback", "stats"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "admin",
+                "feedback",
+                "stats"
+              ],
               "query": [
-                { "key": "workspace_id", "value": "", "description": "Optional: filter by workspace UUID.", "disabled": true }
+                {
+                  "key": "workspace_id",
+                  "value": "",
+                  "description": "Optional: filter by workspace UUID.",
+                  "disabled": true
+                }
               ]
             },
             "description": "Aggregate AI feedback (positive/negative) counts per workspace. Super admin only."
@@ -1298,12 +2114,21 @@
         {
           "name": "GET Health Detailed",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/metrics/health/detailed",
-              "host": ["{{base_url}}"],
-              "path": ["api", "metrics", "health", "detailed"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "metrics",
+                "health",
+                "detailed"
+              ]
             },
             "description": "Detailed health check: status, timestamp, health breakdown, performance metrics."
           },
@@ -1315,8 +2140,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/metrics/system",
-              "host": ["{{base_url}}"],
-              "path": ["api", "metrics", "system"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "metrics",
+                "system"
+              ]
             },
             "description": "Get system-level performance metrics."
           },
@@ -1328,8 +2159,15 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/metrics/workspace/{{workspace_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "metrics", "workspace", "{{workspace_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "metrics",
+                "workspace",
+                "{{workspace_id}}"
+              ]
             },
             "description": "Get metrics scoped to a specific workspace."
           },
@@ -1338,12 +2176,20 @@
         {
           "name": "GET Prometheus Metrics",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/metrics/prometheus",
-              "host": ["{{base_url}}"],
-              "path": ["api", "metrics", "prometheus"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "metrics",
+                "prometheus"
+              ]
             },
             "description": "Get metrics in Prometheus text format for scraping."
           },
@@ -1355,8 +2201,15 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/metrics/alerts/status",
-              "host": ["{{base_url}}"],
-              "path": ["api", "metrics", "alerts", "status"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "metrics",
+                "alerts",
+                "status"
+              ]
             },
             "description": "Get current alert status and active alert list."
           },
@@ -1371,20 +2224,39 @@
         {
           "name": "POST Telegram Webhook",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-Telegram-Bot-Api-Secret-Token", "value": "your_secret_token", "description": "Secret token set when registering the webhook with Telegram." }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Telegram-Bot-Api-Secret-Token",
+                "value": "your_secret_token",
+                "description": "Secret token set when registering the webhook with Telegram."
+              }
             ],
             "url": {
               "raw": "{{base_url}}/webhooks/telegram/{{channel_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["webhooks", "telegram", "{{channel_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "telegram",
+                "{{channel_id}}"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"update_id\": 123456789,\n  \"message\": {\n    \"message_id\": 1,\n    \"from\": { \"id\": 987654321, \"first_name\": \"John\", \"username\": \"john_doe\" },\n    \"chat\": { \"id\": 987654321, \"type\": \"private\" },\n    \"date\": 1711234567,\n    \"text\": \"Hello, I need help with my order.\"\n  }\n}"
             },
             "description": "Receive message updates from Telegram. Always returns HTTP 200 to prevent retries."
@@ -1394,16 +2266,33 @@
         {
           "name": "GET WhatsApp Webhook Verify",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/webhooks/whatsapp/{{channel_id}}?hub.mode=subscribe&hub.challenge=12345&hub.verify_token=your_verify_token",
-              "host": ["{{base_url}}"],
-              "path": ["webhooks", "whatsapp", "{{channel_id}}"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "whatsapp",
+                "{{channel_id}}"
+              ],
               "query": [
-                { "key": "hub.mode", "value": "subscribe" },
-                { "key": "hub.challenge", "value": "12345" },
-                { "key": "hub.verify_token", "value": "your_verify_token" }
+                {
+                  "key": "hub.mode",
+                  "value": "subscribe"
+                },
+                {
+                  "key": "hub.challenge",
+                  "value": "12345"
+                },
+                {
+                  "key": "hub.verify_token",
+                  "value": "your_verify_token"
+                }
               ]
             },
             "description": "Meta webhook verification challenge. Used when registering the WhatsApp webhook URL in Meta for Developers."
@@ -1413,20 +2302,39 @@
         {
           "name": "POST WhatsApp Webhook",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-Hub-Signature-256", "value": "sha256=your_hmac_signature", "description": "HMAC-SHA256 of the raw body using the app secret." }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Hub-Signature-256",
+                "value": "sha256=your_hmac_signature",
+                "description": "HMAC-SHA256 of the raw body using the app secret."
+              }
             ],
             "url": {
               "raw": "{{base_url}}/webhooks/whatsapp/{{channel_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["webhooks", "whatsapp", "{{channel_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "whatsapp",
+                "{{channel_id}}"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"object\": \"whatsapp_business_account\",\n  \"entry\": [{\n    \"id\": \"WHATSAPP_BUSINESS_ACCOUNT_ID\",\n    \"changes\": [{\n      \"value\": {\n        \"messaging_product\": \"whatsapp\",\n        \"metadata\": { \"display_phone_number\": \"15550000000\", \"phone_number_id\": \"PHONE_NUMBER_ID\" },\n        \"contacts\": [{ \"profile\": { \"name\": \"John Doe\" }, \"wa_id\": \"15551234567\" }],\n        \"messages\": [{\n          \"from\": \"15551234567\",\n          \"id\": \"wamid.xxxx\",\n          \"timestamp\": \"1711234567\",\n          \"text\": { \"body\": \"Hello, I need help.\" },\n          \"type\": \"text\"\n        }]\n      },\n      \"field\": \"messages\"\n    }]\n  }]\n}"
             },
             "description": "Receive message events from WhatsApp Business. Always returns HTTP 200."
@@ -1436,16 +2344,33 @@
         {
           "name": "GET Instagram Webhook Verify",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/webhooks/instagram/{{channel_id}}?hub.mode=subscribe&hub.challenge=12345&hub.verify_token=your_verify_token",
-              "host": ["{{base_url}}"],
-              "path": ["webhooks", "instagram", "{{channel_id}}"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "instagram",
+                "{{channel_id}}"
+              ],
               "query": [
-                { "key": "hub.mode", "value": "subscribe" },
-                { "key": "hub.challenge", "value": "12345" },
-                { "key": "hub.verify_token", "value": "your_verify_token" }
+                {
+                  "key": "hub.mode",
+                  "value": "subscribe"
+                },
+                {
+                  "key": "hub.challenge",
+                  "value": "12345"
+                },
+                {
+                  "key": "hub.verify_token",
+                  "value": "your_verify_token"
+                }
               ]
             },
             "description": "Meta webhook verification challenge for Instagram DMs."
@@ -1455,20 +2380,38 @@
         {
           "name": "POST Instagram Webhook",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-Hub-Signature-256", "value": "sha256=your_hmac_signature" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-Hub-Signature-256",
+                "value": "sha256=your_hmac_signature"
+              }
             ],
             "url": {
               "raw": "{{base_url}}/webhooks/instagram/{{channel_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["webhooks", "instagram", "{{channel_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "instagram",
+                "{{channel_id}}"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"object\": \"instagram\",\n  \"entry\": [{\n    \"id\": \"INSTAGRAM_ACCOUNT_ID\",\n    \"messaging\": [{\n      \"sender\": { \"id\": \"USER_IGSID\" },\n      \"recipient\": { \"id\": \"PAGE_ID\" },\n      \"timestamp\": 1711234567,\n      \"message\": { \"mid\": \"m_xxxx\", \"text\": \"I need help with a return.\" }\n    }]\n  }]\n}"
             },
             "description": "Receive DM events from Instagram. Always returns HTTP 200."
@@ -1478,20 +2421,38 @@
         {
           "name": "POST Stripe Webhook",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Stripe-Signature", "value": "t=1711234567,v1=xxxxxxxxxxxx", "description": "Stripe webhook signature for verification." }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Stripe-Signature",
+                "value": "t=1711234567,v1=xxxxxxxxxxxx",
+                "description": "Stripe webhook signature for verification."
+              }
             ],
             "url": {
               "raw": "{{base_url}}/webhooks/stripe",
-              "host": ["{{base_url}}"],
-              "path": ["webhooks", "stripe"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "stripe"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"id\": \"evt_xxxx\",\n  \"type\": \"customer.subscription.updated\",\n  \"data\": {\n    \"object\": {\n      \"id\": \"sub_xxxx\",\n      \"customer\": \"cus_xxxx\",\n      \"status\": \"active\",\n      \"items\": { \"data\": [{ \"price\": { \"id\": \"price_growth_monthly\" } }] }\n    }\n  }\n}"
             },
             "description": "Receive billing events from Stripe. Handles: customer.subscription.updated, customer.subscription.deleted."
@@ -1501,22 +2462,45 @@
         {
           "name": "POST Resend Webhook",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "svix-id", "value": "msg_xxxxxxxxxxxx" },
-              { "key": "svix-timestamp", "value": "1234567890" },
-              { "key": "svix-signature", "value": "v1,xxxxxxxxxxxx" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "svix-id",
+                "value": "msg_xxxxxxxxxxxx"
+              },
+              {
+                "key": "svix-timestamp",
+                "value": "1234567890"
+              },
+              {
+                "key": "svix-signature",
+                "value": "v1,xxxxxxxxxxxx"
+              }
             ],
             "url": {
               "raw": "{{base_url}}/webhooks/resend",
-              "host": ["{{base_url}}"],
-              "path": ["webhooks", "resend"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "webhooks",
+                "resend"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"type\": \"email.delivered\",\n  \"data\": {\n    \"email_id\": \"email_xxxxxxxxxxxx\",\n    \"from\": \"noreply@example.com\",\n    \"to\": [\"agent@example.com\"],\n    \"subject\": \"You have been invited\",\n    \"created_at\": \"2026-03-20T12:00:00.000Z\"\n  }\n}"
             },
             "description": "Incoming webhook from Resend email service."
@@ -1533,15 +2517,29 @@
           "name": "POST Create Canned Response",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/canned-responses",
-              "host": ["{{base_url}}"],
-              "path": ["api", "canned-responses"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "canned-responses"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"name\": \"Greeting\",\n  \"shortcut\": \"/hi\",\n  \"content\": \"Hello! Thank you for reaching out. How can I assist you today?\"\n}"
             },
             "description": "Create a canned response. Owner only. Shortcut must be unique per workspace."
@@ -1567,8 +2565,13 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/canned-responses",
-              "host": ["{{base_url}}"],
-              "path": ["api", "canned-responses"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "canned-responses"
+              ]
             },
             "description": "List all canned responses for the workspace. Accessible by owners and agents."
           },
@@ -1578,15 +2581,30 @@
           "name": "PUT Update Canned Response",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/canned-responses/{{canned_response_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "canned-responses", "{{canned_response_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "canned-responses",
+                "{{canned_response_id}}"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"name\": \"Updated Greeting\",\n  \"content\": \"Hi there! Welcome. How may I help you?\"\n}"
             },
             "description": "Update a canned response. Owner only."
@@ -1599,8 +2617,14 @@
             "method": "DELETE",
             "url": {
               "raw": "{{base_url}}/api/canned-responses/{{canned_response_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "canned-responses", "{{canned_response_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "canned-responses",
+                "{{canned_response_id}}"
+              ]
             },
             "description": "Delete a canned response. Owner only."
           },
@@ -1616,15 +2640,29 @@
           "name": "POST Create Assignment Rule",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/assignment-rules",
-              "host": ["{{base_url}}"],
-              "path": ["api", "assignment-rules"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "assignment-rules"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"name\": \"Route billing queries to senior agent\",\n  \"priority\": 10,\n  \"conditions\": {\n    \"keywords\": [\"refund\", \"billing\", \"invoice\"],\n    \"channel_type\": \"whatsapp\"\n  },\n  \"action\": \"specific_agent\",\n  \"target_agent_id\": \"{{agent_id}}\",\n  \"is_active\": true\n}"
             },
             "description": "Create a routing rule. Actions: round_robin, specific_agent, least_loaded. Pro tier only."
@@ -1650,8 +2688,13 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/assignment-rules",
-              "host": ["{{base_url}}"],
-              "path": ["api", "assignment-rules"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "assignment-rules"
+              ]
             },
             "description": "List all assignment rules ordered by priority."
           },
@@ -1661,15 +2704,30 @@
           "name": "PUT Update Assignment Rule",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/assignment-rules/{{rule_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "assignment-rules", "{{rule_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "assignment-rules",
+                "{{rule_id}}"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"is_active\": false,\n  \"priority\": 20\n}"
             },
             "description": "Update an assignment rule."
@@ -1682,8 +2740,14 @@
             "method": "DELETE",
             "url": {
               "raw": "{{base_url}}/api/assignment-rules/{{rule_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "assignment-rules", "{{rule_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "assignment-rules",
+                "{{rule_id}}"
+              ]
             },
             "description": "Delete an assignment rule."
           },
@@ -1701,8 +2765,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/workspace/overview",
-              "host": ["{{base_url}}"],
-              "path": ["api", "workspace", "overview"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "workspace",
+                "overview"
+              ]
             },
             "description": "Get workspace dashboard stats: conversations today, messages this month, quota remaining."
           },
@@ -1712,15 +2782,30 @@
           "name": "PUT Workspace Settings",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/workspace/settings",
-              "host": ["{{base_url}}"],
-              "path": ["api", "workspace", "settings"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "workspace",
+                "settings"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"fallback_msg\": \"Sorry, I couldn't understand that. A human agent will assist you shortly.\",\n  \"alert_email\": \"alerts@mycompany.com\",\n  \"agents_enabled\": true,\n  \"escalation_keywords\": [\"refund\", \"angry\", \"cancel\", \"lawsuit\"],\n  \"escalation_sensitivity\": \"medium\"\n}"
             },
             "description": "Update workspace settings. All fields optional."
@@ -1733,8 +2818,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/workspace/ai-config",
-              "host": ["{{base_url}}"],
-              "path": ["api", "workspace", "ai-config"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "workspace",
+                "ai-config"
+              ]
             },
             "description": "Get current AI provider and model configuration for the workspace."
           },
@@ -1744,15 +2835,30 @@
           "name": "PUT AI Config",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/workspace/ai-config",
-              "host": ["{{base_url}}"],
-              "path": ["api", "workspace", "ai-config"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "workspace",
+                "ai-config"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"ai_provider\": \"groq\",\n  \"ai_model\": \"llama3-8b-8192\",\n  \"ai_api_key\": \"gsk_your_groq_api_key\"\n}"
             },
             "description": "Set workspace AI provider/model override. Growth+ tier only. Providers: google, openai, groq."
@@ -1769,15 +2875,30 @@
           "name": "POST Create Outbound Webhook",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/webhooks/outbound",
-              "host": ["{{base_url}}"],
-              "path": ["api", "webhooks", "outbound"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "webhooks",
+                "outbound"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"url\": \"https://your-server.com/chatsaas-events\",\n  \"events\": [\"message.received\", \"conversation.escalated\", \"conversation.resolved\", \"conversation.created\"],\n  \"secret\": \"my_webhook_secret_for_hmac\"\n}"
             },
             "description": "Register an outbound webhook. Events: message.received, conversation.escalated, conversation.resolved, conversation.created. Requests are signed with X-ChatSaaS-Signature: sha256=<hmac>."
@@ -1803,8 +2924,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/webhooks/outbound",
-              "host": ["{{base_url}}"],
-              "path": ["api", "webhooks", "outbound"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "webhooks",
+                "outbound"
+              ]
             },
             "description": "List all registered outbound webhooks for the workspace."
           },
@@ -1814,15 +2941,31 @@
           "name": "PUT Update Outbound Webhook",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/webhooks/outbound/{{outbound_webhook_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "webhooks", "outbound", "{{outbound_webhook_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "webhooks",
+                "outbound",
+                "{{outbound_webhook_id}}"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"is_active\": false\n}"
             },
             "description": "Enable or disable an outbound webhook, or update its URL/events."
@@ -1835,8 +2978,15 @@
             "method": "DELETE",
             "url": {
               "raw": "{{base_url}}/api/webhooks/outbound/{{outbound_webhook_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "webhooks", "outbound", "{{outbound_webhook_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "webhooks",
+                "outbound",
+                "{{outbound_webhook_id}}"
+              ]
             },
             "description": "Delete an outbound webhook registration."
           },
@@ -1848,12 +2998,32 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/webhooks/outbound/{{outbound_webhook_id}}/logs?limit=20&offset=0",
-              "host": ["{{base_url}}"],
-              "path": ["api", "webhooks", "outbound", "{{outbound_webhook_id}}", "logs"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "webhooks",
+                "outbound",
+                "{{outbound_webhook_id}}",
+                "logs"
+              ],
               "query": [
-                { "key": "limit", "value": "20", "description": "Max results (1-100, default 20)." },
-                { "key": "offset", "value": "0", "description": "Pagination offset." },
-                { "key": "success", "value": "", "description": "Filter by success: true or false. Optional." }
+                {
+                  "key": "limit",
+                  "value": "20",
+                  "description": "Max results (1-100, default 20)."
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Pagination offset."
+                },
+                {
+                  "key": "success",
+                  "value": "",
+                  "description": "Filter by success: true or false. Optional."
+                }
               ]
             },
             "description": "List delivery attempt logs for an outbound webhook. Returns up to 30 days of history, most recent first. Each log includes status code, response body (truncated to 2000 chars), duration_ms, and is_success flag."
@@ -1882,8 +3052,17 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/webhooks/outbound/{{outbound_webhook_id}}/logs/{{webhook_log_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "webhooks", "outbound", "{{outbound_webhook_id}}", "logs", "{{webhook_log_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "webhooks",
+                "outbound",
+                "{{outbound_webhook_id}}",
+                "logs",
+                "{{webhook_log_id}}"
+              ]
             },
             "description": "Get full detail of a single delivery log entry, including complete payload and response body."
           },
@@ -1899,18 +3078,32 @@
           "name": "POST Create API Key",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/api-keys",
-              "host": ["{{base_url}}"],
-              "path": ["api", "api-keys"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "api-keys"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"name\": \"CI/CD Pipeline Key\",\n  \"scopes\": [\"conversations:read\", \"conversations:write\"]\n}"
             },
-            "description": "Create an API key. The raw key (csk_xxx) is returned ONCE — store it securely. It cannot be retrieved again."
+            "description": "Create an API key. The raw key (csk_xxx) is returned ONCE \u2014 store it securely. It cannot be retrieved again."
           },
           "event": [
             {
@@ -1935,8 +3128,13 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/api-keys",
-              "host": ["{{base_url}}"],
-              "path": ["api", "api-keys"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "api-keys"
+              ]
             },
             "description": "List all API keys (shows prefix only, never the full key)."
           },
@@ -1948,8 +3146,14 @@
             "method": "DELETE",
             "url": {
               "raw": "{{base_url}}/api/api-keys/{{api_key_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "api-keys", "{{api_key_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "api-keys",
+                "{{api_key_id}}"
+              ]
             },
             "description": "Revoke and delete an API key."
           },
@@ -1967,8 +3171,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/billing/status",
-              "host": ["{{base_url}}"],
-              "path": ["api", "billing", "status"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "status"
+              ]
             },
             "description": "Get current subscription status, tier, and Stripe customer ID."
           },
@@ -1978,15 +3188,30 @@
           "name": "POST Create Checkout Session",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/billing/checkout",
-              "host": ["{{base_url}}"],
-              "path": ["api", "billing", "checkout"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "checkout"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"tier\": \"growth\",\n  \"success_url\": \"https://yourdashboard.com/billing/success\",\n  \"cancel_url\": \"https://yourdashboard.com/billing\"\n}"
             },
             "description": "Create a Stripe checkout session for upgrading tier. Returns checkout URL. Tiers: starter, growth, pro."
@@ -1997,15 +3222,30 @@
           "name": "POST Create Customer Portal Session",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/billing/portal",
-              "host": ["{{base_url}}"],
-              "path": ["api", "billing", "portal"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "billing",
+                "portal"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"return_url\": \"https://yourdashboard.com/billing\"\n}"
             },
             "description": "Create a Stripe customer portal session for managing subscription, invoices, and payment methods."
@@ -2016,7 +3256,7 @@
     },
     {
       "name": "Contacts",
-      "description": "Manage customer contacts — search, tag, block, and GDPR-delete. Custom fields gated to Growth+ tier.",
+      "description": "Manage customer contacts \u2014 search, tag, block, and GDPR-delete. Custom fields gated to Growth+ tier.",
       "item": [
         {
           "name": "GET List Contacts",
@@ -2024,14 +3264,40 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/contacts/?limit=50&offset=0",
-              "host": ["{{base_url}}"],
-              "path": ["api", "contacts", ""],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "contacts",
+                ""
+              ],
               "query": [
-                { "key": "q", "value": "", "description": "Search by name, email, or phone (ILIKE). Optional." },
-                { "key": "tag", "value": "", "description": "Filter by tag value. Optional." },
-                { "key": "is_blocked", "value": "", "description": "Filter by blocked status: true or false. Optional." },
-                { "key": "limit", "value": "50", "description": "Max results (1-100, default 50)." },
-                { "key": "offset", "value": "0", "description": "Pagination offset." }
+                {
+                  "key": "q",
+                  "value": "",
+                  "description": "Search by name, email, or phone (ILIKE). Optional."
+                },
+                {
+                  "key": "tag",
+                  "value": "",
+                  "description": "Filter by tag value. Optional."
+                },
+                {
+                  "key": "is_blocked",
+                  "value": "",
+                  "description": "Filter by blocked status: true or false. Optional."
+                },
+                {
+                  "key": "limit",
+                  "value": "50",
+                  "description": "Max results (1-100, default 50)."
+                },
+                {
+                  "key": "offset",
+                  "value": "0",
+                  "description": "Pagination offset."
+                }
               ]
             },
             "description": "List contacts for the workspace with optional search and filters."
@@ -2044,8 +3310,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/contacts/{{contact_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "contacts", "{{contact_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "contacts",
+                "{{contact_id}}"
+              ]
             },
             "description": "Get contact detail including the last 10 conversations."
           },
@@ -2055,15 +3327,30 @@
           "name": "PATCH Update Contact",
           "request": {
             "method": "PATCH",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/contacts/{{contact_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "contacts", "{{contact_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "contacts",
+                "{{contact_id}}"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"name\": \"John Smith\",\n  \"email\": \"john@example.com\",\n  \"phone\": \"+1-555-0100\",\n  \"tags\": [\"vip\", \"enterprise\"],\n  \"custom_fields\": {\n    \"account_id\": \"ACC-12345\",\n    \"plan\": \"enterprise\"\n  }\n}"
             },
             "description": "Update contact details. custom_fields requires Growth+ tier. Fires contact.updated outbound webhook event."
@@ -2077,8 +3364,15 @@
             "header": [],
             "url": {
               "raw": "{{base_url}}/api/contacts/{{contact_id}}/block",
-              "host": ["{{base_url}}"],
-              "path": ["api", "contacts", "{{contact_id}}", "block"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "contacts",
+                "{{contact_id}}",
+                "block"
+              ]
             },
             "description": "Block a contact. Blocked contacts receive a polite auto-reply and no AI processing or usage counting occurs for their messages."
           },
@@ -2091,8 +3385,15 @@
             "header": [],
             "url": {
               "raw": "{{base_url}}/api/contacts/{{contact_id}}/unblock",
-              "host": ["{{base_url}}"],
-              "path": ["api", "contacts", "{{contact_id}}", "unblock"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "contacts",
+                "{{contact_id}}",
+                "unblock"
+              ]
             },
             "description": "Unblock a previously blocked contact."
           },
@@ -2104,8 +3405,14 @@
             "method": "DELETE",
             "url": {
               "raw": "{{base_url}}/api/contacts/{{contact_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "contacts", "{{contact_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "contacts",
+                "{{contact_id}}"
+              ]
             },
             "description": "Permanently delete a contact and all their conversations and messages (cascading delete). Use for GDPR erasure requests. This action is irreversible."
           },
@@ -2123,8 +3430,15 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/workspace/business-hours/",
-              "host": ["{{base_url}}"],
-              "path": ["api", "workspace", "business-hours", ""]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "workspace",
+                "business-hours",
+                ""
+              ]
             },
             "description": "Get configured business hours for all 7 days of the week (Mon=0 to Sun=6). Returns empty array if not yet configured (treated as always open)."
           },
@@ -2134,15 +3448,31 @@
           "name": "PUT Update Business Hours Schedule",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/workspace/business-hours/",
-              "host": ["{{base_url}}"],
-              "path": ["api", "workspace", "business-hours", ""]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "workspace",
+                "business-hours",
+                ""
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "[\n  { \"day_of_week\": 0, \"open_time\": \"09:00\", \"close_time\": \"17:00\", \"is_closed\": false, \"timezone\": \"America/New_York\" },\n  { \"day_of_week\": 1, \"open_time\": \"09:00\", \"close_time\": \"17:00\", \"is_closed\": false, \"timezone\": \"America/New_York\" },\n  { \"day_of_week\": 2, \"open_time\": \"09:00\", \"close_time\": \"17:00\", \"is_closed\": false, \"timezone\": \"America/New_York\" },\n  { \"day_of_week\": 3, \"open_time\": \"09:00\", \"close_time\": \"17:00\", \"is_closed\": false, \"timezone\": \"America/New_York\" },\n  { \"day_of_week\": 4, \"open_time\": \"09:00\", \"close_time\": \"17:00\", \"is_closed\": false, \"timezone\": \"America/New_York\" },\n  { \"day_of_week\": 5, \"open_time\": \"10:00\", \"close_time\": \"14:00\", \"is_closed\": false, \"timezone\": \"America/New_York\" },\n  { \"day_of_week\": 6, \"open_time\": \"00:00\", \"close_time\": \"00:00\", \"is_closed\": true, \"timezone\": \"America/New_York\" }\n]"
             },
             "description": "Upsert business hours for all 7 days. day_of_week: 0=Monday, 6=Sunday. is_closed=true marks the day as fully closed regardless of open/close times. timezone must be a valid IANA timezone (e.g. America/New_York, Europe/London, Asia/Kolkata)."
@@ -2153,16 +3483,32 @@
           "name": "PUT Outside Hours Settings",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/workspace/business-hours/outside-hours-settings",
-              "host": ["{{base_url}}"],
-              "path": ["api", "workspace", "business-hours", "outside-hours-settings"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "workspace",
+                "business-hours",
+                "outside-hours-settings"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
-              "raw": "{\n  \"outside_hours_message\": \"Thanks for reaching out! Our team is currently offline. We're available Mon–Fri 9am–5pm ET. We'll get back to you soon!\",\n  \"outside_hours_behavior\": \"inform_and_pause\"\n}"
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"outside_hours_message\": \"Thanks for reaching out! Our team is currently offline. We're available Mon\u2013Fri 9am\u20135pm ET. We'll get back to you soon!\",\n  \"outside_hours_behavior\": \"inform_and_pause\"\n}"
             },
             "description": "Set the auto-reply message and behavior when a message arrives outside business hours. Behaviors: inform_and_continue (reply then continue to AI), inform_and_pause (reply and pause conversation until business hours)."
           },
@@ -2172,17 +3518,26 @@
     },
     {
       "name": "CSAT - Public (No Auth)",
-      "description": "Customer-facing CSAT endpoints. No authentication required — secured via time-limited JWT in token parameter.",
+      "description": "Customer-facing CSAT endpoints. No authentication required \u2014 secured via time-limited JWT in token parameter.",
       "item": [
         {
           "name": "GET CSAT Rating Form (Validate Token)",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/webchat/csat/{{csat_token}}",
-              "host": ["{{base_url}}"],
-              "path": ["api", "webchat", "csat", "{{csat_token}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "webchat",
+                "csat",
+                "{{csat_token}}"
+              ]
             },
             "description": "Validate a CSAT token and get conversation context for the rating form. Token is a JWT with 72h expiry delivered via WebSocket csat_prompt event. Returns 400 if token is expired or invalid."
           },
@@ -2191,17 +3546,34 @@
         {
           "name": "POST Submit CSAT Rating",
           "request": {
-            "auth": { "type": "noauth" },
+            "auth": {
+              "type": "noauth"
+            },
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/api/webchat/csat",
-              "host": ["{{base_url}}"],
-              "path": ["api", "webchat", "csat"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "webchat",
+                "csat"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"token\": \"{{csat_token}}\",\n  \"rating\": 5,\n  \"comment\": \"Very helpful and fast response!\"\n}"
             },
             "description": "Submit a CSAT rating (1-5) for a resolved conversation. Token must be the JWT from the csat_prompt WebSocket event. One rating per conversation. Fires csat.submitted outbound webhook event."
@@ -2220,11 +3592,25 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/api/metrics/csat",
-              "host": ["{{base_url}}"],
-              "path": ["api", "metrics", "csat"],
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "metrics",
+                "csat"
+              ],
               "query": [
-                { "key": "date_from", "value": "", "description": "ISO date filter start. Optional, Growth+ only for trend data." },
-                { "key": "date_to", "value": "", "description": "ISO date filter end. Optional, Growth+ only for trend data." }
+                {
+                  "key": "date_from",
+                  "value": "",
+                  "description": "ISO date filter start. Optional, Growth+ only for trend data."
+                },
+                {
+                  "key": "date_to",
+                  "value": "",
+                  "description": "ISO date filter end. Optional, Growth+ only for trend data."
+                }
               ]
             },
             "description": "Get CSAT metrics: average score (1-5), total_rated, total_resolved, response_rate (%). Growth+ tier additionally returns a daily/weekly trend array when date_from/date_to are provided."
@@ -2243,8 +3629,13 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/ws/health",
-              "host": ["{{base_url}}"],
-              "path": ["ws", "health"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ws",
+                "health"
+              ]
             },
             "description": "Check WebSocket server health and connection stats."
           },
@@ -2256,8 +3647,14 @@
             "method": "GET",
             "url": {
               "raw": "{{base_url}}/ws/connections/{{workspace_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["ws", "connections", "{{workspace_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ws",
+                "connections",
+                "{{workspace_id}}"
+              ]
             },
             "description": "List active WebSocket connections for a workspace."
           },
@@ -2267,15 +3664,30 @@
           "name": "POST Broadcast Message",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "url": {
               "raw": "{{base_url}}/ws/broadcast/{{workspace_id}}",
-              "host": ["{{base_url}}"],
-              "path": ["ws", "broadcast", "{{workspace_id}}"]
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "ws",
+                "broadcast",
+                "{{workspace_id}}"
+              ]
             },
             "body": {
               "mode": "raw",
-              "options": { "raw": { "language": "json" } },
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
               "raw": "{\n  \"type\": \"system_notification\",\n  \"message\": \"System maintenance in 10 minutes.\",\n  \"data\": {}\n}"
             },
             "description": "Broadcast a message to all WebSocket connections in a workspace."
@@ -2283,29 +3695,713 @@
           "response": []
         }
       ]
+    },
+    {
+      "name": "AI Agents",
+      "item": [
+        {
+          "name": "POST Create Agent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents"
+              ]
+            },
+            "description": "Create a new AI agent (starts as draft). Requires Starter tier+.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"Order Support Bot\",\n  \"system_prompt\": \"You are a helpful order support assistant. Use available tools to look up order status.\",\n  \"persona_name\": \"Aria\",\n  \"persona_tone\": \"friendly\",\n  \"first_message\": \"Hi! I'm Aria. How can I help with your order?\",\n  \"escalation_trigger\": \"low_confidence\",\n  \"escalation_message\": \"Let me connect you with a team member.\",\n  \"confidence_threshold\": 0.7,\n  \"max_turns\": 10,\n  \"token_budget\": 8000\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  var j = pm.response.json();",
+                  "  pm.environment.set('ai_agent_id', j.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET List Agents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents"
+              ]
+            },
+            "description": "List all AI agents in the workspace."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Agent By ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}"
+              ]
+            },
+            "description": "Get full agent details including tools and guardrails."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT Update Agent",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}"
+              ]
+            },
+            "description": "Update agent settings. Partial updates supported.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"Updated Bot Name\",\n  \"max_turns\": 15\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST Publish Agent",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/publish",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "publish"
+              ]
+            },
+            "description": "Validate and go live (sets is_draft=false). Requires system_prompt, escalation_message, and at least one tool."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE Agent",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}"
+              ]
+            },
+            "description": "Delete agent and all its tools, guardrails, and channel assignments."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Add Tool",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/tools",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "tools"
+              ]
+            },
+            "description": "Add an HTTP tool the agent can call. name must be snake_case.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"get_order_status\",\n  \"display_name\": \"Get Order Status\",\n  \"description\": \"Look up the current status of a customer order by order ID.\",\n  \"method\": \"GET\",\n  \"endpoint_url\": \"https://api.example.com/orders/{order_id}\",\n  \"headers\": {\n    \"Authorization\": \"Bearer sk-secret-key\"\n  },\n  \"parameters\": [\n    {\n      \"name\": \"order_id\",\n      \"type\": \"string\",\n      \"required\": true,\n      \"description\": \"The order ID to look up\"\n    }\n  ],\n  \"response_path\": \"order.status\",\n  \"requires_confirmation\": false,\n  \"is_read_only\": true\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  var j = pm.response.json();",
+                  "  pm.environment.set('ai_tool_id', j.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET List Tools",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/tools",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "tools"
+              ]
+            },
+            "description": "List all tools for an agent."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT Update Tool",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/tools/{{ai_tool_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "tools",
+                "{{ai_tool_id}}"
+              ]
+            },
+            "description": "Update a tool. Partial updates supported.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"description\": \"Updated description\",\n  \"is_active\": true\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE Tool",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/tools/{{ai_tool_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "tools",
+                "{{ai_tool_id}}"
+              ]
+            },
+            "description": "Delete a tool."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Test Tool (Dry Run)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/tools/{{ai_tool_id}}/test",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "tools",
+                "{{ai_tool_id}}",
+                "test"
+              ]
+            },
+            "description": "Dry-run a tool call without quota charges. Verifies your endpoint is reachable.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"params\": {\n    \"order_id\": \"ORD-12345\"\n  }\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "POST Add Guardrail",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/guardrails",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "guardrails"
+              ]
+            },
+            "description": "Add a safety guardrail. rule_type: forbidden_topic | forbidden_action | required_escalation",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"rule_type\": \"forbidden_topic\",\n  \"description\": \"Do not discuss competitor pricing or products\"\n}"
+            }
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200 || pm.response.code === 201) {",
+                  "  var j = pm.response.json();",
+                  "  pm.environment.set('ai_guardrail_id', j.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET List Guardrails",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/guardrails",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "guardrails"
+              ]
+            },
+            "description": "List all guardrails for an agent."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE Guardrail",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/guardrails/{{ai_guardrail_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "guardrails",
+                "{{ai_guardrail_id}}"
+              ]
+            },
+            "description": "Delete a guardrail."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Assign to Channel",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/channels/{{channel_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "channels",
+                "{{channel_id}}"
+              ]
+            },
+            "description": "Assign agent to a channel. The agent must be published first."
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE Unassign from Channel",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/channels/{{channel_id}}",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "channels",
+                "{{channel_id}}"
+              ]
+            },
+            "description": "Remove channel assignment. Channel falls back to RAG mode."
+          },
+          "response": []
+        },
+        {
+          "name": "POST Sandbox Message",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/sandbox/message",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "sandbox",
+                "message"
+              ]
+            },
+            "description": "Test the agent interactively. No quota charge. Response includes debug block with tool_called, tokens, cost, model_used.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"message\": \"Where is my order ORD-12345?\",\n  \"conversation_id\": \"sandbox-session-1\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "DELETE Sandbox Reset",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/sandbox/reset",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "sandbox",
+                "reset"
+              ]
+            },
+            "description": "Clear sandbox session history for this agent."
+          },
+          "response": []
+        },
+        {
+          "name": "GET Agent Analytics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/ai-agents/{{ai_agent_id}}/analytics",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "ai-agents",
+                "{{ai_agent_id}}",
+                "analytics"
+              ]
+            },
+            "description": "Token usage, cost breakdown, conversation stats, tool call success rate."
+          },
+          "response": []
+        },
+        {
+          "name": "PUT AI Pipeline Config",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/workspace/ai-pipeline",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "workspace",
+                "ai-pipeline"
+              ]
+            },
+            "description": "Switch pipeline mode (rag|ai_agent) and set provider/model. Requires Growth+ tier.",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"ai_mode\": \"ai_agent\",\n  \"ai_provider\": \"openai\",\n  \"ai_model\": \"gpt-4o-mini\",\n  \"ai_api_key\": \"sk-...\"\n}"
+            }
+          },
+          "response": []
+        },
+        {
+          "name": "GET AI Pipeline Config",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/workspace/ai-pipeline",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "workspace",
+                "ai-pipeline"
+              ]
+            },
+            "description": "Get current AI pipeline configuration (mode, provider, model)."
+          },
+          "response": []
+        }
+      ]
     }
   ],
   "variable": [
-    { "key": "base_url", "value": "http://localhost:8000", "type": "string" },
-    { "key": "access_token", "value": "", "type": "string" },
-    { "key": "workspace_id", "value": "", "type": "string" },
-    { "key": "workspace_slug", "value": "", "type": "string" },
-    { "key": "channel_id", "value": "", "type": "string" },
-    { "key": "document_id", "value": "", "type": "string" },
-    { "key": "agent_id", "value": "", "type": "string" },
-    { "key": "conversation_id", "value": "", "type": "string" },
-    { "key": "session_token", "value": "", "type": "string" },
-    { "key": "widget_id", "value": "", "type": "string" },
-    { "key": "invitation_token", "value": "", "type": "string" },
-    { "key": "message_id", "value": "", "type": "string" },
-    { "key": "feedback_id", "value": "", "type": "string" },
-    { "key": "canned_response_id", "value": "", "type": "string" },
-    { "key": "rule_id", "value": "", "type": "string" },
-    { "key": "outbound_webhook_id", "value": "", "type": "string" },
-    { "key": "webhook_log_id", "value": "", "type": "string" },
-    { "key": "api_key_id", "value": "", "type": "string" },
-    { "key": "api_key_raw", "value": "", "type": "string" },
-    { "key": "contact_id", "value": "", "type": "string" },
-    { "key": "csat_token", "value": "", "type": "string" }
+    {
+      "key": "base_url",
+      "value": "http://localhost:8000",
+      "type": "string"
+    },
+    {
+      "key": "access_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "workspace_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "workspace_slug",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "channel_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "document_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "agent_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "conversation_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "session_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "widget_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "invitation_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "message_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "feedback_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "canned_response_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "rule_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "outbound_webhook_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "webhook_log_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "api_key_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "api_key_raw",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "contact_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "csat_token",
+      "value": "",
+      "type": "string"
+    }
   ]
 }
