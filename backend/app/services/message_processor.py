@@ -236,7 +236,7 @@ class MessageProcessor:
             select(Conversation)
             .where(Conversation.workspace_id == workspace_id)
             .where(Conversation.contact_id == contact_id)
-            .where(Conversation.channel_id == channel_id)
+            .where(Conversation.channel_type == channel_type)
             .where(Conversation.status.in_(["active", "escalated", "agent"]))
             .order_by(Conversation.updated_at.desc())
         )
@@ -249,7 +249,6 @@ class MessageProcessor:
         conversation = Conversation(
             workspace_id=workspace_id,
             contact_id=contact_id,
-            channel_id=channel_id,
             channel_type=channel_type,
             status="active"
         )

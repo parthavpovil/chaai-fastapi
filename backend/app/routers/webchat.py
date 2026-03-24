@@ -192,7 +192,7 @@ async def get_webchat_conversation(
         select(Conversation)
         .where(Conversation.workspace_id == channel.workspace_id)
         .where(Conversation.contact_id == contact.id)
-        .where(Conversation.channel_id == channel.id)
+        .where(Conversation.channel_type == "webchat")
         .where(Conversation.status.in_(["active", "escalated", "agent"]))
         .order_by(Conversation.updated_at.desc())
     )
