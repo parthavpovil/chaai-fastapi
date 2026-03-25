@@ -168,22 +168,27 @@ async def list_conversations(
         # Convert to response format
         conversation_responses = []
         for conv in conversations:
-            # Get last message
-            last_message = None
-            if hasattr(conv, 'messages') and conv.messages:
-                msg = conv.messages[-1]
-                last_message = MessageResponse(
-                    id=str(msg.id),
-                    content=msg.content,
-                    role=msg.role,
-                    sender_name=None,
-                    created_at=msg.created_at.isoformat(),
-                    metadata=msg.metadata
-                )
-            
-            # Get message count
+            # Get last message and count via queries (avoid lazy-loading in async)
             from sqlalchemy import select, func
             from app.models.message import Message
+            last_msg_result = await db.execute(
+                select(Message)
+                .where(Message.conversation_id == conv.id)
+                .order_by(Message.created_at.desc())
+                .limit(1)
+            )
+            last_msg_row = last_msg_result.scalar_one_or_none()
+            last_message = None
+            if last_msg_row:
+                last_message = MessageResponse(
+                    id=str(last_msg_row.id),
+                    content=last_msg_row.content,
+                    role=last_msg_row.role,
+                    sender_name=None,
+                    created_at=last_msg_row.created_at.isoformat(),
+                    metadata=last_msg_row.extra_data
+                )
+
             msg_count_result = await db.execute(
                 select(func.count(Message.id)).where(Message.conversation_id == conv.id)
             )
