@@ -105,36 +105,40 @@ class EmbeddingService:
         Raises:
             EmbeddingError: If chunk processing fails
         """
+        if not chunks:
+            raise EmbeddingError("No chunks to process")
+
+        # Batch all texts into a single API call
+        texts = [c['text'] for c in chunks]
+        try:
+            if hasattr(embedding_provider, 'generate_batch_embeddings'):
+                embeddings = await embedding_provider.generate_batch_embeddings(texts)
+            else:
+                # Fallback for providers without batch support
+                embeddings = [await embedding_provider.generate_embedding(t) for t in texts]
+        except AIProviderError as e:
+            raise EmbeddingError(f"Batch embedding failed: {e}")
+
+        embedding_model = getattr(embedding_provider, 'embedding_model', 'unknown')
         created_chunks = []
-        
-        for chunk_data in chunks:
-            try:
-                # Generate embedding for chunk text
-                embedding = await self.generate_chunk_embedding(chunk_data['text'])
-                
-                # Create chunk record
-                chunk = DocumentChunk(
-                    document_id=document_id,
-                    chunk_index=chunk_data['chunk_index'],
-                    content=chunk_data['text'],
-                    token_count=chunk_data.get('token_count'),
-                    start_char=chunk_data.get('start_char'),
-                    end_char=chunk_data.get('end_char'),
-                    embedding=embedding,
-                    chunk_metadata={
-                        'embedding_model': getattr(embedding_provider, 'embedding_model', 'unknown'),
-                        'embedding_dimensions': len(embedding)
-                    }
-                )
-                
-                self.db.add(chunk)
-                created_chunks.append(chunk)
-                
-            except Exception as e:
-                # Log error but continue with other chunks
-                print(f"Warning: Failed to process chunk {chunk_data['chunk_index']}: {e}")
-                continue
-        
+
+        for chunk_data, embedding in zip(chunks, embeddings):
+            chunk = DocumentChunk(
+                document_id=document_id,
+                chunk_index=chunk_data['chunk_index'],
+                content=chunk_data['text'],
+                token_count=chunk_data.get('token_count'),
+                start_char=chunk_data.get('start_char'),
+                end_char=chunk_data.get('end_char'),
+                embedding=embedding,
+                chunk_metadata={
+                    'embedding_model': embedding_model,
+                    'embedding_dimensions': len(embedding)
+                }
+            )
+            self.db.add(chunk)
+            created_chunks.append(chunk)
+
         if not created_chunks:
             raise EmbeddingError("Failed to process any chunks")
         

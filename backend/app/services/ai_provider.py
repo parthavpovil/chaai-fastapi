@@ -266,12 +266,17 @@ class OpenAIProvider:
     
     async def generate_embedding(self, text: str) -> List[float]:
         """Generate embedding using OpenAI's embedding model"""
+        embeddings = await self.generate_batch_embeddings([text])
+        return embeddings[0]
+
+    async def generate_batch_embeddings(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings for multiple texts in a single API call"""
         try:
             response = await self.client.embeddings.create(
                 model=self.embedding_model,
-                input=text
+                input=texts
             )
-            return response.data[0].embedding  # 1536 dimensions
+            return [item.embedding for item in sorted(response.data, key=lambda x: x.index)]
         except Exception as e:
             if "rate_limit" in str(e).lower():
                 raise AIProviderRateLimitError(f"OpenAI rate limit: {str(e)}")
