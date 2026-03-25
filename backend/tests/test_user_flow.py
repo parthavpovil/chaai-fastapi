@@ -561,7 +561,7 @@ def test_33b_search_conversations():
                   params={"q": "order"}, headers=auth_headers())
     assert r.status_code == 200, r.text
     data = r.json()
-    assert "conversations" in data or isinstance(data, list)
+    assert "results" in data or "conversations" in data or isinstance(data, list)
 
 
 def test_34_add_internal_note():

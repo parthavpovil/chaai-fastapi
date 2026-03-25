@@ -404,6 +404,67 @@ class ConversationManager:
         
         return stats
 
+    async def get_conversation_detail(
+        self,
+        conversation_id: str,
+        workspace_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get detailed conversation information with messages."""
+        from sqlalchemy.orm import selectinload as _sel
+        result = await self.db.execute(
+            select(Conversation)
+            .where(Conversation.id == conversation_id)
+            .where(Conversation.workspace_id == workspace_id)
+            .options(
+                _sel(Conversation.contact),
+                _sel(Conversation.messages)
+            )
+        )
+        conversation = result.scalar_one_or_none()
+        if not conversation:
+            return None
+
+        assigned_agent_name = None
+        if conversation.assigned_agent_id:
+            agent_result = await self.db.execute(
+                select(Agent).where(Agent.id == conversation.assigned_agent_id)
+            )
+            agent = agent_result.scalar_one_or_none()
+            if agent:
+                assigned_agent_name = agent.name
+
+        messages = []
+        for msg in conversation.messages:
+            sender_name = None
+            if msg.extra_data and "agent_name" in msg.extra_data:
+                sender_name = msg.extra_data["agent_name"]
+            messages.append({
+                "id": str(msg.id),
+                "content": msg.content,
+                "role": msg.role,
+                "sender_name": sender_name,
+                "created_at": msg.created_at.isoformat(),
+                "metadata": msg.extra_data
+            })
+
+        return {
+            "id": str(conversation.id),
+            "status": conversation.status,
+            "contact": {
+                "id": str(conversation.contact.id),
+                "name": conversation.contact.name,
+                "external_id": conversation.contact.external_contact_id,
+                "channel_type": conversation.channel_type,
+                "metadata": conversation.contact.meta
+            },
+            "assigned_agent_id": str(conversation.assigned_agent_id) if conversation.assigned_agent_id else None,
+            "assigned_agent_name": assigned_agent_name,
+            "escalation_reason": conversation.escalation_reason,
+            "messages": messages,
+            "created_at": conversation.created_at.isoformat(),
+            "updated_at": conversation.updated_at.isoformat()
+        }
+
 
 # ─── Convenience Functions ────────────────────────────────────────────────────
 

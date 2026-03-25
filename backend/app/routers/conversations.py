@@ -666,9 +666,7 @@ async def update_conversation_status(
             conversation_id=request.conversation_id,
             new_status=request.status,
             workspace_id=current_workspace.id,
-            user_id=current_user.id,
             agent_id=agent_id,
-            note=request.note
         )
         
         # Send WebSocket notification

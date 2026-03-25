@@ -300,7 +300,7 @@ class EscalationClassifier:
             from sqlalchemy import select, desc
             
             result = await self.db.execute(
-                select(Message.content, Message.message_type)
+                select(Message.content, Message.msg_type)
                 .where(Message.conversation_id == conversation_id)
                 .order_by(desc(Message.created_at))
                 .limit(limit)
