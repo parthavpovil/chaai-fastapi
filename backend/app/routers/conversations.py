@@ -7,7 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, or_, and_, text
+from sqlalchemy import select, func, or_, and_, text, null
 from pydantic import BaseModel, Field
 from datetime import datetime, date
 import csv
@@ -305,7 +305,7 @@ async def search_conversations(
         query = query.group_by(Conversation.id)
     else:
         query = (
-            select(Conversation, text("NULL").label("snippet"))
+            select(Conversation, null().label("snippet"))
             .join(ContactModel, ContactModel.id == Conversation.contact_id)
             .where(*base_filters)
         )
