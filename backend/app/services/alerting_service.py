@@ -14,12 +14,13 @@ import os
 from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, text
+from sqlalchemy import select, func, text, update
 
 from app.services.email_service import EmailService
 from app.models.workspace import Workspace
 from app.models.conversation import Conversation
 from app.models.usage_counter import UsageCounter
+from app.models.document import Document
 
 logger = logging.getLogger(__name__)
 
@@ -250,8 +251,6 @@ class AlertingService:
         alerts = []
         
         try:
-            from app.models.document import Document
-            
             # Check for failed document processing
             failed_docs = await self.db.execute(
                 select(func.count(Document.id))
@@ -272,24 +271,33 @@ class AlertingService:
                     timestamp=datetime.now(timezone.utc)
                 ))
             
-            # Check for documents stuck in processing
+            # Mark documents stuck in processing as failed so users can retry
             one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
-            stuck_docs = await self.db.execute(
-                select(func.count(Document.id))
+            stuck_result = await self.db.execute(
+                select(Document.id)
                 .where(
                     Document.status == 'processing',
                     Document.created_at < one_hour_ago
                 )
             )
-            
-            stuck_count = stuck_docs.scalar() or 0
-            
-            if stuck_count > 0:
+            stuck_ids = [row[0] for row in stuck_result.fetchall()]
+
+            if stuck_ids:
+                await self.db.execute(
+                    update(Document)
+                    .where(Document.id.in_(stuck_ids))
+                    .values(
+                        status='failed',
+                        error_message='Processing timed out. Please retry.',
+                    )
+                )
+                await self.db.commit()
+                logger.warning(f"Marked {len(stuck_ids)} stuck document(s) as failed")
                 alerts.append(Alert(
                     type=AlertType.SYSTEM_ERROR,
                     severity=AlertSeverity.WARNING,
-                    message=f"Documents stuck in processing: {stuck_count}",
-                    details={"stuck_documents": stuck_count},
+                    message=f"Marked {len(stuck_ids)} stuck document(s) as failed — users can retry",
+                    details={"stuck_documents": len(stuck_ids), "document_ids": stuck_ids},
                     timestamp=datetime.now(timezone.utc)
                 ))
                 
