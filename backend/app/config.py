@@ -35,12 +35,12 @@ class Settings(BaseSettings):
     
     # AI Provider Selection
     AI_PROVIDER: str = Field(
-        default="google",
-        pattern="^(google|openai|groq)$",
-        description="LLM provider: google | openai | groq"
+        default="openai",
+        pattern="^(google|openai|groq|anthropic)$",
+        description="LLM provider: google | openai | groq | anthropic"
     )
     EMBEDDING_PROVIDER: str = Field(
-        default="google",
+        default="openai",
         pattern="^(google|openai)$",
         description="Embedding provider: google | openai"
     )
@@ -88,12 +88,13 @@ class Settings(BaseSettings):
         description="Process secret for internal API calls"
     )
     
-    # Stripe Billing
-    STRIPE_SECRET_KEY: str = Field(default="", description="Stripe secret key")
-    STRIPE_WEBHOOK_SECRET: str = Field(default="", description="Stripe webhook signing secret")
-    STRIPE_PRICE_STARTER: str = Field(default="", description="Stripe price ID for Starter tier")
-    STRIPE_PRICE_GROWTH: str = Field(default="", description="Stripe price ID for Growth tier")
-    STRIPE_PRICE_PRO: str = Field(default="", description="Stripe price ID for Pro tier")
+    # Razorpay Billing
+    RAZORPAY_KEY_ID: str = Field(default="", description="Razorpay Key ID")
+    RAZORPAY_KEY_SECRET: str = Field(default="", description="Razorpay Key Secret")
+    RAZORPAY_WEBHOOK_SECRET: str = Field(default="", description="Razorpay webhook signing secret")
+    RAZORPAY_PLAN_STARTER: str = Field(default="", description="Razorpay plan_id for Starter tier")
+    RAZORPAY_PLAN_GROWTH: str = Field(default="", description="Razorpay plan_id for Growth tier")
+    RAZORPAY_PLAN_PRO: str = Field(default="", description="Razorpay plan_id for Pro tier")
 
     # Cloudflare R2 (S3-compatible object storage for WhatsApp media)
     R2_ACCOUNT_ID: str = Field(default="", description="Cloudflare account ID")

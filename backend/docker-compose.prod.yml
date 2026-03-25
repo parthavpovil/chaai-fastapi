@@ -49,6 +49,8 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - DEBUG=false
+      - AI_PROVIDER=openai
+      - EMBEDDING_PROVIDER=openai
       - DATABASE_URL=postgresql+asyncpg://chatsaas_user:${POSTGRES_PASSWORD}@postgres:5432/chatsaas_prod
       - JWT_SECRET_KEY=${JWT_SECRET_KEY}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY}
@@ -71,6 +73,12 @@ services:
       - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
       - R2_BUCKET_NAME=${R2_BUCKET_NAME}
       - R2_PUBLIC_DOMAIN=${R2_PUBLIC_DOMAIN}
+      - RAZORPAY_KEY_ID=${RAZORPAY_KEY_ID}
+      - RAZORPAY_KEY_SECRET=${RAZORPAY_KEY_SECRET}
+      - RAZORPAY_WEBHOOK_SECRET=${RAZORPAY_WEBHOOK_SECRET}
+      - RAZORPAY_PLAN_STARTER=${RAZORPAY_PLAN_STARTER}
+      - RAZORPAY_PLAN_GROWTH=${RAZORPAY_PLAN_GROWTH}
+      - RAZORPAY_PLAN_PRO=${RAZORPAY_PLAN_PRO}
     volumes:
       - storage_data:/var/chatsaas/storage
       - ./logs:/var/log/chatsaas

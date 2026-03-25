@@ -241,104 +241,75 @@ class RAGEngine:
             import logging
             logging.getLogger(__name__).warning(f"Summary generation failed: {e}")
 
-    async def build_context_prompt(
+    def build_context_prompt(
         self,
         query: str,
         relevant_chunks: List[Tuple[DocumentChunk, float]],
         conversation_history: List[Message],
         workspace_fallback_message: Optional[str] = None,
         conversation_summary: Optional[str] = None
-    ) -> str:
+    ) -> List[Dict[str, str]]:
         """
-        Build context prompt for LLM with retrieved chunks and conversation history
-        
-        Args:
-            query: User query
-            relevant_chunks: Retrieved document chunks with similarity scores
-            conversation_history: Recent conversation messages
-            workspace_fallback_message: Fallback message when no relevant content
-        
-        Returns:
-            Formatted prompt for LLM
+        Build messages list for LLM with retrieved chunks and conversation history.
+        Returns a [system, user] message pair for efficient token usage.
         """
-        prompt_parts = []
+        system_parts = [
+            "You are a helpful customer support assistant. "
+            "Answer using the knowledge base context below. "
+            "Be concise. If context lacks the answer, use the fallback message if provided."
+        ]
 
-        # System instruction
-        prompt_parts.append(
-            "You are a helpful customer support assistant. Use the provided context "
-            "to answer the user's question accurately and helpfully. If the context "
-            "doesn't contain relevant information, politely say so and provide the "
-            "fallback message if available."
-        )
+        if workspace_fallback_message:
+            system_parts.append(f"Fallback: {workspace_fallback_message}")
 
-        # Add conversation summary if available
+        user_parts = []
+
         if conversation_summary:
-            prompt_parts.append(f"\n--- CONVERSATION SUMMARY SO FAR ---\n{conversation_summary}")
+            user_parts.append(f"[Conversation summary]\n{conversation_summary}")
 
-        # Add relevant document context
         if relevant_chunks:
-            prompt_parts.append("\n--- RELEVANT KNOWLEDGE BASE ---")
-            for i, (chunk, similarity) in enumerate(relevant_chunks, 1):
+            user_parts.append("[Knowledge base]")
+            for i, (chunk, _) in enumerate(relevant_chunks, 1):
                 filename = getattr(chunk, 'filename', 'Unknown')
-                prompt_parts.append(
-                    f"\nSource {i} (from {filename}, similarity: {similarity:.3f}):\n"
-                    f"{chunk.content}"
-                )
-        
-        # Add conversation history
+                user_parts.append(f"[{i}] ({filename})\n{chunk.content}")
+
         if conversation_history:
-            prompt_parts.append("\n--- CONVERSATION HISTORY ---")
+            user_parts.append("[Recent conversation]")
             for msg in conversation_history[-self.CONTEXT_MESSAGES * 2:]:
                 role = "Customer" if msg.role in ("customer", "user") else "Assistant"
-                prompt_parts.append(f"\n{role}: {msg.content}")
-        
-        # Add current query
-        prompt_parts.append(f"\n--- CURRENT QUESTION ---\nCustomer: {query}")
-        
-        # Add fallback instruction
-        if workspace_fallback_message:
-            prompt_parts.append(
-                f"\n--- FALLBACK MESSAGE ---\n"
-                f"If you cannot answer based on the knowledge base, use this message:\n"
-                f"{workspace_fallback_message}"
-            )
-        
-        prompt_parts.append("\nAssistant:")
-        
-        return "\n".join(prompt_parts)
+                user_parts.append(f"{role}: {msg.content}")
+
+        user_parts.append(f"Customer: {query}\nAssistant:")
+
+        return [
+            {"role": "system", "content": "\n".join(system_parts)},
+            {"role": "user", "content": "\n\n".join(user_parts)},
+        ]
     
     async def generate_response(
         self,
-        prompt: str,
+        prompt: str = None,
+        messages: List[Dict[str, str]] = None,
         max_tokens: int = 300,
         temperature: float = 0.7
     ) -> Tuple[str, int, int]:
         """
-        Generate response using LLM
-        
-        Args:
-            prompt: Context prompt
-            max_tokens: Maximum response tokens
-            temperature: Response creativity (0.0-1.0)
-        
-        Returns:
-            Tuple of (response_text, input_tokens, output_tokens)
-        
-        Raises:
-            RAGError: If response generation fails
+        Generate response using LLM.
+        Accepts either a messages list (preferred) or a plain prompt string.
         """
         try:
             if not llm_provider:
                 raise RAGError("LLM provider not initialized")
-            
-            messages = [{"role": "user", "content": prompt}]
-            
+
+            if messages is None:
+                messages = [{"role": "user", "content": prompt}]
+
             return await llm_provider.generate_response(
                 messages=messages,
                 max_tokens=max_tokens,
                 temperature=temperature
             )
-            
+
         except AIProviderError as e:
             raise RAGError(f"Response generation failed: {str(e)}")
         except Exception as e:
@@ -399,18 +370,18 @@ class RAGEngine:
             )
             fallback_message = workspace_result.scalar_one_or_none()
 
-            # 5. Build context prompt
-            context_prompt = await self.build_context_prompt(
+            # 5. Build context messages (system + user split for token efficiency)
+            context_messages = self.build_context_prompt(
                 query=query,
                 relevant_chunks=relevant_chunks,
                 conversation_history=conversation_history,
                 workspace_fallback_message=fallback_message,
                 conversation_summary=conversation_summary
             )
-            
+
             # 6. Generate response
             response_text, input_tokens, output_tokens = await self.generate_response(
-                prompt=context_prompt,
+                messages=context_messages,
                 max_tokens=max_tokens,
                 temperature=temperature
             )

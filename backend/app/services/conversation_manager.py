@@ -453,7 +453,7 @@ class ConversationManager:
             "contact": {
                 "id": str(conversation.contact.id),
                 "name": conversation.contact.name,
-                "external_id": conversation.contact.external_contact_id,
+                "external_id": conversation.contact.external_id,
                 "channel_type": conversation.channel_type,
                 "metadata": conversation.contact.meta
             },
@@ -558,7 +558,7 @@ async def escalate_conversation_by_id(
             "contact": {
                 "id": str(conversation.contact.id),
                 "name": conversation.contact.name,
-                "external_id": conversation.contact.external_contact_id,
+                "external_id": conversation.contact.external_id,
                 "channel_type": conversation.channel_type,
                 "metadata": conversation.contact.meta
             },

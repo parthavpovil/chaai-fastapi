@@ -214,42 +214,48 @@ async def handle_email_clicked(data: dict):
     # await track_email_click(email_id, link)
 
 
-# ─── Stripe Webhook ───────────────────────────────────────────────────────────
+# ─── Razorpay Webhook ─────────────────────────────────────────────────────────
 
-@router.post("/stripe")
-async def stripe_webhook(
+@router.post("/razorpay")
+async def razorpay_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """Handle Stripe subscription lifecycle events."""
-    if not settings.STRIPE_WEBHOOK_SECRET:
+    """Handle Razorpay subscription lifecycle events."""
+    if not settings.RAZORPAY_WEBHOOK_SECRET:
         return {"status": "ok"}
 
     payload = await request.body()
-    sig_header = request.headers.get("stripe-signature", "")
+    sig_header = request.headers.get("x-razorpay-signature", "")
+
+    from app.services.razorpay_service import (
+        verify_webhook_signature,
+        handle_subscription_activated,
+        handle_subscription_cancelled,
+    )
+
+    if not verify_webhook_signature(payload.decode("utf-8"), sig_header):
+        logger.error("Razorpay webhook signature verification failed")
+        raise HTTPException(status_code=400, detail="Invalid Razorpay signature")
+
+    import json
+    try:
+        event = json.loads(payload)
+    except Exception as e:
+        logger.error(f"Razorpay webhook JSON parse error: {e}")
+        raise HTTPException(status_code=400, detail="Invalid JSON payload")
+
+    event_type = event.get("event", "")
+    event_data = event.get("payload", {})
 
     try:
-        import stripe
-        stripe.api_key = settings.STRIPE_SECRET_KEY
-        event = stripe.Webhook.construct_event(
-            payload, sig_header, settings.STRIPE_WEBHOOK_SECRET
-        )
+        if event_type == "subscription.activated":
+            await handle_subscription_activated(event_data, db)
+        elif event_type in ("subscription.cancelled", "subscription.halted", "subscription.completed"):
+            await handle_subscription_cancelled(event_data, db)
+        # subscription.charged is a no-op — subscription is already active
     except Exception as e:
-        logger.error(f"Stripe webhook signature failed: {e}")
-        raise HTTPException(status_code=400, detail="Invalid Stripe signature")
-
-    from app.services.stripe_service import handle_subscription_updated, handle_subscription_deleted
-
-    event_type = event.get("type", "")
-    event_data = event.get("data", {})
-
-    try:
-        if event_type == "customer.subscription.updated":
-            await handle_subscription_updated(event_data, db)
-        elif event_type == "customer.subscription.deleted":
-            await handle_subscription_deleted(event_data, db)
-    except Exception as e:
-        logger.error(f"Stripe event handling error: {e}")
+        logger.error(f"Razorpay event handling error ({event_type}): {e}")
 
     return {"status": "ok"}
 
