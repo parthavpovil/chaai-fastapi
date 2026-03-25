@@ -22,7 +22,6 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://${{ secrets.VPS_HOST }}
     
     steps:
       - name: Validate inputs
