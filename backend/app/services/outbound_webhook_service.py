@@ -21,31 +21,34 @@ MAX_RESPONSE_BODY_LEN = 2000
 
 
 async def trigger_event(
-    db: AsyncSession,
     workspace_id: str,
     event_type: str,
-    payload: Dict[str, Any]
+    payload: Dict[str, Any],
+    db: AsyncSession = None,  # kept for backward compat, ignored
 ) -> None:
     """
     Find all active outbound webhooks subscribed to event_type and POST to them.
+    Opens its own DB session so it can safely run as an asyncio.create_task.
     Silently handles errors — never raises to callers.
     """
+    from app.database import AsyncSessionLocal
+    from app.models.outbound_webhook import OutboundWebhook
+
     try:
-        from app.models.outbound_webhook import OutboundWebhook
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(OutboundWebhook)
+                .where(OutboundWebhook.workspace_id == UUID(workspace_id))
+                .where(OutboundWebhook.is_active == True)
+            )
+            webhooks = result.scalars().all()
 
-        result = await db.execute(
-            select(OutboundWebhook)
-            .where(OutboundWebhook.workspace_id == UUID(workspace_id))
-            .where(OutboundWebhook.is_active == True)
-        )
-        webhooks = result.scalars().all()
+            for wh in webhooks:
+                subscribed = wh.events or []
+                if event_type not in subscribed:
+                    continue
 
-        for wh in webhooks:
-            subscribed = wh.events or []
-            if event_type not in subscribed:
-                continue
-
-            await _deliver(db, wh, event_type, payload)
+                await _deliver(session, wh, event_type, payload)
 
     except Exception as e:
         logger.error(f"outbound_webhook trigger_event error: {e}")
