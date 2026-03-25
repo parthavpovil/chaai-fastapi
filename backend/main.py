@@ -18,6 +18,7 @@ from app.routers import canned_responses, assignment_rules as assignment_rules_r
 from app.routers import contacts as contacts_router, business_hours as business_hours_router
 from app.routers import flows as flows_router, templates as templates_router, broadcasts as broadcasts_router
 from app.routers import ai_agents as ai_agents_router
+from app.routers import websocket_webchat
 from app.middleware.maintenance_middleware import maintenance_mode_middleware
 from app.middleware.monitoring_middleware import init_monitoring_middleware, MonitoringMiddleware
 
@@ -36,7 +37,11 @@ async def lifespan(app: FastAPI):
     # Start agent status heartbeat check
     from app.tasks.agent_status_tasks import start_agent_status_tasks
     await start_agent_status_tasks()
-    
+
+    # Start customer WebSocket stale-connection cleanup
+    import asyncio
+    asyncio.create_task(websocket_webchat.cleanup_stale_customer_connections())
+
     yield
     
     # Shutdown
@@ -105,6 +110,7 @@ app.include_router(flows_router.router)
 app.include_router(templates_router.router)
 app.include_router(broadcasts_router.router)
 app.include_router(ai_agents_router.router)
+app.include_router(websocket_webchat.router)
 
 @app.get("/health")
 async def health_check():

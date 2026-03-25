@@ -718,6 +718,27 @@ async def update_conversation_status(
             except Exception:
                 pass
 
+        # Push status change to customer WS for relevant transitions
+        if request.status in ("escalated", "agent", "resolved"):
+            try:
+                from app.models.contact import Contact
+                from app.services.websocket_events import notify_customer_status_change
+                sc_result = await db.execute(
+                    select(Conversation, Contact)
+                    .join(Contact, Contact.id == Conversation.contact_id)
+                    .where(Conversation.id == UUID(request.conversation_id))
+                    .where(Conversation.workspace_id == current_workspace.id)
+                )
+                sc_row = sc_result.first()
+                if sc_row and sc_row[0].channel_type == "webchat":
+                    await notify_customer_status_change(
+                        workspace_id=str(current_workspace.id),
+                        session_token=sc_row[1].external_id,
+                        new_status=request.status,
+                    )
+            except Exception:
+                pass
+
         return {"message": f"Conversation status updated to {request.status}"}
         
     except ConversationManagementError as e:
@@ -783,7 +804,7 @@ async def send_agent_message(
             workspace_id=current_workspace.id
         )
         
-        # Send WebSocket notification
+        # Send WebSocket notification to agents
         from app.services.websocket_events import notify_new_message
         await notify_new_message(
             db=db,
@@ -791,7 +812,29 @@ async def send_agent_message(
             conversation_id=conversation_id,
             message_id=str(message.id)
         )
-        
+
+        # Push to customer WS if this is a webchat conversation
+        try:
+            from sqlalchemy import select
+            from app.models.conversation import Conversation
+            from app.models.contact import Contact
+            from app.services.websocket_events import notify_customer_new_message
+            conv_row = await db.execute(
+                select(Conversation, Contact)
+                .join(Contact, Contact.id == Conversation.contact_id)
+                .where(Conversation.id == message.conversation_id)
+            )
+            row = conv_row.first()
+            if row and row[0].channel_type == "webchat":
+                await notify_customer_new_message(
+                    db=db,
+                    workspace_id=str(current_workspace.id),
+                    session_token=row[1].external_id,
+                    message_id=str(message.id),
+                )
+        except Exception:
+            pass  # never block the agent reply
+
         return {
             "message": "Message sent successfully",
             "message_id": str(message.id)

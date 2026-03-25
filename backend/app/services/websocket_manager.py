@@ -502,12 +502,12 @@ async def broadcast_new_message_event(
 ) -> int:
     """
     Broadcast new message event to workspace connections
-    
+
     Args:
         workspace_id: Workspace ID
         conversation_id: Conversation ID
         message_data: Message metadata
-    
+
     Returns:
         Number of connections notified
     """
@@ -517,5 +517,229 @@ async def broadcast_new_message_event(
         "timestamp": datetime.now(timezone.utc).isoformat(),
         **message_data
     }
-    
+
     return await websocket_manager.broadcast_to_workspace(workspace_id, message)
+
+
+# ─── Customer WebSocket (Widget-Facing) ───────────────────────────────────────
+# Completely isolated from agent connections — no JWT, no user_id.
+# Identity is: workspace_id + session_token (= Contact.external_id for webchat).
+
+class CustomerWebSocketConnection:
+    """Represents a single customer (widget) WebSocket connection."""
+
+    def __init__(
+        self,
+        websocket: WebSocket,
+        connection_id: str,
+        workspace_id: str,
+        session_token: str,
+    ):
+        self.websocket = websocket
+        self.connection_id = connection_id
+        self.workspace_id = workspace_id
+        self.session_token = session_token
+        self.connected_at = datetime.now(timezone.utc)
+        self.last_ping = datetime.now(timezone.utc)
+
+    async def send_message(self, message: Dict[str, Any]) -> bool:
+        try:
+            await self.websocket.send_text(json.dumps(message))
+            return True
+        except Exception as e:
+            print(f"Failed to send customer WS message to {self.connection_id}: {e}")
+            return False
+
+    def update_last_ping(self):
+        self.last_ping = datetime.now(timezone.utc)
+
+
+class CustomerWebSocketManager:
+    """
+    WebSocket manager for customer (widget) connections.
+    Pools are keyed workspace_id → session_token → connection.
+    Completely separate from WebSocketManager — no agent data is accessible here.
+    """
+
+    def __init__(self):
+        # workspace_id → session_token → CustomerWebSocketConnection
+        self.customer_connections: Dict[str, Dict[str, CustomerWebSocketConnection]] = {}
+        # connection_id → CustomerWebSocketConnection  (fast disconnect/ping lookup)
+        self.connections_by_id: Dict[str, CustomerWebSocketConnection] = {}
+        self._lock = asyncio.Lock()
+
+    async def authenticate_customer(
+        self,
+        widget_id: str,
+        session_token: str,
+        db: AsyncSession,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Validate widget_id and session_token.
+        Returns {"workspace_id": str, "channel_id": str} or None.
+        Does NOT require an active conversation — customer can pre-connect.
+        """
+        try:
+            from app.routers.webchat import get_webchat_channel_by_widget_id
+            channel = await get_webchat_channel_by_widget_id(db, widget_id)
+            if not channel:
+                return None
+            # session_token is only required to be non-empty (contact may not exist yet
+            # on the very first message, so we don't enforce Contact lookup here)
+            if not session_token:
+                return None
+            return {
+                "workspace_id": str(channel.workspace_id),
+                "channel_id": str(channel.id),
+            }
+        except Exception as e:
+            print(f"Customer WS authentication failed: {e}")
+            return None
+
+    async def connect(
+        self,
+        websocket: WebSocket,
+        widget_id: str,
+        session_token: str,
+        db: AsyncSession,
+    ) -> Optional[CustomerWebSocketConnection]:
+        """
+        Authenticate, accept, and register a customer WS connection.
+        If a connection for the same session_token already exists in this workspace,
+        it is replaced (new tab / page refresh wins).
+        """
+        try:
+            auth_info = await self.authenticate_customer(widget_id, session_token, db)
+            if not auth_info:
+                await websocket.close(code=4001, reason="Authentication failed")
+                return None
+
+            await websocket.accept()
+
+            from uuid import uuid4
+            connection_id = str(uuid4())
+            workspace_id = auth_info["workspace_id"]
+
+            connection = CustomerWebSocketConnection(
+                websocket=websocket,
+                connection_id=connection_id,
+                workspace_id=workspace_id,
+                session_token=session_token,
+            )
+
+            async with self._lock:
+                if workspace_id not in self.customer_connections:
+                    self.customer_connections[workspace_id] = {}
+
+                # Replace any existing connection for this session_token
+                old = self.customer_connections[workspace_id].get(session_token)
+                if old:
+                    self.connections_by_id.pop(old.connection_id, None)
+                    try:
+                        await old.websocket.close(code=1001, reason="Replaced by new connection")
+                    except Exception:
+                        pass
+
+                self.customer_connections[workspace_id][session_token] = connection
+                self.connections_by_id[connection_id] = connection
+
+            await connection.send_message({
+                "type": "connection_established",
+                "connection_id": connection_id,
+                "workspace_id": workspace_id,
+                "connected_at": connection.connected_at.isoformat(),
+            })
+
+            print(f"Customer WS connected: {connection_id} (workspace={workspace_id})")
+            return connection
+
+        except Exception as e:
+            print(f"Customer WS connection failed: {e}")
+            try:
+                await websocket.close(code=4000, reason="Connection failed")
+            except Exception:
+                pass
+            return None
+
+    async def disconnect(self, connection_id: str) -> bool:
+        """Remove connection from both pools and close the WebSocket."""
+        async with self._lock:
+            connection = self.connections_by_id.get(connection_id)
+            if not connection:
+                return False
+
+            workspace_id = connection.workspace_id
+            session_token = connection.session_token
+
+            # Only remove from workspace pool if it's still THIS connection
+            # (could have been replaced by a newer connection for the same session)
+            ws_pool = self.customer_connections.get(workspace_id, {})
+            if ws_pool.get(session_token) is connection:
+                ws_pool.pop(session_token, None)
+                if not ws_pool:
+                    self.customer_connections.pop(workspace_id, None)
+
+            self.connections_by_id.pop(connection_id, None)
+
+            try:
+                await connection.websocket.close()
+            except Exception:
+                pass
+
+            print(f"Customer WS disconnected: {connection_id}")
+            return True
+
+    async def send_to_session(
+        self,
+        workspace_id: str,
+        session_token: str,
+        message: Dict[str, Any],
+    ) -> bool:
+        """
+        Push a message to the customer identified by session_token.
+        Returns True if sent, False if no active connection (silent — never raises).
+        """
+        try:
+            ws_pool = self.customer_connections.get(workspace_id, {})
+            connection = ws_pool.get(session_token)
+            if not connection:
+                return False
+
+            success = await connection.send_message(message)
+            if not success:
+                await self.disconnect(connection.connection_id)
+            return success
+        except Exception as e:
+            print(f"customer send_to_session error: {e}")
+            return False
+
+    async def handle_ping(self, connection_id: str) -> bool:
+        """Update last_ping and send pong."""
+        connection = self.connections_by_id.get(connection_id)
+        if not connection:
+            return False
+        connection.update_last_ping()
+        return await connection.send_message({
+            "type": "pong",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        })
+
+    async def cleanup_stale_customer_connections(self, max_idle_minutes: int = 10) -> int:
+        """Remove connections idle longer than max_idle_minutes (default 10)."""
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_idle_minutes)
+        stale = [
+            conn.connection_id
+            for conn in list(self.connections_by_id.values())
+            if conn.last_ping < cutoff
+        ]
+        count = 0
+        for cid in stale:
+            if await self.disconnect(cid):
+                count += 1
+        return count
+
+
+# ─── Global Customer WebSocket Manager Instance ───────────────────────────────
+
+customer_websocket_manager = CustomerWebSocketManager()

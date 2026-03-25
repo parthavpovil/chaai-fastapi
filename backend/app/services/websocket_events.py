@@ -508,3 +508,102 @@ async def notify_conversation_status_change(
     return await broadcaster.broadcast_conversation_status_change(
         workspace_id, conversation_id, old_status, new_status, agent_id
     )
+
+
+# ─── Customer (Widget) Notification Helpers ───────────────────────────────────
+# These push events directly to the customer's WS session (not to agents).
+# All are fire-and-forget — callers never check return values.
+
+async def notify_customer_new_message(
+    db: AsyncSession,
+    workspace_id: str,
+    session_token: str,
+    message_id: str,
+) -> bool:
+    """
+    Push a new_message event to the customer's WS connection.
+    Called after AI reply or human-agent reply is saved.
+    Returns True if sent, False if no active WS connection (graceful).
+    """
+    try:
+        from sqlalchemy import select
+        from app.models.message import Message
+        from app.services.websocket_manager import customer_websocket_manager
+
+        result = await db.execute(select(Message).where(Message.id == message_id))
+        message = result.scalar_one_or_none()
+        if not message:
+            return False
+
+        event = {
+            "type": "new_message",
+            "message_id": str(message.id),
+            "role": message.role,
+            "content": message.content,
+            "msg_type": message.msg_type or "text",
+            "media_url": message.media_url if hasattr(message, "media_url") else None,
+            "media_filename": message.media_filename if hasattr(message, "media_filename") else None,
+            "media_mime_type": message.media_mime_type if hasattr(message, "media_mime_type") else None,
+            "created_at": message.created_at.isoformat(),
+        }
+
+        return await customer_websocket_manager.send_to_session(
+            workspace_id, session_token, event
+        )
+    except Exception as e:
+        print(f"notify_customer_new_message error: {e}")
+        return False
+
+
+async def notify_customer_status_change(
+    workspace_id: str,
+    session_token: str,
+    new_status: str,
+    agent_name: Optional[str] = None,
+) -> bool:
+    """
+    Push a conversation_status_changed event to the customer's WS connection.
+    Called on escalation, agent assignment, or resolution.
+    """
+    try:
+        from app.services.websocket_manager import customer_websocket_manager
+
+        event = {
+            "type": "conversation_status_changed",
+            "new_status": new_status,
+            "agent_name": agent_name,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+
+        return await customer_websocket_manager.send_to_session(
+            workspace_id, session_token, event
+        )
+    except Exception as e:
+        print(f"notify_customer_status_change error: {e}")
+        return False
+
+
+async def notify_customer_csat_prompt(
+    workspace_id: str,
+    session_token: str,
+    token: str,
+) -> bool:
+    """
+    Push a csat_prompt event to the customer's WS connection.
+    Called when a webchat conversation is resolved.
+    """
+    try:
+        from app.services.websocket_manager import customer_websocket_manager
+
+        event = {
+            "type": "csat_prompt",
+            "token": token,
+            "expires_in_hours": 72,
+        }
+
+        return await customer_websocket_manager.send_to_session(
+            workspace_id, session_token, event
+        )
+    except Exception as e:
+        print(f"notify_customer_csat_prompt error: {e}")
+        return False

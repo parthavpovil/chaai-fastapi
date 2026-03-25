@@ -46,21 +46,23 @@ async def generate_and_send_csat_prompt(
     workspace_id: str,
 ) -> None:
     """
-    Generate a CSAT token and broadcast a csat_prompt WebSocket event
-    to the webchat session for the given conversation.
+    Generate a CSAT token and push a csat_prompt event to the customer's
+    WS session for the given conversation.
     """
     token = create_csat_token(conversation_id, workspace_id)
 
     try:
-        from app.services.websocket_manager import websocket_manager
-        await websocket_manager.broadcast_to_workspace(
-            workspace_id=workspace_id,
-            message={
-                "type": "csat_prompt",
-                "conversation_id": conversation_id,
-                "token": token,
-                "expires_in_hours": CSAT_TOKEN_EXPIRE_HOURS,
-            }
+        from app.models.contact import Contact
+        from app.models.conversation import Conversation
+        from app.services.websocket_events import notify_customer_csat_prompt
+
+        row = await db.execute(
+            select(Contact.external_id)
+            .join(Conversation, Conversation.contact_id == Contact.id)
+            .where(Conversation.id == conversation_id)
         )
+        session_token = row.scalar_one_or_none()
+        if session_token:
+            await notify_customer_csat_prompt(workspace_id, session_token, token)
     except Exception:
-        pass  # WebSocket broadcast failure is non-fatal
+        pass  # non-fatal

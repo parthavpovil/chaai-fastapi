@@ -13,6 +13,15 @@
   var is_open = false;
   var config = {};
 
+  // ── WebSocket state ─────────────────────────────────────────────────────────
+  var ws = null;
+  var ws_retry_count = 0;
+  var ws_retry_timer = null;
+  var ws_ping_interval = null;
+  var WS_MAX_RETRIES = 5;
+  var ws_enabled = (typeof WebSocket !== 'undefined');
+  var rendered_message_ids = {}; // {message_id: true} — dedup guard
+
   // ── Resolve API base from script tag src ──────────────────────────────────
 
   function getApiBase() {
@@ -196,6 +205,54 @@
     }
   }
 
+  function renderCsatPrompt(token) {
+    var container = document.getElementById('chatsaas-messages');
+    if (!container) return;
+
+    var wrap = document.createElement('div');
+    wrap.className = 'cs-msg assistant';
+    wrap.style.display = 'flex';
+    wrap.style.flexDirection = 'column';
+    wrap.style.gap = '6px';
+
+    var label = document.createElement('div');
+    label.textContent = 'How would you rate your experience?';
+    wrap.appendChild(label);
+
+    var stars = document.createElement('div');
+    stars.style.display = 'flex';
+    stars.style.gap = '4px';
+
+    [1, 2, 3, 4, 5].forEach(function (n) {
+      var btn = document.createElement('button');
+      btn.textContent = '★';
+      btn.style.cssText = 'background:none;border:none;font-size:22px;cursor:pointer;color:#ccc;padding:0;';
+      btn.addEventListener('mouseover', function () {
+        Array.from(stars.children).forEach(function (b, i) {
+          b.style.color = i < n ? '#f5a623' : '#ccc';
+        });
+      });
+      btn.addEventListener('mouseout', function () {
+        Array.from(stars.children).forEach(function (b) { b.style.color = '#ccc'; });
+      });
+      btn.addEventListener('click', function () {
+        wrap.innerHTML = '';
+        var thanks = document.createElement('div');
+        thanks.textContent = 'Thanks for your feedback!';
+        wrap.appendChild(thanks);
+        apiFetch('/api/webchat/csat', {
+          method: 'POST',
+          body: JSON.stringify({ token: token, rating: n })
+        }).catch(function () {});
+      });
+      stars.appendChild(btn);
+    });
+
+    wrap.appendChild(stars);
+    container.appendChild(wrap);
+    container.scrollTop = container.scrollHeight;
+  }
+
   // ── File upload ────────────────────────────────────────────────────────────
 
   function handleFileSelect(e) {
@@ -279,13 +336,18 @@
     if (panel) panel.classList.add('open');
     is_open = true;
     loadHistory();
-    startPolling();
+    if (ws_enabled && session_token && config.workspace_id) {
+      connectWebSocket();
+    } else {
+      startPolling();
+    }
   }
 
   function closePanel() {
     var panel = document.getElementById('chatsaas-panel');
     if (panel) panel.classList.remove('open');
     is_open = false;
+    disconnectWebSocket();
     stopPolling();
   }
 
@@ -312,11 +374,22 @@
         if (data.session_token) {
           session_token = data.session_token;
           saveSession(session_token);
+          // Now that we have a session_token, connect WS if not already connected
+          if (ws_enabled && config.workspace_id && (!ws || ws.readyState !== WebSocket.OPEN)) {
+            connectWebSocket();
+          }
         }
-        if (data.response) appendMessage(data.response, 'assistant');
-        last_message_count += (data.response ? 2 : 1);
+        // Mark the user message id as rendered to prevent double-render from WS push
+        if (data.message_id) rendered_message_ids[data.message_id] = true;
+        // The AI reply comes back synchronously in the HTTP response — render it directly
+        if (data.response) {
+          appendMessage(data.response, 'assistant');
+          last_message_count += 2;
+        } else {
+          last_message_count += 1;
+        }
       })
-      .catch(function (err) {
+      .catch(function () {
         appendMessage('Sorry, something went wrong. Please try again.', 'assistant');
       })
       .finally(function () { send.disabled = false; });
@@ -333,8 +406,10 @@
         var container = document.getElementById('chatsaas-messages');
         if (!container) return;
         container.innerHTML = '';
+        rendered_message_ids = {}; // reset on full reload
         (data.messages || []).forEach(function (msg) {
           renderMessage(msg);
+          if (msg.id) rendered_message_ids[msg.id] = true;
         });
         last_message_count = (data.messages || []).length;
       })
@@ -368,6 +443,128 @@
 
   function stopPolling() {
     if (poll_interval) { clearInterval(poll_interval); poll_interval = null; }
+  }
+
+  // ── WebSocket (primary real-time channel) ──────────────────────────────────
+
+  function connectWebSocket() {
+    if (!ws_enabled || !widget_id || !session_token || !config.workspace_id) return;
+    if (ws && ws.readyState === WebSocket.OPEN) return;
+
+    var wsBase = API_BASE.replace(/^http/, 'ws');
+    var url = wsBase + '/ws/webchat/' + encodeURIComponent(config.workspace_id)
+      + '?widget_id=' + encodeURIComponent(widget_id)
+      + '&session_token=' + encodeURIComponent(session_token);
+
+    try {
+      ws = new WebSocket(url);
+    } catch (e) {
+      fallbackToPolling();
+      return;
+    }
+
+    ws.onopen = function () {
+      ws_retry_count = 0;
+      stopPolling(); // WS is up — no need to poll
+      startWsPing();
+    };
+
+    ws.onmessage = function (event) {
+      try {
+        handleServerPush(JSON.parse(event.data));
+      } catch (e) {}
+    };
+
+    ws.onerror = function () {
+      // onclose fires after onerror — handle reconnect there
+    };
+
+    ws.onclose = function () {
+      ws = null;
+      stopWsPing();
+      if (ws_retry_count < WS_MAX_RETRIES) {
+        ws_retry_count++;
+        var delay = Math.min(1000 * Math.pow(2, ws_retry_count - 1), 30000);
+        ws_retry_timer = setTimeout(function () {
+          if (is_open) connectWebSocket();
+        }, delay);
+      } else {
+        fallbackToPolling();
+      }
+    };
+  }
+
+  function disconnectWebSocket() {
+    if (ws_retry_timer) { clearTimeout(ws_retry_timer); ws_retry_timer = null; }
+    stopWsPing();
+    if (ws) {
+      ws.onclose = null; // prevent reconnect loop on intentional close
+      ws.close(1000, 'Panel closed');
+      ws = null;
+    }
+  }
+
+  function fallbackToPolling() {
+    ws_enabled = false;
+    if (is_open && !poll_interval) startPolling();
+  }
+
+  function startWsPing() {
+    stopWsPing();
+    ws_ping_interval = setInterval(function () {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'ping' }));
+      }
+    }, 25000);
+  }
+
+  function stopWsPing() {
+    if (ws_ping_interval) { clearInterval(ws_ping_interval); ws_ping_interval = null; }
+  }
+
+  function handleServerPush(msg) {
+    if (!msg || !msg.type) return;
+
+    if (msg.type === 'pong') return; // keepalive, ignore
+
+    if (msg.type === 'new_message') {
+      // Dedup: skip if already rendered (history load or HTTP response)
+      if (msg.message_id && rendered_message_ids[msg.message_id]) return;
+      if (msg.message_id) rendered_message_ids[msg.message_id] = true;
+
+      // Only render server-pushed replies (assistant / agent)
+      // Customer's own messages are rendered optimistically in sendMessage()
+      if (msg.role === 'assistant' || msg.role === 'agent') {
+        if (msg.msg_type && msg.msg_type !== 'text' && msg.media_url) {
+          appendMediaMessage({ url: msg.media_url, filename: msg.media_filename, message_type: msg.msg_type }, 'assistant');
+          if (msg.content && msg.content !== '[User sent a file]') {
+            appendMessage(msg.content, 'assistant');
+          }
+        } else {
+          appendMessage(msg.content || '', 'assistant');
+        }
+        last_message_count += 1;
+      }
+      return;
+    }
+
+    if (msg.type === 'conversation_status_changed') {
+      if (msg.new_status === 'agent' && msg.agent_name) {
+        appendMessage('You are now connected with ' + escapeHtml(msg.agent_name) + '.', 'assistant');
+      } else if (msg.new_status === 'agent') {
+        appendMessage('You are now connected with a support agent.', 'assistant');
+      } else if (msg.new_status === 'escalated') {
+        appendMessage('Your request has been escalated to our support team.', 'assistant');
+      } else if (msg.new_status === 'resolved') {
+        appendMessage('This conversation has been resolved. Thank you!', 'assistant');
+      }
+      return;
+    }
+
+    if (msg.type === 'csat_prompt' && msg.token) {
+      renderCsatPrompt(msg.token);
+      return;
+    }
   }
 
   // ── Welcome message ────────────────────────────────────────────────────────

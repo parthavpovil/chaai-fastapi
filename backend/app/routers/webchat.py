@@ -104,6 +104,7 @@ class WebChatMessagesResponse(BaseModel):
 class WebChatConfigResponse(BaseModel):
     """Response schema for WebChat configuration endpoint"""
     widget_id: str
+    workspace_id: str
     business_name: str
     primary_color: str
     position: str
@@ -312,6 +313,7 @@ async def get_webchat_config(
         
         return WebChatConfigResponse(
             widget_id=config["widget_id"],
+            workspace_id=str(channel.workspace_id),
             business_name=config["business_name"],
             primary_color=config["primary_color"],
             position=config["position"],
@@ -446,7 +448,7 @@ async def send_webchat_message(
                     
                     # Step 4: Create assistant response message
                     processor = MessageProcessor(db)
-                    await processor.create_message(
+                    ai_message = await processor.create_message(
                         conversation_id=conversation_id,
                         content=response_content,
                         role="assistant",
@@ -458,7 +460,7 @@ async def send_webchat_message(
                             "webchat_response": True
                         }
                     )
-                    
+
                     # Step 5: Track usage
                     await track_message_usage(
                         db=db,
@@ -466,14 +468,24 @@ async def send_webchat_message(
                         input_tokens=input_tokens,
                         output_tokens=output_tokens
                     )
-                    
-                    # Step 6: Send WebSocket notification
+
+                    # Step 6: Notify agents via WS
                     await notify_new_message(
                         db=db,
                         workspace_id=str(channel.workspace_id),
                         conversation_id=conversation_id,
                         message_id=user_message_id
                     )
+
+                    # Step 7: Push AI reply to customer WS session (if connected)
+                    if ai_message:
+                        from app.services.websocket_events import notify_customer_new_message
+                        await notify_customer_new_message(
+                            db=db,
+                            workspace_id=str(channel.workspace_id),
+                            session_token=session_token,
+                            message_id=str(ai_message.id),
+                        )
                     
                 except Exception as e:
                     print(f"RAG response generation failed: {e}")

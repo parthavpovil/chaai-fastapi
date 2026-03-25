@@ -370,6 +370,27 @@ class EscalationRouter:
             except Exception:
                 pass
 
+            # Push escalation status to customer WS if this is a webchat conversation
+            try:
+                from sqlalchemy import select
+                from app.models.contact import Contact
+                from app.models.conversation import Conversation
+                from app.services.websocket_events import notify_customer_status_change
+                cust_row = await self.db.execute(
+                    select(Conversation, Contact)
+                    .join(Contact, Contact.id == Conversation.contact_id)
+                    .where(Conversation.id == conversation_id)
+                )
+                cust = cust_row.first()
+                if cust and cust[0].channel_type == "webchat":
+                    await notify_customer_status_change(
+                        workspace_id=workspace_id,
+                        session_token=cust[1].external_id,
+                        new_status="escalated",
+                    )
+            except Exception:
+                pass
+
             return result
             
         except Exception as e:
