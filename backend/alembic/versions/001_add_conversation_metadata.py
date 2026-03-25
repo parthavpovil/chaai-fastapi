@@ -1,7 +1,7 @@
 """add conversation metadata column
 
 Revision ID: 001_add_conversation_metadata
-Revises:
+Revises: 0001
 Create Date: 2026-03-22
 
 """
@@ -11,7 +11,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 
 # revision identifiers
 revision = '001_add_conversation_metadata'
-down_revision = None
+down_revision = '0001'
 branch_labels = None
 depends_on = None
 
