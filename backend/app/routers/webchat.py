@@ -413,7 +413,6 @@ async def send_webchat_message(
                 await db.commit()
 
             # Send WebSocket notification for customer message
-            from app.services.websocket_events import notify_new_message
             await notify_new_message(
                 db=db,
                 workspace_id=str(channel.workspace_id),

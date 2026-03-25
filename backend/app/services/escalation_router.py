@@ -372,6 +372,7 @@ class EscalationRouter:
 
             # Push escalation status to customer WS if this is a webchat conversation
             try:
+                from uuid import UUID as _UUID
                 from sqlalchemy import select
                 from app.models.contact import Contact
                 from app.models.conversation import Conversation
@@ -379,7 +380,7 @@ class EscalationRouter:
                 cust_row = await self.db.execute(
                     select(Conversation, Contact)
                     .join(Contact, Contact.id == Conversation.contact_id)
-                    .where(Conversation.id == conversation_id)
+                    .where(Conversation.id == _UUID(conversation_id))
                 )
                 cust = cust_row.first()
                 if cust and cust[0].channel_type == "webchat":

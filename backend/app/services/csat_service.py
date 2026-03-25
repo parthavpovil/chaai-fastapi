@@ -56,10 +56,11 @@ async def generate_and_send_csat_prompt(
         from app.models.conversation import Conversation
         from app.services.websocket_events import notify_customer_csat_prompt
 
+        from uuid import UUID as _UUID
         row = await db.execute(
             select(Contact.external_id)
             .join(Conversation, Conversation.contact_id == Contact.id)
-            .where(Conversation.id == conversation_id)
+            .where(Conversation.id == _UUID(conversation_id))
         )
         session_token = row.scalar_one_or_none()
         if session_token:

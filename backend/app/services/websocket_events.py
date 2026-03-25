@@ -541,9 +541,9 @@ async def notify_customer_new_message(
             "role": message.role,
             "content": message.content,
             "msg_type": message.msg_type or "text",
-            "media_url": message.media_url if hasattr(message, "media_url") else None,
-            "media_filename": message.media_filename if hasattr(message, "media_filename") else None,
-            "media_mime_type": message.media_mime_type if hasattr(message, "media_mime_type") else None,
+            "media_url": message.media_url,
+            "media_filename": message.media_filename,
+            "media_mime_type": message.media_mime_type,
             "created_at": message.created_at.isoformat(),
         }
 
