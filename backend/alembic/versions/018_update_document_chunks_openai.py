@@ -14,7 +14,7 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects.postgresql import JSONB
 
-revision = "018_update_document_chunks_openai"
+revision = "018_chunks_openai_1536"
 down_revision = "017_stripe_to_razorpay"
 branch_labels = None
 depends_on = None
