@@ -1,4 +1,4 @@
-the old onw whch is more e"""Initial schema with all models
+"""Initial schema with all models
 
 Revision ID: 0001
 Revises: 
