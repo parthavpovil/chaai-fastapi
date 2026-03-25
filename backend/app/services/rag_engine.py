@@ -187,9 +187,20 @@ class RAGEngine:
         """
         Generate and store a conversation summary every SUMMARY_INTERVAL messages.
         Runs as a fire-and-forget task — does not raise exceptions to callers.
+        Uses its own DB session to avoid conflicts with the caller's session.
         """
+        from app.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as db:
+            await self._do_generate_summary(db, conversation_id, workspace_id)
+
+    async def _do_generate_summary(
+        self,
+        db,
+        conversation_id: str,
+        workspace_id: str
+    ) -> None:
         try:
-            count_result = await self.db.execute(
+            count_result = await db.execute(
                 select(Message)
                 .where(Message.conversation_id == conversation_id)
                 .order_by(Message.created_at.asc())
@@ -199,7 +210,7 @@ class RAGEngine:
                 return
 
             # Check tier — only Growth+ gets auto-summaries
-            ws_result = await self.db.execute(
+            ws_result = await db.execute(
                 select(Workspace).where(Workspace.id == workspace_id)
             )
             workspace = ws_result.scalar_one_or_none()
@@ -224,7 +235,7 @@ class RAGEngine:
             )
 
             # Store summary in conversation.metadata
-            conv_result = await self.db.execute(
+            conv_result = await db.execute(
                 select(Conversation).where(Conversation.id == conversation_id)
             )
             conv = conv_result.scalar_one_or_none()
@@ -234,7 +245,7 @@ class RAGEngine:
                 meta["summary"] = response_text
                 meta["summary_generated_at"] = datetime.now(timezone.utc).isoformat()
                 conv.meta = meta
-                await self.db.commit()
+                await db.commit()
 
         except Exception as e:
             # Non-fatal — log and continue

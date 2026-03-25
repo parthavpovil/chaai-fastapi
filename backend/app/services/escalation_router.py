@@ -325,16 +325,22 @@ class EscalationRouter:
                     print(f"WebSocket notification failed: {e}")
                     notifications_sent = False
             else:
-                # Send email alert to workspace owner
-                owner_email = await self.get_workspace_owner_email(workspace_id)
-                if owner_email:
-                    try:
-                        email_sent = await self.send_email_alert(
-                            workspace_id, owner_email, conversation_id, escalation_data
-                        )
-                    except Exception as e:
-                        print(f"Email alert failed: {e}")
-                        email_sent = False
+                # Send email alert to workspace owner (only if enabled in workspace settings)
+                ws_result = await self.db.execute(
+                    select(Workspace).where(Workspace.id == workspace_id)
+                )
+                ws = ws_result.scalar_one_or_none()
+                email_enabled = ws.escalation_email_enabled if ws else True
+                if email_enabled:
+                    owner_email = await self.get_workspace_owner_email(workspace_id)
+                    if owner_email:
+                        try:
+                            email_sent = await self.send_email_alert(
+                                workspace_id, owner_email, conversation_id, escalation_data
+                            )
+                        except Exception as e:
+                            print(f"Email alert failed: {e}")
+                            email_sent = False
             
             result = {
                 "success": True,

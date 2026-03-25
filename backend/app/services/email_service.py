@@ -230,5 +230,60 @@ class EmailService:
         )
 
 
+    async def send_escalation_alert(
+        self,
+        to_email: str,
+        workspace_id: str,
+        conversation_id: str,
+        escalation_reason: str,
+        priority: str = "medium",
+        classification_data: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        """Send escalation alert email to workspace owner"""
+        priority_colors = {"high": "#dc2626", "medium": "#d97706", "low": "#2563eb"}
+        color = priority_colors.get(priority, "#d97706")
+
+        classification_html = ""
+        if classification_data:
+            classification_html = f"<p><strong>Classification:</strong> {classification_data}</p>"
+
+        html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: {color};">Escalation Alert — {priority.upper()} Priority</h2>
+                <p>A conversation requires your attention.</p>
+                <div style="background-color: #fef9ec; border-left: 4px solid {color}; padding: 15px; margin: 20px 0;">
+                    <p style="margin: 0;"><strong>Reason:</strong> {escalation_reason}</p>
+                    <p style="margin: 8px 0 0;"><strong>Conversation ID:</strong> {conversation_id}</p>
+                    <p style="margin: 8px 0 0;"><strong>Workspace ID:</strong> {workspace_id}</p>
+                </div>
+                {classification_html}
+                <div style="margin: 30px 0;">
+                    <a href="{settings.APP_URL}/conversations/{conversation_id}"
+                       style="background-color: {color}; color: white; padding: 12px 24px;
+                              text-decoration: none; border-radius: 6px; display: inline-block;">
+                        View Conversation
+                    </a>
+                </div>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                <p style="color: #999; font-size: 12px;">ChatSaaS - AI-Powered Customer Support Platform</p>
+            </div>
+        </body>
+        </html>
+        """
+
+        try:
+            await self.send_email(
+                to=to_email,
+                subject=f"[{priority.upper()}] Escalation Alert — Action Required",
+                html=html,
+                tags=[{"name": "category", "value": "escalation_alert"}],
+            )
+            return True
+        except Exception:
+            return False
+
+
 # Global email service instance
 email_service = EmailService()

@@ -31,6 +31,7 @@ class Workspace(Base):
     outside_hours_behavior = Column(String, nullable=True, default="inform_and_continue")
     escalation_keywords = Column(JSONB, nullable=True)  # None = use built-in defaults
     escalation_sensitivity = Column(String, nullable=False, default="medium")
+    escalation_email_enabled = Column(Boolean, nullable=False, default=True)
     razorpay_customer_id = Column(String, nullable=True)
     razorpay_subscription_id = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

@@ -41,6 +41,7 @@ class WorkspaceSettingsUpdate(BaseModel):
     agents_enabled: Optional[bool] = None
     escalation_keywords: Optional[List[str]] = Field(None, max_length=100)
     escalation_sensitivity: Optional[str] = Field(None, pattern="^(low|medium|high)$")
+    escalation_email_enabled: Optional[bool] = None
 
 
 class WorkspaceOverview(BaseModel):
@@ -163,6 +164,8 @@ async def update_workspace_settings(
         current_workspace.escalation_keywords = request.escalation_keywords
     if request.escalation_sensitivity is not None:
         current_workspace.escalation_sensitivity = request.escalation_sensitivity
+    if request.escalation_email_enabled is not None:
+        current_workspace.escalation_email_enabled = request.escalation_email_enabled
 
     await db.commit()
     return {"status": "updated"}
