@@ -316,7 +316,7 @@ class DocumentProcessor:
         await self.db.commit()
 
         embedding_service = EmbeddingService(self.db)
-        await embedding_service.create_document_chunks(str(document_id), chunks)
+        await embedding_service.create_document_chunks(str(document_id), chunks, workspace_id=str(doc.workspace_id))
 
         doc.chunks_count = len(chunks)
         await self.db.commit()

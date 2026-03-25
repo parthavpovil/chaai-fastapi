@@ -90,18 +90,20 @@ class EmbeddingService:
     async def create_document_chunks(
         self,
         document_id: str,
-        chunks: List[Dict[str, Any]]
+        chunks: List[Dict[str, Any]],
+        workspace_id: Optional[str] = None,
     ) -> List[DocumentChunk]:
         """
         Create document chunks with embeddings
-        
+
         Args:
             document_id: Document ID
             chunks: List of chunk data from document processor
-        
+            workspace_id: Workspace ID (required for NOT NULL constraint)
+
         Returns:
             List of created DocumentChunk instances
-        
+
         Raises:
             EmbeddingError: If chunk processing fails
         """
@@ -125,6 +127,7 @@ class EmbeddingService:
         for chunk_data, embedding in zip(chunks, embeddings):
             chunk = DocumentChunk(
                 document_id=document_id,
+                workspace_id=workspace_id,
                 chunk_index=chunk_data['chunk_index'],
                 content=chunk_data['text'],
                 token_count=chunk_data.get('token_count'),
@@ -218,7 +221,8 @@ class EmbeddingService:
             # 2. Process chunks and generate embeddings
             chunks = await self.create_document_chunks(
                 document.id,
-                processing_result['chunks']
+                processing_result['chunks'],
+                workspace_id=workspace_id,
             )
 
             # 3. Update chunks_count and status
@@ -412,7 +416,7 @@ class EmbeddingService:
             await self.update_document_status(document_id, "processing")
 
             # Create new chunks
-            await self.create_document_chunks(document_id, processing_result['chunks'])
+            await self.create_document_chunks(document_id, processing_result['chunks'], workspace_id=workspace_id)
 
             # Update status to completed
             return await self.update_document_status(document_id, "completed")
