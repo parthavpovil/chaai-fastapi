@@ -117,11 +117,11 @@ class EmbeddingService:
                     document_id=document_id,
                     chunk_index=chunk_data['chunk_index'],
                     content=chunk_data['text'],
-                    token_count=chunk_data['token_count'],
-                    start_char=chunk_data['start_char'],
-                    end_char=chunk_data['end_char'],
+                    token_count=chunk_data.get('token_count'),
+                    start_char=chunk_data.get('start_char'),
+                    end_char=chunk_data.get('end_char'),
                     embedding=embedding,
-                    metadata={
+                    chunk_metadata={
                         'embedding_model': getattr(embedding_provider, 'embedding_model', 'unknown'),
                         'embedding_dimensions': len(embedding)
                     }
