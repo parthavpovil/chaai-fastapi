@@ -337,6 +337,8 @@ async def deactivate_agent(
         )
         
     except AgentManagementError as e:
+        if "not found" in str(e).lower():
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)

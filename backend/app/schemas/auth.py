@@ -2,9 +2,10 @@
 Authentication Schemas
 Pydantic models for authentication requests and responses
 """
+import re
 from typing import Optional
 from uuid import UUID
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class UserRegistrationRequest(BaseModel):
@@ -12,6 +13,11 @@ class UserRegistrationRequest(BaseModel):
     email: EmailStr = Field(..., description="User email address")
     password: str = Field(..., min_length=8, description="Password (minimum 8 characters)")
     business_name: str = Field(..., min_length=1, max_length=100, description="Business name for workspace")
+
+    @field_validator("business_name")
+    @classmethod
+    def sanitize_business_name(cls, v: str) -> str:
+        return re.sub(r"<[^>]+>", "", v).strip()
 
 
 class UserLoginRequest(BaseModel):

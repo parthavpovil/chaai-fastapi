@@ -76,7 +76,7 @@ class ChannelUpdateRequest(BaseModel):
 
 # ─── Channel Management Endpoints ─────────────────────────────────────────────
 
-@router.post("/", response_model=ChannelResponse)
+@router.post("/", response_model=ChannelResponse, status_code=201)
 async def create_channel(
     request: ChannelCreateRequest,
     current_user: User = Depends(get_current_user),

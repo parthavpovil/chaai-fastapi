@@ -60,7 +60,7 @@ class OutboundWebhookOut(BaseModel):
 def _require_feature(workspace: Workspace) -> None:
     if not TIER_LIMITS.get(workspace.tier or "free", {}).get("has_outbound_webhooks", False):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="Outbound webhooks require Growth or Pro tier."
         )
 

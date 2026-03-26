@@ -34,7 +34,7 @@ class FlowUpdate(BaseModel):
     steps: Optional[dict] = None
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("/", status_code=status.HTTP_201_CREATED)
 async def create_flow(
     body: FlowCreate,
     workspace: Workspace = Depends(get_current_workspace),

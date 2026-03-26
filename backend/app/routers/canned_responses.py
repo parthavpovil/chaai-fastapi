@@ -78,7 +78,7 @@ def _to_out(cr: CannedResponse) -> CannedResponseOut:
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
-@router.post("", response_model=CannedResponseOut, status_code=201)
+@router.post("/", response_model=CannedResponseOut, status_code=201)
 async def create_canned_response(
     request: CannedResponseCreate,
     current_user: User = Depends(get_current_user),

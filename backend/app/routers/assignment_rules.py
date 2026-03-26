@@ -58,7 +58,7 @@ def _require_pro(workspace: Workspace) -> None:
     tier = workspace.tier or "free"
     if not TIER_LIMITS.get(tier, {}).get("has_assignment_rules", False):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="Assignment rules require Pro tier. Please upgrade."
         )
 

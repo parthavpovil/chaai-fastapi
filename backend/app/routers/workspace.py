@@ -168,7 +168,16 @@ async def update_workspace_settings(
         current_workspace.escalation_email_enabled = request.escalation_email_enabled
 
     await db.commit()
-    return {"status": "updated"}
+    await db.refresh(current_workspace)
+    return {
+        "status": "updated",
+        "fallback_msg": current_workspace.fallback_msg,
+        "alert_email": current_workspace.alert_email,
+        "agents_enabled": current_workspace.agents_enabled,
+        "escalation_keywords": current_workspace.escalation_keywords,
+        "escalation_sensitivity": current_workspace.escalation_sensitivity,
+        "escalation_email_enabled": current_workspace.escalation_email_enabled,
+    }
 
 
 @router.get("/overview", response_model=WorkspaceOverview)

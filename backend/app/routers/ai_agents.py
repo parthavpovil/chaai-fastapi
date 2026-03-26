@@ -45,7 +45,7 @@ def _require_ai_agents_tier(workspace: Workspace):
     limits = TIER_LIMITS.get(workspace.tier or "free", {})
     if limits.get("ai_agents", 0) == 0:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="AI Agents require Starter tier or above.",
         )
 
@@ -63,7 +63,7 @@ async def _get_agent_or_404(
 
 # ─── Agent CRUD ───────────────────────────────────────────────────────────────
 
-@router.post("", response_model=AIAgentResponse, status_code=201)
+@router.post("/", response_model=AIAgentResponse, status_code=201)
 async def create_agent(
     payload: AIAgentCreate,
     current_user: User = Depends(get_current_user),
@@ -77,7 +77,7 @@ async def create_agent(
     max_agents = limits.get("ai_agents", 0)
     if len(existing) >= max_agents:
         raise HTTPException(
-            status_code=403,
+            status_code=402,
             detail=f"AI agent limit ({max_agents}) reached for {workspace.tier} tier.",
         )
 

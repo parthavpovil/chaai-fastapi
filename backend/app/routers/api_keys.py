@@ -54,7 +54,7 @@ class APIKeyOut(BaseModel):
 def _require_feature(workspace: Workspace) -> None:
     if not TIER_LIMITS.get(workspace.tier or "free", {}).get("has_api_access", False):
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail="API key access requires Growth or Pro tier."
         )
 

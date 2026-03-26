@@ -920,7 +920,7 @@ class TestBilling:
     def test_billing_checkout_valid_tier_returns_url(self):
         r = post("/api/billing/checkout", {"tier": "starter"}, token=_state["token"])
         # Should either return a checkout URL or fail gracefully if Razorpay not configured
-        assert r.status_code in (200, 400, 402, 500), r.text
+        assert r.status_code in (200, 400, 402, 500, 503), r.text
         if r.status_code == 200:
             assert "checkout_url" in r.json()
 
