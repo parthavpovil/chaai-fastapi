@@ -192,6 +192,31 @@ Refreshes the JWT token before it expires.
 
 ---
 
+### `POST /api/auth/logout`
+
+Revokes the current JWT token immediately by adding it to a server-side blocklist.
+
+**Auth required**: `Authorization: Bearer <token>`
+
+**Request Body**: None
+
+**Response `200`**:
+```json
+{
+  "message": "Logged out successfully"
+}
+```
+
+**Errors**:
+- `401` — Token is invalid or already expired
+
+**Notes**:
+- The token is added to a Redis blocklist and rejected on all subsequent requests, even before its natural expiry
+- The client must discard the token after calling this endpoint
+- The test script in Postman automatically clears the `access_token` environment variable on success
+
+---
+
 ## 2. Workspace
 
 ### `GET /api/workspace/overview`

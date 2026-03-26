@@ -67,6 +67,13 @@ async def get_current_user(
     if not payload:
         raise AuthenticationError("Invalid token")
 
+    # Reject tokens that have been explicitly logged out
+    jti = payload.get("jti")
+    if jti:
+        from app.services.token_blocklist import is_blocked
+        if await is_blocked(jti):
+            raise AuthenticationError("Token has been revoked")
+
     try:
         user_id = UUID(payload["sub"])
     except (ValueError, KeyError):

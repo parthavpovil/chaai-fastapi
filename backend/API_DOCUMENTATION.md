@@ -211,6 +211,32 @@ Silently refresh a JWT token before it expires. Pass in a valid (non-expired) to
 
 ---
 
+### POST /logout
+
+Revoke the current JWT token. The token is immediately added to a Redis blocklist and rejected on all subsequent requests.
+
+**Headers:**
+- `Authorization: Bearer <token>`
+
+**Request Body:** None
+
+**Response (200):**
+```json
+{
+  "message": "Logged out successfully"
+}
+```
+
+**Errors:**
+- 401: Invalid or missing token
+
+**Notes:**
+- The blocklist entry expires automatically when the token would have naturally expired (no permanent storage)
+- On Redis outage the request still succeeds; the token remains valid until its `exp` claim (fail-open design)
+- The Postman test script automatically clears the `access_token` environment variable on `200`
+
+---
+
 ## Channel Management
 
 Base URL: `/api/channels`

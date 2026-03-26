@@ -286,6 +286,39 @@
             }
           ],
           "response": []
+        },
+        {
+          "name": "POST Logout",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/auth/logout",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "api",
+                "auth",
+                "logout"
+              ]
+            },
+            "description": "Revoke the current JWT token by adding its JTI to a Redis blocklist. The token is immediately invalidated for all subsequent requests. The client should discard the token after calling this endpoint.\n\nRequires: Bearer token authentication.\n\nReturns: { \"message\": \"Logged out successfully\" }"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  pm.environment.unset(\"access_token\");",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "response": []
         }
       ]
     },

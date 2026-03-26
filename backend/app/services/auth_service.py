@@ -4,7 +4,7 @@ JWT token generation, validation, and password hashing
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 from jose import JWTError, jwt
 import bcrypt
 
@@ -76,6 +76,7 @@ class AuthService:
             "workspace_id": str(workspace_id) if workspace_id else None,
             "exp": expire,
             "iat": datetime.now(timezone.utc),  # Issued at
+            "jti": str(uuid4()),               # Unique token ID (used for blocklist on logout)
         }
         
         # Encode JWT token

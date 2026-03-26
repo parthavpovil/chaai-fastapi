@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -23,7 +24,7 @@ from app.schemas.auth import (
     UserResponse, WorkspaceResponse
 )
 from app.services.auth_service import auth_service
-from app.middleware.auth_middleware import get_current_user, get_current_workspace
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, security
 from app.utils.slug import generate_unique_slug
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
@@ -349,6 +350,30 @@ class TokenRefreshRequest(BaseModel):
 class TokenRefreshResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+@router.post("/logout", response_model=MessageResponse)
+async def logout(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Logout the current user by revoking their JWT token.
+
+    Adds the token's JTI to a Redis blocklist until the token's natural
+    expiry time, so it is rejected on all subsequent requests.
+    """
+    token = credentials.credentials
+    payload = auth_service.decode_access_token(token)
+
+    if payload:
+        jti = payload.get("jti")
+        exp = payload.get("exp")
+        if jti and exp:
+            from app.services.token_blocklist import block_token
+            await block_token(jti, exp)
+
+    return MessageResponse(message="Logged out successfully")
 
 
 @router.post("/refresh", response_model=TokenRefreshResponse)
