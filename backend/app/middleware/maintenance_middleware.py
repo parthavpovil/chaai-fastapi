@@ -2,11 +2,14 @@
 Maintenance Mode Middleware
 Handles maintenance mode checking and admin access control
 """
+import logging
 from typing import Callable, Optional
 from fastapi import Request, Response, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
+logger = logging.getLogger(__name__)
 
 from app.database import get_db
 from app.models.platform_setting import PlatformSetting
@@ -60,7 +63,7 @@ class MaintenanceMode:
             return False, None
             
         except Exception as e:
-            print(f"Error checking maintenance mode: {e}")
+            logger.error(f"Error checking maintenance mode: {e}", exc_info=True)
             # Fail safe - assume not in maintenance mode
             return False, None
     
@@ -192,7 +195,7 @@ async def maintenance_mode_middleware(request: Request, call_next: Callable) -> 
                 await db.close()
                 
     except Exception as e:
-        print(f"Maintenance middleware error: {e}")
+        logger.error(f"Maintenance middleware error: {e}", exc_info=True)
         # On error, allow request to proceed
         return await call_next(request)
 
@@ -245,12 +248,12 @@ async def enable_maintenance_mode(
         
         await db.commit()
         
-        print(f"Maintenance mode enabled by {admin_email or 'system'}")
+        logger.info(f"Maintenance mode enabled by {admin_email or 'system'}")
         return True
-        
+
     except Exception as e:
         await db.rollback()
-        print(f"Failed to enable maintenance mode: {e}")
+        logger.error(f"Failed to enable maintenance mode: {e}", exc_info=True)
         return False
 
 
@@ -287,12 +290,12 @@ async def disable_maintenance_mode(
         
         await db.commit()
         
-        print(f"Maintenance mode disabled by {admin_email or 'system'}")
+        logger.info(f"Maintenance mode disabled by {admin_email or 'system'}")
         return True
-        
+
     except Exception as e:
         await db.rollback()
-        print(f"Failed to disable maintenance mode: {e}")
+        logger.error(f"Failed to disable maintenance mode: {e}", exc_info=True)
         return False
 
 

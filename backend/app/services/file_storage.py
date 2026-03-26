@@ -5,12 +5,15 @@ Provides secure, workspace-isolated file storage with concurrent access handling
 import os
 import uuid
 import fcntl
+import logging
 import mimetypes
 from typing import Optional, Tuple, BinaryIO, Dict, Any
 from pathlib import Path
 from contextlib import contextmanager
 import tempfile
 import shutil
+
+logger = logging.getLogger(__name__)
 
 from app.config import settings
 
@@ -398,12 +401,12 @@ class FileStorageService:
             file_deleted = self.delete_file(workspace_id, stored_filename)
             
             # Log cleanup action
-            print(f"Cleaned up partial file: {stored_filename} (deleted: {file_deleted})")
-            
+            logger.info(f"Cleaned up partial file: {stored_filename} (deleted: {file_deleted})")
+
             return True
-            
+
         except Exception as e:
-            print(f"Warning: Failed to cleanup partial file {stored_filename}: {e}")
+            logger.warning(f"Failed to cleanup partial file {stored_filename}: {e}")
             return False
     
     def file_exists(self, workspace_id: str, stored_filename: str) -> bool:

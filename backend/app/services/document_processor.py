@@ -4,9 +4,12 @@ Handles document upload, validation, text extraction, and chunking.
 All files are stored in Cloudflare R2 — no local filesystem writes.
 """
 import io
+import logging
 from typing import List, Dict, Any, Optional
 from pathlib import Path
 import PyPDF2
+
+logger = logging.getLogger(__name__)
 
 
 class DocumentProcessingError(Exception):
@@ -77,7 +80,7 @@ class DocumentProcessor:
                     if page_text and page_text.strip():
                         text_content.append(page_text)
                 except Exception as e:
-                    print(f"Warning: Failed to extract text from page {page_num + 1}: {e}")
+                    logger.warning(f"Failed to extract text from page {page_num + 1}: {e}")
                     continue
             if not text_content:
                 raise TextExtractionError("No text content found in PDF")
@@ -273,7 +276,7 @@ class DocumentProcessor:
             try:
                 delete_r2_object(file_url)
             except Exception as e:
-                print(f"Warning: Failed to delete R2 object {file_url}: {e}")
+                logger.warning(f"Failed to delete R2 object {file_url}: {e}")
 
         return True
 

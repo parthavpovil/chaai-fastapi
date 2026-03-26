@@ -112,11 +112,46 @@ async def _deliver(db: AsyncSession, webhook, event_type: str, payload: Dict[str
     await db.commit()
 
 
+async def _get_workspace_owner_email(db: AsyncSession, workspace_id) -> str | None:
+    """Return the email of the workspace owner, or None if not found."""
+    from app.models.user import User
+    from app.models.workspace import Workspace
+    result = await db.execute(
+        select(User.email)
+        .join(Workspace, Workspace.owner_id == User.id)
+        .where(Workspace.id == workspace_id)
+    )
+    return result.scalar_one_or_none()
+
+
 async def _record_failure(db: AsyncSession, webhook) -> None:
     webhook.failure_count = (webhook.failure_count or 0) + 1
     if webhook.failure_count >= MAX_FAILURES_BEFORE_DISABLE:
         webhook.is_active = False
-        logger.warning(f"Outbound webhook {webhook.id} disabled after {webhook.failure_count} failures")
+        logger.warning(
+            "Outbound webhook %s disabled after %d consecutive failures",
+            webhook.id,
+            webhook.failure_count,
+        )
+        # Notify workspace owner by email
+        try:
+            from app.services.email_service import EmailService
+            email_svc = EmailService()
+            owner_email = await _get_workspace_owner_email(db, webhook.workspace_id)
+            if owner_email:
+                await email_svc.send_email(
+                    to=owner_email,
+                    subject="Outbound Webhook Auto-Disabled",
+                    body=(
+                        f"Your outbound webhook has been automatically disabled "
+                        f"after {webhook.failure_count} consecutive delivery failures.\n\n"
+                        f"URL: {webhook.url}\n\n"
+                        f"Please check that your endpoint is reachable and re-enable "
+                        f"the webhook from your workspace settings once the issue is resolved."
+                    ),
+                )
+        except Exception:
+            logger.warning("Failed to send webhook-disabled notification email", exc_info=True)
 
 
 def _sign(secret: str, body: bytes) -> str:

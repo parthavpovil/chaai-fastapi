@@ -6,8 +6,11 @@ The widget connects here to receive server-pushed events instead of polling.
 """
 import json
 import asyncio
+import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.database import get_db
 from app.services.websocket_manager import customer_websocket_manager
@@ -91,7 +94,7 @@ async def cleanup_stale_customer_connections():
                 max_idle_minutes=10
             )
             if count > 0:
-                print(f"Cleaned up {count} stale customer WebSocket connections")
+                logger.info(f"Cleaned up {count} stale customer WebSocket connections")
         except Exception as e:
-            print(f"Customer WS cleanup error: {e}")
+            logger.error(f"Customer WS cleanup error: {e}", exc_info=True)
         await asyncio.sleep(300)

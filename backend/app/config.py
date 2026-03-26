@@ -2,10 +2,13 @@
 Application Configuration
 Environment variables and settings management using Pydantic Settings
 """
+import logging
 import os
 from typing import List
 from pydantic import Field
 from pydantic_settings import BaseSettings
+
+_config_logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -13,7 +16,7 @@ class Settings(BaseSettings):
     
     # Application
     DEBUG: bool = Field(default=False, description="Enable debug mode")
-    APP_URL: str = Field(default="http://localhost:8000", description="Application base URL")
+    APP_URL: str = Field(default="http://localhost:8000", description="Public application base URL — MUST be set via APP_URL env var in production")
     ALLOWED_ORIGINS: List[str] = Field(
         default=["http://localhost:3000", "http://localhost:5173"],
         description="CORS allowed origins"
@@ -67,7 +70,7 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = Field(default="", description="Resend API key")
     RESEND_FROM_EMAIL: str = Field(
         default="alerts@yourdomain.com",
-        description="Default sender email address"
+        description="Sender email for transactional emails — MUST be set via RESEND_FROM_EMAIL env var in production"
     )
     RESEND_WEBHOOK_SECRET: str = Field(default="", description="Resend webhook signing secret")
     
@@ -101,7 +104,7 @@ class Settings(BaseSettings):
     R2_ACCESS_KEY_ID: str = Field(default="", description="R2 API access key ID")
     R2_SECRET_ACCESS_KEY: str = Field(default="", description="R2 API secret access key")
     R2_BUCKET_NAME: str = Field(default="chaai-media", description="R2 bucket name")
-    R2_PUBLIC_DOMAIN: str = Field(default="media.yourdomain.com", description="R2 public domain or custom domain")
+    R2_PUBLIC_DOMAIN: str = Field(default="media.yourdomain.com", description="R2 public CDN domain — MUST be set via R2_PUBLIC_DOMAIN env var in production")
 
     # Redis (for broadcast queue)
     REDIS_URL: str = Field(default="redis://localhost:6379/0", description="Redis connection URL")
@@ -109,7 +112,7 @@ class Settings(BaseSettings):
     # Administration
     SUPER_ADMIN_EMAIL: str = Field(
         default="admin@yourdomain.com",
-        description="Super administrator email address"
+        description="Super administrator email address — MUST be set via SUPER_ADMIN_EMAIL env var in production"
     )
     
     class Config:
@@ -188,3 +191,18 @@ TIER_LIMITS = {
 
 # Global settings instance
 settings = Settings()
+
+# Warn at startup if placeholder values are still in use
+_PLACEHOLDER_CHECKS = [
+    ("APP_URL", settings.APP_URL, "http://localhost:8000"),
+    ("RESEND_FROM_EMAIL", settings.RESEND_FROM_EMAIL, "yourdomain.com"),
+    ("R2_PUBLIC_DOMAIN", settings.R2_PUBLIC_DOMAIN, "yourdomain.com"),
+    ("SUPER_ADMIN_EMAIL", settings.SUPER_ADMIN_EMAIL, "yourdomain.com"),
+]
+for _name, _value, _placeholder_hint in _PLACEHOLDER_CHECKS:
+    if _placeholder_hint in _value:
+        _config_logger.warning(
+            "Config %s is still set to a placeholder value ('%s'). "
+            "Set the %s environment variable before deploying to production.",
+            _name, _value, _name,
+        )

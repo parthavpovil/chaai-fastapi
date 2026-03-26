@@ -4,8 +4,11 @@ Unified interface for multiple AI providers (Google, OpenAI, Groq, Anthropic)
 """
 import os
 import json
+import logging
 from typing import Optional, Protocol, runtime_checkable, List, Dict, Any, Tuple
 from abc import ABC, abstractmethod
+
+logger = logging.getLogger(__name__)
 
 from app.config import settings
 
@@ -771,6 +774,6 @@ try:
     embedding_provider: AIProvider = get_embedding_provider()
 except Exception as e:
     # Log error but don't crash on startup - providers will be initialized on first use
-    print(f"Warning: Failed to initialize AI providers: {e}")
+    logger.warning(f"Failed to initialize AI providers: {e}")
     llm_provider = None
     embedding_provider = None

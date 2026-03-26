@@ -32,6 +32,8 @@ class Workspace(Base):
     escalation_keywords = Column(JSONB, nullable=True)  # None = use built-in defaults
     escalation_sensitivity = Column(String, nullable=False, default="medium")
     escalation_email_enabled = Column(Boolean, nullable=False, default=True)
+    escalation_message_with_agents = Column(Text, nullable=True)    # custom acknowledgment when agents available
+    escalation_message_without_agents = Column(Text, nullable=True) # custom acknowledgment when no agents
     razorpay_customer_id = Column(String, nullable=True)
     razorpay_subscription_id = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
@@ -57,6 +59,7 @@ class Workspace(Base):
     whatsapp_templates = relationship("WhatsAppTemplate", back_populates="workspace", cascade="all, delete-orphan")
     broadcasts = relationship("Broadcast", back_populates="workspace", cascade="all, delete-orphan")
     ai_agents = relationship("AIAgent", back_populates="workspace", cascade="all, delete-orphan")
+    email_logs = relationship("EmailLog", back_populates="workspace", cascade="all, delete-orphan")
 
     def __repr__(self) -> str:
         return f"<Workspace(id={self.id}, name='{self.name}', slug='{self.slug}')>"

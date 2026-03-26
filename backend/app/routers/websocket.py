@@ -4,11 +4,14 @@ Handles WebSocket connections with JWT authentication and message routing
 """
 import json
 import asyncio
+import logging
 from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
+
+logger = logging.getLogger(__name__)
 from app.middleware.auth_middleware import get_current_user, get_current_workspace
 from app.models.user import User
 from app.models.workspace import Workspace
@@ -71,7 +74,7 @@ async def websocket_endpoint(
             return
         
         # Connection established successfully
-        print(f"WebSocket connection established: {connection.connection_id}")
+        logger.info(f"WebSocket connection established: {connection.connection_id}")
         
         # Message handling loop
         while True:
@@ -93,10 +96,10 @@ async def websocket_endpoint(
                 await handle_websocket_message(connection, message, db)
                 
             except WebSocketDisconnect:
-                print(f"WebSocket client disconnected: {connection.connection_id}")
+                logger.info(f"WebSocket client disconnected: {connection.connection_id}")
                 break
             except Exception as e:
-                print(f"Error handling WebSocket message: {e}")
+                logger.error(f"Error handling WebSocket message: {e}", exc_info=True)
                 try:
                     await connection.send_message({
                         "type": "error",
@@ -106,8 +109,8 @@ async def websocket_endpoint(
                     break
     
     except Exception as e:
-        print(f"WebSocket connection error: {e}")
-    
+        logger.error(f"WebSocket connection error: {e}", exc_info=True)
+
     finally:
         # Clean up connection
         if connection:
@@ -451,9 +454,9 @@ async def cleanup_stale_connections():
         try:
             cleanup_count = await websocket_manager.cleanup_stale_connections(max_idle_minutes=30)
             if cleanup_count > 0:
-                print(f"Cleaned up {cleanup_count} stale WebSocket connections")
+                logger.info(f"Cleaned up {cleanup_count} stale WebSocket connections")
         except Exception as e:
-            print(f"Error during WebSocket cleanup: {e}")
+            logger.error(f"Error during WebSocket cleanup: {e}", exc_info=True)
         
         # Wait 5 minutes before next cleanup
         await asyncio.sleep(300)

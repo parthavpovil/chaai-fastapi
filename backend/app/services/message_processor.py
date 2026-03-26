@@ -2,10 +2,13 @@
 Message Processing Core System
 Handles message deduplication, maintenance mode checking, and processing pipeline
 """
+import logging
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+
+logger = logging.getLogger(__name__)
 
 from app.models.workspace import Workspace
 from app.models.channel import Channel
@@ -273,7 +276,7 @@ class MessageProcessor:
                 }
             ))
         except Exception:
-            pass
+            logger.warning("Failed to schedule outbound webhook for conversation.created", exc_info=True)
 
         return conversation
 
@@ -522,7 +525,7 @@ class MessageProcessor:
         except (ImportError, OutsideBusinessHoursError):
             raise
         except Exception:
-            pass  # business_hours_service not yet configured — skip silently
+            logger.warning("Business hours check skipped due to unexpected error", exc_info=True)
 
         # 6. If media message, download and store before creating DB record
         media_url = None
@@ -551,7 +554,7 @@ class MessageProcessor:
                         if not media_filename:
                             media_filename = stored.get("filename")
             except Exception:
-                pass  # store without media URL if download fails
+                logger.warning("WhatsApp media download failed — storing message without media URL", exc_info=True)
 
         # 7. Create message
         message = await self.create_message(

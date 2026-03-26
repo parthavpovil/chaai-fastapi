@@ -2,9 +2,12 @@
 WebSocket Event Broadcasting Service
 Handles real-time event broadcasting with workspace isolation
 """
+import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.services.websocket_manager import websocket_manager
 from app.models.conversation import Conversation
@@ -551,7 +554,7 @@ async def notify_customer_new_message(
             workspace_id, session_token, event
         )
     except Exception as e:
-        print(f"notify_customer_new_message error: {e}")
+        logger.error(f"notify_customer_new_message error: {e}", exc_info=True)
         return False
 
 
@@ -579,7 +582,7 @@ async def notify_customer_status_change(
             workspace_id, session_token, event
         )
     except Exception as e:
-        print(f"notify_customer_status_change error: {e}")
+        logger.error(f"notify_customer_status_change error: {e}", exc_info=True)
         return False
 
 
@@ -605,5 +608,5 @@ async def notify_customer_csat_prompt(
             workspace_id, session_token, event
         )
     except Exception as e:
-        print(f"notify_customer_csat_prompt error: {e}")
+        logger.error(f"notify_customer_csat_prompt error: {e}", exc_info=True)
         return False

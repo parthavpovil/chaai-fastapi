@@ -2,10 +2,13 @@
 Escalation Workflow Routing Service
 Handles escalation workflow, agent notifications, and customer acknowledgments
 """
+import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
+
+logger = logging.getLogger(__name__)
 
 from app.models.workspace import Workspace
 from app.models.conversation import Conversation
@@ -124,20 +127,34 @@ class EscalationRouter:
         Returns:
             Created acknowledgment message
         """
+        # Fetch workspace to use custom messages if configured
+        ws_result = await self.db.execute(
+            select(Workspace).where(Workspace.id == workspace_id)
+        )
+        ws = ws_result.scalar_one_or_none()
+
+        default_with_agents = (
+            "Thank you for your message. I've escalated your request to one of our "
+            "human agents who will assist you shortly. Please wait for their response."
+        )
+        default_without_agents = (
+            "Thank you for your message. I've forwarded your request to our support team. "
+            "Someone will get back to you as soon as possible via email or through this chat."
+        )
+
         if has_agents:
             content = (
-                "Thank you for your message. I've escalated your request to one of our "
-                "human agents who will assist you shortly. Please wait for their response."
+                ws.escalation_message_with_agents
+                if ws and ws.escalation_message_with_agents
+                else default_with_agents
             )
         else:
             content = (
-                "Thank you for your message. I've forwarded your request to our support team. "
-                "Someone will get back to you as soon as possible via email or through this chat."
+                ws.escalation_message_without_agents
+                if ws and ws.escalation_message_without_agents
+                else default_without_agents
             )
-        
-        # TODO: Allow workspace-specific escalation messages
-        # This could be added to workspace settings in the future
-        
+
         message = Message(
             conversation_id=conversation_id,
             content=content,
@@ -185,11 +202,11 @@ class EscalationRouter:
                 classification_data=escalation_data.get("classification")
             )
             
-            print(f"WebSocket escalation notification sent to {connections_notified} connections")
+            logger.info("WebSocket escalation notification sent to %d connections", connections_notified)
             return connections_notified > 0
-            
-        except Exception as e:
-            print(f"WebSocket escalation notification failed: {e}")
+
+        except Exception:
+            logger.warning("WebSocket escalation notification failed", exc_info=True)
             return False
     
     async def send_email_alert(
@@ -227,14 +244,14 @@ class EscalationRouter:
             )
             
             if success:
-                print(f"Escalation email alert sent to {owner_email}")
+                logger.info("Escalation email alert sent to %s", owner_email)
             else:
-                print(f"Failed to send escalation email alert to {owner_email}")
-            
+                logger.warning("Escalation email alert delivery failed for %s", owner_email)
+
             return success
-            
-        except Exception as e:
-            print(f"Email escalation alert failed: {e}")
+
+        except Exception:
+            logger.error("Email escalation alert raised an exception", exc_info=True)
             return False
     
     async def process_escalation(
@@ -321,8 +338,8 @@ class EscalationRouter:
                     notifications_sent = await self.notify_agents_via_websocket(
                         workspace_id, conversation_id, escalation_data
                     )
-                except Exception as e:
-                    print(f"WebSocket notification failed: {e}")
+                except Exception:
+                    logger.warning("WebSocket agent notification failed", exc_info=True)
                     notifications_sent = False
             else:
                 # Send email alert to workspace owner (only if enabled in workspace settings)
@@ -338,8 +355,8 @@ class EscalationRouter:
                             email_sent = await self.send_email_alert(
                                 workspace_id, owner_email, conversation_id, escalation_data
                             )
-                        except Exception as e:
-                            print(f"Email alert failed: {e}")
+                        except Exception:
+                            logger.error("Email alert failed during process_escalation", exc_info=True)
                             email_sent = False
             
             result = {
@@ -374,7 +391,7 @@ class EscalationRouter:
                     }
                 ))
             except Exception:
-                pass
+                logger.warning("Failed to schedule outbound webhook for conversation.escalated", exc_info=True)
 
             # Push escalation status to customer WS if this is a webchat conversation
             try:
@@ -396,7 +413,7 @@ class EscalationRouter:
                         new_status="escalated",
                     )
             except Exception:
-                pass
+                logger.warning("Failed to send WebSocket escalation status to customer", exc_info=True)
 
             return result
             
@@ -462,8 +479,8 @@ class EscalationRouter:
                 priority=priority
             )
             
-        except Exception as e:
-            print(f"Warning: Auto-escalation failed: {e}")
+        except Exception:
+            logger.warning("Auto-escalation failed unexpectedly", exc_info=True)
             return None
     
     async def get_escalated_conversations(

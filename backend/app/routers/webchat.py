@@ -2,8 +2,11 @@
 WebChat Public API Router
 Public endpoints for website chat widget functionality
 """
+import logging
 import mimetypes
 from typing import List, Optional, Dict, Any
+
+logger = logging.getLogger(__name__)
 from uuid import UUID
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, Form, File, UploadFile
@@ -487,7 +490,7 @@ async def send_webchat_message(
                         )
                     
                 except Exception as e:
-                    print(f"RAG response generation failed: {e}")
+                    logger.error(f"RAG response generation failed: {e}", exc_info=True)
                     # Use fallback response
                     response_content = "I'm sorry, I'm having trouble processing your request right now. Please try again later."
             else:
@@ -525,7 +528,7 @@ async def send_webchat_message(
                 raise HTTPException(status_code=400, detail=str(e))
         
         except Exception as e:
-            print(f"WebChat message processing failed: {e}")
+            logger.error(f"WebChat message processing failed: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail="Failed to process message")
         
         return WebChatSendResponse(

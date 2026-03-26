@@ -3,9 +3,12 @@ Escalation Classification Service
 LLM-based escalation detection with keyword matching and confidence scoring
 """
 import re
+import logging
 from typing import Dict, Any, List, Optional, Tuple
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.services.ai_provider import llm_provider, AIProviderError
 from app.models.message import Message
@@ -223,7 +226,7 @@ class EscalationClassifier:
                 try:
                     llm_result = await self.classify_with_llm(message, conversation_context)
                 except EscalationError as e:
-                    print(f"Warning: LLM classification failed, using keywords only: {e}")
+                    logger.warning(f"LLM classification failed, using keywords only: {e}")
             
             # 4. Combine results
             if llm_result:
@@ -316,7 +319,7 @@ class EscalationClassifier:
             return context
             
         except Exception as e:
-            print(f"Warning: Failed to get conversation context: {e}")
+            logger.warning(f"Failed to get conversation context: {e}")
             return []
     
     def get_escalation_priority(self, classification: Dict[str, Any]) -> str:

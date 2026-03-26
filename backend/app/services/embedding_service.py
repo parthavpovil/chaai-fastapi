@@ -2,9 +2,12 @@
 Embedding Generation and Storage Service
 Handles document chunk embedding generation and vector storage
 """
+import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 
@@ -247,7 +250,7 @@ class EmbeddingService:
                         pass
 
             except Exception as cleanup_error:
-                print(f"Warning: Cleanup failed after processing error: {cleanup_error}")
+                logger.warning(f"Cleanup failed after processing error: {cleanup_error}")
 
             raise EmbeddingError(f"Document embedding processing failed: {str(e)}")
     
@@ -273,7 +276,7 @@ class EmbeddingService:
             
         except Exception as e:
             await self.db.rollback()
-            print(f"Warning: Failed to cleanup failed document processing: {e}")
+            logger.warning(f"Failed to cleanup failed document processing: {e}")
     
     async def get_document_with_chunks(
         self,
@@ -334,7 +337,7 @@ class EmbeddingService:
                     from app.services.r2_storage import delete_r2_object
                     delete_r2_object(file_url)
                 except Exception as e:
-                    print(f"Warning: Failed to delete R2 object {file_url}: {e}")
+                    logger.warning(f"Failed to delete R2 object {file_url}: {e}")
 
             return True
 

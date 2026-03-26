@@ -2,10 +2,13 @@
 Agent Management Service
 Handles agent invitations, acceptance, and lifecycle management
 """
+import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
+
+logger = logging.getLogger(__name__)
 
 from app.models.workspace import Workspace
 from app.models.agent import Agent
@@ -274,7 +277,7 @@ class AgentManager:
                     agent_id=None
                 )
             except Exception as e:
-                print(f"Warning: Failed to send WebSocket notification for conversation {conversation_id}: {e}")
+                logger.warning(f"Failed to send WebSocket notification for conversation {conversation_id}: {e}")
     
     async def get_workspace_agents(
         self,

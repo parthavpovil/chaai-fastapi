@@ -26,6 +26,7 @@ from .business_hours import BusinessHours
 from .flow import Flow, ConversationFlowState
 from .whatsapp_template import WhatsAppTemplate
 from .broadcast import Broadcast, BroadcastRecipient
+from .email_log import EmailLog
 
 __all__ = [
     "User",
@@ -55,5 +56,5 @@ __all__ = [
     "WhatsAppTemplate",
     "Broadcast",
     "BroadcastRecipient",
-
+    "EmailLog",
 ]

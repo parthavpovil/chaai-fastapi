@@ -4,6 +4,7 @@ Handles real-time WebSocket connections with workspace isolation and JWT authent
 """
 import json
 import asyncio
+import logging
 from typing import Dict, Set, List, Optional, Any
 from datetime import datetime, timezone
 from fastapi import WebSocket, WebSocketDisconnect
@@ -12,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.auth_service import AuthService
 from app.models.user import User
 from app.models.workspace import Workspace
+
+logger = logging.getLogger(__name__)
 
 
 class WebSocketConnectionError(Exception):
@@ -56,7 +59,7 @@ class WebSocketConnection:
             await self.websocket.send_text(json.dumps(message))
             return True
         except Exception as e:
-            print(f"Failed to send WebSocket message to {self.connection_id}: {e}")
+            logger.warning(f"Failed to send WebSocket message to {self.connection_id}: {e}")
             return False
     
     async def send_ping(self) -> bool:
@@ -161,7 +164,7 @@ class WebSocketManager:
             }
             
         except Exception as e:
-            print(f"WebSocket authentication failed: {e}")
+            logger.error(f"WebSocket authentication failed: {e}", exc_info=True)
             return None
     
     async def connect(
@@ -224,11 +227,11 @@ class WebSocketManager:
                 "connected_at": connection.connected_at.isoformat()
             })
             
-            print(f"WebSocket connected: {connection_id} for workspace {workspace_id}")
+            logger.info(f"WebSocket connected: {connection_id} for workspace {workspace_id}")
             return connection
-            
+
         except Exception as e:
-            print(f"WebSocket connection failed: {e}")
+            logger.error(f"WebSocket connection failed: {e}", exc_info=True)
             try:
                 await websocket.close(code=4000, reason="Connection failed")
             except:
@@ -268,7 +271,7 @@ class WebSocketManager:
             except:
                 pass
             
-            print(f"WebSocket disconnected: {connection_id}")
+            logger.info(f"WebSocket disconnected: {connection_id}")
             return True
     
     async def broadcast_to_workspace(
@@ -547,7 +550,7 @@ class CustomerWebSocketConnection:
             await self.websocket.send_text(json.dumps(message))
             return True
         except Exception as e:
-            print(f"Failed to send customer WS message to {self.connection_id}: {e}")
+            logger.warning(f"Failed to send customer WS message to {self.connection_id}: {e}")
             return False
 
     def update_last_ping(self):
@@ -593,7 +596,7 @@ class CustomerWebSocketManager:
                 "channel_id": str(channel.id),
             }
         except Exception as e:
-            print(f"Customer WS authentication failed: {e}")
+            logger.error(f"Customer WS authentication failed: {e}", exc_info=True)
             return None
 
     async def connect(
@@ -650,11 +653,11 @@ class CustomerWebSocketManager:
                 "connected_at": connection.connected_at.isoformat(),
             })
 
-            print(f"Customer WS connected: {connection_id} (workspace={workspace_id})")
+            logger.info(f"Customer WS connected: {connection_id} (workspace={workspace_id})")
             return connection
 
         except Exception as e:
-            print(f"Customer WS connection failed: {e}")
+            logger.error(f"Customer WS connection failed: {e}", exc_info=True)
             try:
                 await websocket.close(code=4000, reason="Connection failed")
             except Exception:
@@ -686,7 +689,7 @@ class CustomerWebSocketManager:
             except Exception:
                 pass
 
-            print(f"Customer WS disconnected: {connection_id}")
+            logger.info(f"Customer WS disconnected: {connection_id}")
             return True
 
     async def send_to_session(
@@ -710,7 +713,7 @@ class CustomerWebSocketManager:
                 await self.disconnect(connection.connection_id)
             return success
         except Exception as e:
-            print(f"customer send_to_session error: {e}")
+            logger.error(f"customer send_to_session error: {e}", exc_info=True)
             return False
 
     async def handle_ping(self, connection_id: str) -> bool:

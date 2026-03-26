@@ -4,11 +4,14 @@ AES-256-CBC encryption for channel credentials and sensitive data
 """
 import os
 import base64
+import logging
 from typing import Optional
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 from cryptography.hazmat.primitives import padding, hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from cryptography.hazmat.backends import default_backend
+
+logger = logging.getLogger(__name__)
 
 from app.config import settings
 
@@ -126,7 +129,7 @@ try:
     encryption_service = EncryptionService()
 except Exception as e:
     # Log error but don't crash on startup
-    print(f"Warning: Failed to initialize encryption service: {e}")
+    logger.warning(f"Failed to initialize encryption service: {e}")
     encryption_service = None
 
 

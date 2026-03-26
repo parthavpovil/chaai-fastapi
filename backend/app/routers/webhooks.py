@@ -25,10 +25,11 @@ async def resend_webhook(
     svix_id: Optional[str] = Header(None),
     svix_timestamp: Optional[str] = Header(None),
     svix_signature: Optional[str] = Header(None),
+    db: AsyncSession = Depends(get_db),
 ):
     """
     Handle Resend email webhooks
-    
+
     Events:
     - email.sent: Email was accepted by Resend
     - email.delivered: Email was successfully delivered
@@ -40,48 +41,47 @@ async def resend_webhook(
     """
     # Get raw body for signature verification
     body = await request.body()
-    
+
     # Verify webhook signature if secret is configured
     if settings.RESEND_WEBHOOK_SECRET:
         if not svix_signature:
             raise HTTPException(status_code=401, detail="Missing signature")
-        
-        # Verify signature
+
         if not verify_resend_signature(
             body=body,
             signature=svix_signature,
             timestamp=svix_timestamp,
-            secret=settings.RESEND_WEBHOOK_SECRET
+            secret=settings.RESEND_WEBHOOK_SECRET,
         ):
             raise HTTPException(status_code=401, detail="Invalid signature")
-    
+
     # Parse event
     try:
         event = json.loads(body)
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
-    
+
     event_type = event.get("type")
     data = event.get("data", {})
-    
+
     # Handle different event types
     if event_type == "email.sent":
-        await handle_email_sent(data)
+        await handle_email_sent(data, db)
     elif event_type == "email.delivered":
-        await handle_email_delivered(data)
+        await handle_email_delivered(data, db)
     elif event_type == "email.delivery_delayed":
-        await handle_email_delayed(data)
+        await handle_email_delayed(data, db)
     elif event_type == "email.complained":
-        await handle_email_complained(data)
+        await handle_email_complained(data, db)
     elif event_type == "email.bounced":
-        await handle_email_bounced(data)
+        await handle_email_bounced(data, db)
     elif event_type == "email.opened":
-        await handle_email_opened(data)
+        await handle_email_opened(data, db)
     elif event_type == "email.clicked":
-        await handle_email_clicked(data)
+        await handle_email_clicked(data, db)
     else:
-        print(f"Unknown event type: {event_type}")
-    
+        logger.warning("Resend webhook received unknown event type: %s", event_type)
+
     return {"status": "ok"}
 
 
@@ -129,89 +129,100 @@ def verify_resend_signature(
         return hmac.compare_digest(computed_sig, expected_sig)
         
     except Exception as e:
-        print(f"Signature verification error: {e}")
+        logger.error("Resend signature verification error: %s", e)
         return False
 
 
-async def handle_email_sent(data: dict):
-    """Handle email.sent event"""
+async def _persist_email_log(
+    db: AsyncSession,
+    event_type: str,
+    data: dict,
+) -> None:
+    """Create an EmailLog row and commit it."""
+    from app.models.email_log import EmailLog
+    from uuid import uuid4
+
+    email_id = data.get("email_id") or data.get("id") or str(uuid4())
+    recipient = data.get("to")
+    if isinstance(recipient, list):
+        recipient = ", ".join(recipient)
+    subject = data.get("subject")
+
+    log_entry = EmailLog(
+        email_id=email_id,
+        event_type=event_type,
+        recipient=recipient,
+        subject=subject,
+        extra_data=data,
+    )
+    db.add(log_entry)
+    await db.commit()
+
+
+async def handle_email_sent(data: dict, db: AsyncSession) -> None:
+    """Handle email.sent event — email accepted by Resend."""
     email_id = data.get("email_id")
     to = data.get("to")
     subject = data.get("subject")
-    
-    print(f"📤 Email sent: {email_id} to {to} - {subject}")
-    
-    # TODO: Update email status in database
-    # await update_email_status(email_id, "sent")
+    logger.info("Email sent: email_id=%s to=%s subject=%s", email_id, to, subject)
+    await _persist_email_log(db, "sent", data)
 
 
-async def handle_email_delivered(data: dict):
-    """Handle email.delivered event"""
+async def handle_email_delivered(data: dict, db: AsyncSession) -> None:
+    """Handle email.delivered event — successfully delivered to recipient."""
     email_id = data.get("email_id")
     to = data.get("to")
-    
-    print(f"✅ Email delivered: {email_id} to {to}")
-    
-    # TODO: Update email status in database
-    # await update_email_status(email_id, "delivered")
+    logger.info("Email delivered: email_id=%s to=%s", email_id, to)
+    await _persist_email_log(db, "delivered", data)
 
 
-async def handle_email_delayed(data: dict):
-    """Handle email.delivery_delayed event"""
+async def handle_email_delayed(data: dict, db: AsyncSession) -> None:
+    """Handle email.delivery_delayed event."""
     email_id = data.get("email_id")
     to = data.get("to")
-    
-    print(f"⏳ Email delayed: {email_id} to {to}")
-    
-    # TODO: Update email status in database
-    # await update_email_status(email_id, "delayed")
+    logger.warning("Email delivery delayed: email_id=%s to=%s", email_id, to)
+    await _persist_email_log(db, "delayed", data)
 
 
-async def handle_email_complained(data: dict):
-    """Handle email.complained event (marked as spam)"""
+async def handle_email_complained(data: dict, db: AsyncSession) -> None:
+    """Handle email.complained event — recipient marked email as spam."""
     email_id = data.get("email_id")
     to = data.get("to")
-    
-    print(f"⚠️ Email complained: {email_id} from {to}")
-    
-    # TODO: Mark user as unsubscribed or handle complaint
-    # await handle_spam_complaint(to)
+    logger.warning("Spam complaint received: email_id=%s from=%s", email_id, to)
+    await _persist_email_log(db, "complained", data)
 
 
-async def handle_email_bounced(data: dict):
-    """Handle email.bounced event"""
+async def handle_email_bounced(data: dict, db: AsyncSession) -> None:
+    """Handle email.bounced event — hard bounces indicate an invalid address."""
     email_id = data.get("email_id")
     to = data.get("to")
     bounce_type = data.get("bounce_type")  # "hard" or "soft"
-    
-    print(f"❌ Email bounced ({bounce_type}): {email_id} to {to}")
-    
-    # TODO: Handle bounce (mark email as invalid if hard bounce)
-    # if bounce_type == "hard":
-    #     await mark_email_invalid(to)
+    if bounce_type == "hard":
+        logger.warning(
+            "Hard bounce received — address may be invalid: email_id=%s to=%s",
+            email_id,
+            to,
+        )
+    else:
+        logger.info("Soft bounce received: email_id=%s to=%s bounce_type=%s", email_id, to, bounce_type)
+    await _persist_email_log(db, "bounced", data)
 
 
-async def handle_email_opened(data: dict):
-    """Handle email.opened event"""
+async def handle_email_opened(data: dict, db: AsyncSession) -> None:
+    """Handle email.opened event."""
     email_id = data.get("email_id")
     to = data.get("to")
-    
-    print(f"👁️ Email opened: {email_id} by {to}")
-    
-    # TODO: Track email open
-    # await track_email_open(email_id)
+    logger.info("Email opened: email_id=%s by=%s", email_id, to)
+    await _persist_email_log(db, "opened", data)
 
 
-async def handle_email_clicked(data: dict):
-    """Handle email.clicked event"""
+async def handle_email_clicked(data: dict, db: AsyncSession) -> None:
+    """Handle email.clicked event."""
     email_id = data.get("email_id")
     to = data.get("to")
     link = data.get("link")
-
-    print(f"🔗 Email link clicked: {email_id} by {to} - {link}")
-
-    # TODO: Track email click
-    # await track_email_click(email_id, link)
+    logger.info("Email link clicked: email_id=%s by=%s link=%s", email_id, to, link)
+    await _persist_email_log(db, "clicked", data)
 
 
 # ─── Razorpay Webhook ─────────────────────────────────────────────────────────
