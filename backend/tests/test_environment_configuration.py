@@ -568,7 +568,12 @@ class TestConfigurationEdgeCases:
             # Verify all defaults are applied
             assert settings.DEBUG is False
             assert settings.APP_URL == "http://localhost:8000"
-            assert settings.ALLOWED_ORIGINS == ["http://localhost:3000", "http://localhost:5173"]
+            assert settings.ALLOWED_ORIGINS == [
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "http://localhost:8080",
+                "https://chatsaas.vercel.app",
+            ]
             assert settings.DATABASE_URL == "postgresql+asyncpg://postgres:password@localhost:5432/chatsaas"
             assert settings.JWT_ALGORITHM == "HS256"
             assert settings.JWT_EXPIRE_MINUTES == 10080

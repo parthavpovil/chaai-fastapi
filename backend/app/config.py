@@ -18,7 +18,12 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=False, description="Enable debug mode")
     APP_URL: str = Field(default="http://localhost:8000", description="Public application base URL — MUST be set via APP_URL env var in production")
     ALLOWED_ORIGINS: List[str] = Field(
-        default=["http://localhost:3000", "http://localhost:5173", "http://localhost:8080"],
+        default=[
+            "http://localhost:3000",
+            "http://localhost:5173",
+            "http://localhost:8080",
+            "https://chatsaas.vercel.app",
+        ],
         description="CORS allowed origins"
     )
     
