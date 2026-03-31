@@ -6,6 +6,7 @@ import uuid
 import aiohttp
 from typing import Dict, Any, Optional, Tuple
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from app.config import settings
 
@@ -89,7 +90,21 @@ class ChannelValidator:
         if not bot_token or not bot_token.strip():
             raise ChannelValidationError("Bot token is required for webhook registration")
 
-        webhook_url = f"{settings.APP_URL.rstrip('/')}/webhooks/telegram/{bot_token}"
+        app_url = settings.APP_URL.rstrip("/")
+        parsed_app_url = urlparse(app_url)
+        if parsed_app_url.scheme.lower() != "https":
+            raise ChannelValidationError(
+                "Invalid APP_URL for Telegram webhook. "
+                "Set APP_URL to a public HTTPS URL (example: https://api.example.com)."
+            )
+
+        if not parsed_app_url.netloc:
+            raise ChannelValidationError(
+                "Invalid APP_URL for Telegram webhook. "
+                "APP_URL must include a valid host, e.g. https://api.example.com"
+            )
+
+        webhook_url = f"{app_url}/webhooks/telegram/{bot_token}"
         telegram_url = f"https://api.telegram.org/bot{bot_token}/setWebhook"
 
         payload: Dict[str, Any] = {"url": webhook_url}
