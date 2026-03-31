@@ -15,7 +15,7 @@ from app.models.workspace import Workspace
 from app.models.channel import Channel
 from app.services.channel_validator import ChannelValidator, ChannelValidationError
 from app.services.tier_manager import TierManager, TierLimitError
-from app.services.encryption import encrypt_credential
+from app.services.encryption import encrypt_credential, decrypt_credential
 
 
 router = APIRouter(prefix="/api/channels", tags=["channels"])
@@ -134,6 +134,17 @@ async def create_channel(
         db.add(channel)
         await db.commit()
         await db.refresh(channel)
+
+        # Telegram channels must auto-register webhook after successful creation.
+        if request.channel_type == "telegram" and request.is_active:
+            bot_token = request.credentials.get("bot_token")
+            try:
+                await validator.register_telegram_webhook(bot_token)
+            except ChannelValidationError:
+                # Compensating action: remove partially created channel if webhook setup fails.
+                await db.delete(channel)
+                await db.commit()
+                raise
         
         return ChannelResponse(
             id=str(channel.id),
@@ -304,10 +315,25 @@ async def update_channel(
                 detail="Channel not found"
             )
         
+        # Track old state so we can trigger side effects on activation.
+        old_is_active = channel.is_active
+
         # Update fields
         if request.is_active is not None:
             channel.is_active = request.is_active
         # Note: name is not stored in the simple Channel model
+
+        # Re-activate Telegram webhook when channel transitions to active.
+        if channel.type == "telegram" and request.is_active is True and not old_is_active:
+            validator = ChannelValidator()
+            encrypted_token = (channel.config or {}).get("bot_token")
+            if not encrypted_token:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Telegram channel is missing bot_token configuration"
+                )
+            bot_token = decrypt_credential(encrypted_token)
+            await validator.register_telegram_webhook(bot_token)
         
         await db.commit()
         await db.refresh(channel)

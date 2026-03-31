@@ -72,6 +72,56 @@ class ChannelValidator:
             if isinstance(e, ChannelValidationError):
                 raise
             raise ChannelValidationError(f"Telegram validation failed: {str(e)}")
+
+    async def register_telegram_webhook(self, bot_token: str) -> Dict[str, Any]:
+        """
+        Register Telegram webhook for the provided bot token.
+
+        Args:
+            bot_token: Telegram bot token
+
+        Returns:
+            Telegram API response payload
+
+        Raises:
+            ChannelValidationError: If webhook registration fails
+        """
+        if not bot_token or not bot_token.strip():
+            raise ChannelValidationError("Bot token is required for webhook registration")
+
+        webhook_url = f"{settings.APP_URL.rstrip('/')}/webhooks/telegram/{bot_token}"
+        telegram_url = f"https://api.telegram.org/bot{bot_token}/setWebhook"
+
+        payload: Dict[str, Any] = {"url": webhook_url}
+        if settings.TELEGRAM_SECRET_TOKEN:
+            payload["secret_token"] = settings.TELEGRAM_SECRET_TOKEN
+
+        try:
+            async with aiohttp.ClientSession(timeout=self.session_timeout) as session:
+                async with session.post(telegram_url, json=payload) as response:
+                    if response.status != 200:
+                        raise ChannelValidationError(
+                            f"Telegram setWebhook failed with HTTP {response.status}"
+                        )
+
+                    data = await response.json()
+                    if not data.get("ok"):
+                        error_desc = data.get("description", "Unknown error")
+                        raise ChannelValidationError(
+                            f"Telegram setWebhook error: {error_desc}"
+                        )
+
+                    return data
+        except aiohttp.ClientError as e:
+            raise ChannelValidationError(
+                f"Network error registering Telegram webhook: {str(e)}"
+            )
+        except Exception as e:
+            if isinstance(e, ChannelValidationError):
+                raise
+            raise ChannelValidationError(
+                f"Telegram webhook registration failed: {str(e)}"
+            )
     
     async def validate_whatsapp_credentials(
         self, 
