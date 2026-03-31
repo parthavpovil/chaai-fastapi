@@ -363,6 +363,7 @@ async def _run_message_pipeline(
     _ai_mode = (_workspace.meta or {}).get("ai_mode", "rag") if _workspace else "rag"
 
     if _ai_mode == "ai_agent":
+        agent_reply_text = None
         try:
             from app.services.ai_agent_runner import ai_agent_runner
             from app.services.websocket_events import notify_new_message
@@ -376,6 +377,7 @@ async def _run_message_pipeline(
                 channel_id=channel_id,
             )
             if agent_result.handled:
+                agent_reply_text = agent_result.reply
                 processor = MessageProcessor(db)
                 ai_msg = await processor.create_message(
                     conversation_id=conversation_id,
@@ -390,22 +392,24 @@ async def _run_message_pipeline(
                     conversation_id=conversation_id,
                     message_id=str(ai_msg.id),
                 )
-                if channel_type == "telegram" and telegram_context and agent_result.reply:
-                    from app.services.telegram_sender import send_telegram_message
-                    sent = await send_telegram_message(
-                        bot_token=telegram_context["bot_token"],
-                        chat_id=telegram_context["chat_id"],
-                        text=agent_result.reply,
-                    )
-                    if not sent:
-                        logger.error(
-                            "Failed to deliver AI agent reply to Telegram for conversation_id=%s chat_id=%s",
-                            conversation_id,
-                            telegram_context["chat_id"],
-                        )
-                return
         except Exception as e:
             logger.error(f"AI agent runner error for conversation {conversation_id}: {e}")
+
+        if agent_reply_text is not None:
+            if channel_type == "telegram" and telegram_context and agent_reply_text:
+                from app.services.telegram_sender import send_telegram_message
+                sent = await send_telegram_message(
+                    bot_token=telegram_context["bot_token"],
+                    chat_id=telegram_context["chat_id"],
+                    text=agent_reply_text,
+                )
+                if not sent:
+                    logger.error(
+                        "Failed to deliver AI agent reply to Telegram for conversation_id=%s chat_id=%s",
+                        conversation_id,
+                        telegram_context["chat_id"],
+                    )
+            return
 
     escalation_result = await check_and_escalate_message(
         db=db,
@@ -415,6 +419,7 @@ async def _run_message_pipeline(
     )
 
     if not escalation_result:
+        rag_response_text = None
         try:
             rag_result = await generate_rag_response(
                 db=db,
@@ -423,11 +428,12 @@ async def _run_message_pipeline(
                 conversation_id=conversation_id,
                 max_tokens=300
             )
+            rag_response_text = rag_result.get("response")
 
             processor = MessageProcessor(db)
             await processor.create_message(
                 conversation_id=conversation_id,
-                content=rag_result["response"],
+                content=rag_response_text,
                 role="assistant",
                 channel_type=channel_type,
                 metadata={
@@ -450,22 +456,22 @@ async def _run_message_pipeline(
                 conversation_id=conversation_id,
                 message_id=user_message_id
             )
-
-            if channel_type == "telegram" and telegram_context and rag_result.get("response"):
-                from app.services.telegram_sender import send_telegram_message
-                sent = await send_telegram_message(
-                    bot_token=telegram_context["bot_token"],
-                    chat_id=telegram_context["chat_id"],
-                    text=rag_result["response"],
-                )
-                if not sent:
-                    logger.error(
-                        "Failed to deliver RAG reply to Telegram for conversation_id=%s chat_id=%s",
-                        conversation_id,
-                        telegram_context["chat_id"],
-                    )
         except Exception as e:
             logger.error(f"RAG response failed for {channel_type} conversation {conversation_id}: {e}")
+
+        if channel_type == "telegram" and telegram_context and rag_response_text:
+            from app.services.telegram_sender import send_telegram_message
+            sent = await send_telegram_message(
+                bot_token=telegram_context["bot_token"],
+                chat_id=telegram_context["chat_id"],
+                text=rag_response_text,
+            )
+            if not sent:
+                logger.error(
+                    "Failed to deliver RAG reply to Telegram for conversation_id=%s chat_id=%s",
+                    conversation_id,
+                    telegram_context["chat_id"],
+                )
 
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
