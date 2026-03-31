@@ -100,8 +100,16 @@ class ChannelValidator:
             async with aiohttp.ClientSession(timeout=self.session_timeout) as session:
                 async with session.post(telegram_url, json=payload) as response:
                     if response.status != 200:
+                        error_body = await response.text()
+                        error_detail = error_body
+                        try:
+                            error_json = await response.json(content_type=None)
+                            if isinstance(error_json, dict):
+                                error_detail = error_json.get("description") or str(error_json)
+                        except Exception:
+                            pass
                         raise ChannelValidationError(
-                            f"Telegram setWebhook failed with HTTP {response.status}"
+                            f"Telegram setWebhook failed with HTTP {response.status}: {error_detail}"
                         )
 
                     data = await response.json()

@@ -198,6 +198,7 @@ jobs:
           # Application
           DEBUG=false
           ENVIRONMENT=production
+          APP_URL=${{ secrets.APP_URL }}
           COMMIT_SHA=${COMMIT_SHA}
           ENV_FILE
           
