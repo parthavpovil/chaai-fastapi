@@ -278,9 +278,16 @@ async def _run_message_pipeline(
     workspace_id: str,
     channel_id: str,
     message_data: dict,
-    channel_type: str
+    channel_type: str,
+    telegram_context: dict = None,
 ) -> None:
-    """Run the full message pipeline: process → flow check → escalate → RAG → persist response."""
+    """Run the full message pipeline: process → flow check → escalate → RAG → persist response.
+
+    Args:
+        telegram_context: For Telegram channels only — dict with keys:
+            - bot_token (str): Decrypted bot token
+            - chat_id (str|int): Telegram chat ID to reply to
+    """
     from app.services.message_processor import process_incoming_message, MessageProcessor
     from app.services.escalation_router import check_and_escalate_message
     from app.services.rag_engine import generate_rag_response
@@ -383,6 +390,13 @@ async def _run_message_pipeline(
                     conversation_id=conversation_id,
                     message_id=str(ai_msg.id),
                 )
+                if channel_type == "telegram" and telegram_context and agent_result.reply:
+                    from app.services.telegram_sender import send_telegram_message
+                    await send_telegram_message(
+                        bot_token=telegram_context["bot_token"],
+                        chat_id=telegram_context["chat_id"],
+                        text=agent_result.reply,
+                    )
                 return
         except Exception as e:
             logger.error(f"AI agent runner error for conversation {conversation_id}: {e}")
@@ -430,6 +444,14 @@ async def _run_message_pipeline(
                 conversation_id=conversation_id,
                 message_id=user_message_id
             )
+
+            if channel_type == "telegram" and telegram_context and rag_result.get("response"):
+                from app.services.telegram_sender import send_telegram_message
+                await send_telegram_message(
+                    bot_token=telegram_context["bot_token"],
+                    chat_id=telegram_context["chat_id"],
+                    text=rag_result["response"],
+                )
         except Exception as e:
             logger.error(f"RAG response failed for {channel_type} conversation {conversation_id}: {e}")
 
@@ -452,12 +474,32 @@ async def telegram_webhook(
 
         if result.get("status") == "success":
             try:
+                # Extract chat_id from message_metadata (set by _extract_telegram_message)
+                chat_id = result["message_data"].get("message_metadata", {}).get("chat_id")
+
+                # Decrypt bot token for sending replies
+                from app.services.encryption import decrypt_credential
+                from app.models.channel import Channel
+                from sqlalchemy import select as _select
+                ch_result = await db.execute(
+                    _select(Channel).where(Channel.id == result["channel_id"])
+                )
+                ch = ch_result.scalar_one_or_none()
+                decrypted_token = None
+                if ch and ch.config and ch.config.get("bot_token"):
+                    decrypted_token = decrypt_credential(ch.config["bot_token"])
+
+                telegram_context = None
+                if chat_id and decrypted_token:
+                    telegram_context = {"bot_token": decrypted_token, "chat_id": chat_id}
+
                 await _run_message_pipeline(
                     db=db,
                     workspace_id=str(result["workspace_id"]),
                     channel_id=str(result["channel_id"]),
                     message_data=result["message_data"],
-                    channel_type="telegram"
+                    channel_type="telegram",
+                    telegram_context=telegram_context,
                 )
             except Exception as e:
                 logger.error(f"Telegram pipeline error: {e}")

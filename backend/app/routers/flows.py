@@ -31,6 +31,8 @@ class FlowUpdate(BaseModel):
     trigger_keywords: Optional[list] = None
     trigger_type: Optional[str] = None
     is_active: Optional[bool] = None
+
+    
     steps: Optional[dict] = None
 
 
