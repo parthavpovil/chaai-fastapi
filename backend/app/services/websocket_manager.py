@@ -136,7 +136,9 @@ class WebSocketManager:
             if not payload:
                 return None
             
-            user_id = payload.get("user_id")
+            # JWT tokens issued by AuthService store user ID in "sub".
+            # Keep backward compatibility with any legacy "user_id" tokens.
+            user_id = payload.get("sub") or payload.get("user_id")
             workspace_id = payload.get("workspace_id")
             
             if not user_id or not workspace_id:
