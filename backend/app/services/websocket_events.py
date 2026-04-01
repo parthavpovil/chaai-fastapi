@@ -147,6 +147,8 @@ class WebSocketEventBroadcaster:
         from sqlalchemy import select
         from sqlalchemy.orm import selectinload
         
+        logger.info(f"🔔 broadcast_new_message_event called: workspace_id={workspace_id}, conversation_id={conversation_id}, message_id={message_id}")
+        
         result = await self.db.execute(
             select(Message)
             .where(Message.id == message_id)
@@ -154,7 +156,12 @@ class WebSocketEventBroadcaster:
         )
         message = result.scalar_one_or_none()
         
-        if not message or message.conversation.workspace_id != workspace_id:
+        if not message:
+            logger.warning(f"❌ Message not found: message_id={message_id}")
+            return 0
+            
+        if str(message.conversation.workspace_id) != str(workspace_id):
+            logger.warning(f"❌ Workspace mismatch: message.conversation.workspace_id={message.conversation.workspace_id}, expected={workspace_id}")
             return 0
         
         event_data = {
@@ -171,11 +178,14 @@ class WebSocketEventBroadcaster:
         if message.extra_data:
             event_data["metadata"] = message.extra_data
         
-        return await websocket_manager.broadcast_to_workspace(
+        logger.info(f"📤 Broadcasting to workspace {workspace_id}: {event_data['type']}")
+        sent_count = await websocket_manager.broadcast_to_workspace(
             workspace_id, 
             event_data, 
             exclude_connection_id
         )
+        logger.info(f"✅ Broadcast sent to {sent_count} connections")
+        return sent_count
     
     async def broadcast_conversation_status_change(
         self,
@@ -440,10 +450,13 @@ async def notify_new_message(
     Returns:
         Number of connections notified
     """
+    logger.info(f"🔔 notify_new_message called: workspace_id={workspace_id}, conversation_id={conversation_id}, message_id={message_id}")
     broadcaster = WebSocketEventBroadcaster(db)
-    return await broadcaster.broadcast_new_message_event(
+    result = await broadcaster.broadcast_new_message_event(
         workspace_id, conversation_id, message_id, exclude_connection_id
     )
+    logger.info(f"📊 notify_new_message result: {result} connections notified")
+    return result
 
 
 async def notify_agent_status_change(

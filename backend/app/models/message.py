@@ -17,7 +17,7 @@ class Message(Base):
 
     id = Column(PostgresUUID(as_uuid=True), primary_key=True, default=uuid4)
     conversation_id = Column(PostgresUUID(as_uuid=True), ForeignKey("conversations.id"), nullable=False)
-    role = Column(String, nullable=False)  # customer | ai | agent
+    role = Column(String, nullable=False)  # customer | assistant | agent | owner
     content = Column(Text, nullable=True)  # nullable for pure media messages
     channel_type = Column(String, nullable=False)
     external_message_id = Column(String, nullable=True)  # for deduplication

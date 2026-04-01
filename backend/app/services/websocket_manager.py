@@ -293,10 +293,16 @@ class WebSocketManager:
         Returns:
             Number of connections that received the message
         """
+        logger.info(f"🔊 broadcast_to_workspace called: workspace_id={workspace_id}, message_type={message.get('type')}")
+        logger.info(f"📊 Active workspaces: {list(self.workspace_connections.keys())}")
+        
         if workspace_id not in self.workspace_connections:
+            logger.warning(f"❌ No connections found for workspace {workspace_id}")
             return 0
         
         connections = self.workspace_connections[workspace_id].copy()
+        logger.info(f"👥 Found {len(connections)} connections for workspace {workspace_id}")
+        
         sent_count = 0
         failed_connections = []
         
@@ -307,13 +313,16 @@ class WebSocketManager:
             success = await connection.send_message(message)
             if success:
                 sent_count += 1
+                logger.info(f"✅ Sent to connection {connection_id}")
             else:
+                logger.warning(f"❌ Failed to send to connection {connection_id}")
                 failed_connections.append(connection_id)
         
         # Clean up failed connections
         for failed_id in failed_connections:
             await self.disconnect(failed_id)
         
+        logger.info(f"📤 Broadcast complete: {sent_count}/{len(connections)} successful")
         return sent_count
     
     async def send_to_connection(

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
 from app.middleware.auth_middleware import get_current_user, get_current_workspace
@@ -166,6 +167,17 @@ async def create_channel(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Channel validation failed: {str(e)}"
+        )
+    except IntegrityError as e:
+        await db.rollback()
+        if "uq_workspace_channel_type" in str(e.orig):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"A {request.channel_type} channel already exists for this workspace"
+            )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Channel already exists"
         )
     except Exception as e:
         raise HTTPException(

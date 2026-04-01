@@ -438,6 +438,8 @@ class ConversationManager:
             sender_name = None
             if msg.extra_data and "agent_name" in msg.extra_data:
                 sender_name = msg.extra_data["agent_name"]
+            elif msg.role == "owner":
+                sender_name = "Owner"
             messages.append({
                 "id": str(msg.id),
                 "content": msg.content,
@@ -603,7 +605,7 @@ class ConversationManager:
         message = Message(
             conversation_id=conversation_id,
             content=content,
-            role="agent",
+            role="owner",
             channel_type=conversation.channel_type,
             extra_data={"sender_type": "owner", "sender_id": str(owner_user_id)}
         )
