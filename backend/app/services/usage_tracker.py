@@ -255,9 +255,14 @@ async def track_message_usage(
         output_tokens=output_tokens
     )
     
+    # Access attributes immediately while session is active
+    # to avoid lazy-loading issues
+    message_count = counter.messages_sent
+    tokens_used = counter.tokens_used
+    
     return {
-        "message_count": counter.messages_sent,
-        "tokens_used": counter.tokens_used
+        "message_count": message_count,
+        "tokens_used": tokens_used
     }
 
 
