@@ -100,12 +100,11 @@ async def websocket_endpoint(
                 break
             except Exception as e:
                 logger.error(f"Error handling WebSocket message: {e}", exc_info=True)
-                try:
-                    await connection.send_message({
-                        "type": "error",
-                        "message": "Message processing error"
-                    })
-                except:
+                sent = await connection.send_message({
+                    "type": "error",
+                    "message": "Message processing error"
+                })
+                if not sent:
                     break
     
     except Exception as e:
