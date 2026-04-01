@@ -71,7 +71,7 @@ class RedisPubSub:
         logger.info("Redis pub/sub listener started")
         while True:
             try:
-                if self._pubsub is None:
+                if not self._subscriptions:
                     await asyncio.sleep(0.1)
                     continue
                 msg = await self._pubsub.get_message(
