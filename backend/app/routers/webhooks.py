@@ -526,7 +526,7 @@ async def _run_message_pipeline(
             rag_response_text = rag_result.get("response")
 
             processor = MessageProcessor(db)
-            await processor.create_message(
+            ai_msg = await processor.create_message(
                 conversation_id=conversation_id,
                 content=rag_response_text,
                 role="assistant",
@@ -549,7 +549,7 @@ async def _run_message_pipeline(
                 db=db,
                 workspace_id=workspace_id,
                 conversation_id=conversation_id,
-                message_id=user_message_id
+                message_id=str(ai_msg.id)
             )
         except Exception as e:
             logger.error(f"RAG response failed for {channel_type} conversation {conversation_id}: {e}")
