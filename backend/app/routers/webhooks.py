@@ -515,6 +515,7 @@ async def _run_message_pipeline(
 
     if not escalation_result:
         rag_response_text = None
+        ai_msg = None
         try:
             rag_result = await generate_rag_response(
                 db=db,
@@ -524,6 +525,7 @@ async def _run_message_pipeline(
                 max_tokens=300
             )
             rag_response_text = rag_result.get("response")
+            logger.info(f"✅ RAG response generated: {len(rag_response_text)} chars")
 
             processor = MessageProcessor(db)
             ai_msg = await processor.create_message(
@@ -537,6 +539,7 @@ async def _run_message_pipeline(
                     "output_tokens": rag_result["output_tokens"],
                 }
             )
+            logger.info(f"✅ AI message created: {ai_msg.id}")
 
             await track_message_usage(
                 db=db,
@@ -544,6 +547,7 @@ async def _run_message_pipeline(
                 input_tokens=rag_result["input_tokens"],
                 output_tokens=rag_result["output_tokens"]
             )
+            logger.info(f"✅ Usage tracked")
 
             await notify_new_message(
                 db=db,
@@ -551,8 +555,12 @@ async def _run_message_pipeline(
                 conversation_id=conversation_id,
                 message_id=str(ai_msg.id)
             )
+            logger.info(f"✅ Websocket broadcast sent for message {ai_msg.id}")
         except Exception as e:
-            logger.error(f"RAG response failed for {channel_type} conversation {conversation_id}: {e}")
+            logger.error(f"❌ RAG response failed for {channel_type} conversation {conversation_id}: {e}", exc_info=True)
+            # If message creation failed, don't send to Telegram
+            if not ai_msg:
+                rag_response_text = None
 
         if channel_type == "telegram" and telegram_context and rag_response_text:
             from app.services.telegram_sender import send_telegram_message

@@ -350,38 +350,53 @@ class RAGEngine:
         Raises:
             RAGError: If processing fails
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         try:
             # 1. Generate query embedding
+            logger.info("🔍 Step 1: Generating query embedding")
             query_embedding = await self.generate_query_embedding(query)
+            logger.info(f"✅ Query embedding generated: {len(query_embedding)} dimensions")
             
             # 2. Search for similar chunks
+            logger.info("🔍 Step 2: Searching for similar chunks")
             relevant_chunks = await self.search_similar_chunks(
                 workspace_id, query_embedding
             )
+            logger.info(f"✅ Found {len(relevant_chunks)} relevant chunks")
             
             # 3. Get conversation context if available
             conversation_history = []
             conversation_summary = None
             if conversation_id:
+                logger.info("🔍 Step 3: Getting conversation context")
                 conversation_history = await self.get_conversation_context(
                     conversation_id, workspace_id
                 )
+                logger.info(f"✅ Got {len(conversation_history)} conversation messages")
+                
                 # Load any existing summary from conversation.metadata
+                logger.info("🔍 Step 3b: Loading conversation summary")
                 conv_result = await self.db.execute(
                     select(Conversation).where(Conversation.id == conversation_id)
                 )
                 conv = conv_result.scalar_one_or_none()
                 if conv and conv.meta:
                     conversation_summary = conv.meta.get("summary")
+                logger.info(f"✅ Conversation summary loaded: {bool(conversation_summary)}")
 
             # 4. Get workspace fallback message
+            logger.info("🔍 Step 4: Getting workspace fallback message")
             workspace_result = await self.db.execute(
                 select(Workspace.fallback_msg)
                 .where(Workspace.id == workspace_id)
             )
             fallback_message = workspace_result.scalar_one_or_none()
+            logger.info(f"✅ Fallback message loaded: {bool(fallback_message)}")
 
             # 5. Build context messages (system + user split for token efficiency)
+            logger.info("🔍 Step 5: Building context prompt")
             context_messages = self.build_context_prompt(
                 query=query,
                 relevant_chunks=relevant_chunks,
@@ -389,15 +404,19 @@ class RAGEngine:
                 workspace_fallback_message=fallback_message,
                 conversation_summary=conversation_summary
             )
+            logger.info(f"✅ Context prompt built: {len(context_messages)} messages")
 
             # 6. Generate response
+            logger.info("🔍 Step 6: Generating AI response")
             response_text, input_tokens, output_tokens = await self.generate_response(
                 messages=context_messages,
                 max_tokens=max_tokens,
                 temperature=temperature
             )
+            logger.info(f"✅ AI response generated: {len(response_text)} chars, {input_tokens} in / {output_tokens} out")
             
-            return {
+            logger.info("🔍 Step 7: Building result dictionary")
+            result = {
                 'response': response_text,
                 'input_tokens': input_tokens,
                 'output_tokens': output_tokens,
@@ -415,10 +434,13 @@ class RAGEngine:
                 'has_conversation_context': len(conversation_history) > 0,
                 'used_fallback': len(relevant_chunks) == 0
             }
+            logger.info("✅ Result dictionary built successfully")
+            return result
             
         except RAGError:
             raise
         except Exception as e:
+            logger.error(f"❌ RAG processing failed at some step: {str(e)}", exc_info=True)
             raise RAGError(f"RAG processing failed: {str(e)}")
     
     async def get_workspace_fallback_response(self, workspace_id: str) -> str:
@@ -459,7 +481,6 @@ async def generate_rag_response(
     Convenience function to generate RAG response.
     After generating, fires an async summary task if applicable.
     """
-    import asyncio
     rag_engine = RAGEngine(db)
     result = await rag_engine.process_rag_query(
         workspace_id=workspace_id,
@@ -467,16 +488,8 @@ async def generate_rag_response(
         conversation_id=conversation_id,
         max_tokens=max_tokens
     )
-    if conversation_id:
-        # Fire-and-forget summary generation in background
-        # Use try/except to prevent task creation errors from breaking the response
-        try:
-            asyncio.create_task(
-                rag_engine.maybe_generate_summary(conversation_id, workspace_id)
-            )
-        except Exception:
-            # Silently ignore task creation errors - summary is optional
-            pass
+    # Don't fire background task - it causes async context issues
+    # Summary generation can be done via a separate scheduled job if needed
     return result
 
 
