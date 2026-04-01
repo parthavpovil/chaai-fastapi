@@ -568,6 +568,7 @@ class ConversationManager:
             conversation_id=conversation_id,
             content=content,
             role="agent",
+            channel_type=conversation.channel_type,
             extra_data={"agent_id": str(agent_id), "agent_name": agent.name, "sender_id": str(agent.user_id)}
         )
 
@@ -603,6 +604,7 @@ class ConversationManager:
             conversation_id=conversation_id,
             content=content,
             role="agent",
+            channel_type=conversation.channel_type,
             extra_data={"sender_type": "owner", "sender_id": str(owner_user_id)}
         )
 
