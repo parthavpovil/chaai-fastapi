@@ -148,6 +148,28 @@ async def get_ai_pipeline(
     }
 
 
+@router.get("/settings")
+async def get_workspace_settings(
+    current_user: User = Depends(get_current_user),
+    current_workspace: Workspace = Depends(get_current_workspace),
+):
+    """Get current workspace settings."""
+    return {
+        "fallback_msg": current_workspace.fallback_msg,
+        "alert_email": current_workspace.alert_email,
+        "agents_enabled": current_workspace.agents_enabled,
+        "escalation_keywords": current_workspace.escalation_keywords,
+        "escalation_sensitivity": current_workspace.escalation_sensitivity,
+        "escalation_email_enabled": current_workspace.escalation_email_enabled,
+        "ai_enabled": current_workspace.ai_enabled,
+        "auto_escalation_enabled": current_workspace.auto_escalation_enabled,
+        "outside_hours_message": current_workspace.outside_hours_message,
+        "outside_hours_behavior": current_workspace.outside_hours_behavior,
+        "escalation_message_with_agents": current_workspace.escalation_message_with_agents,
+        "escalation_message_without_agents": current_workspace.escalation_message_without_agents,
+    }
+
+
 @router.put("/settings")
 async def update_workspace_settings(
     request: WorkspaceSettingsUpdate,
