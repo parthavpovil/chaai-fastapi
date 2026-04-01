@@ -173,6 +173,15 @@ class EscalationRouter:
         await self.db.commit()
         await self.db.refresh(message)
         
+        # Broadcast escalation acknowledgment message via websocket
+        from app.services.websocket_events import notify_new_message
+        await notify_new_message(
+            db=self.db,
+            workspace_id=workspace_id,
+            conversation_id=conversation_id,
+            message_id=str(message.id),
+        )
+        
         return message
     
     async def notify_agents_via_websocket(

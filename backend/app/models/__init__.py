@@ -27,6 +27,7 @@ from .flow import Flow, ConversationFlowState
 from .whatsapp_template import WhatsAppTemplate
 from .broadcast import Broadcast, BroadcastRecipient
 from .email_log import EmailLog
+from .ai_agent import AIAgent, AIAgentTool, AIAgentGuardrail, AIAgentChannelAssignment, AIAgentConversation, AIAgentTokenLog
 
 __all__ = [
     "User",
@@ -57,4 +58,10 @@ __all__ = [
     "Broadcast",
     "BroadcastRecipient",
     "EmailLog",
+    "AIAgent",
+    "AIAgentTool",
+    "AIAgentGuardrail",
+    "AIAgentChannelAssignment",
+    "AIAgentConversation",
+    "AIAgentTokenLog",
 ]

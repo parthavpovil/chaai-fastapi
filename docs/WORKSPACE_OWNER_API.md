@@ -244,7 +244,7 @@ Returns a dashboard summary with real-time usage stats.
 
 ### `PUT /api/workspace/settings`
 
-Updates workspace-level configuration including escalation and fallback behavior.
+Updates workspace-level configuration including routing mode, escalation, and fallback behavior.
 
 **Auth required (owner).**
 
@@ -256,20 +256,100 @@ Updates workspace-level configuration including escalation and fallback behavior
   "agents_enabled": true,
   "escalation_keywords": ["refund", "cancel", "complaint", "urgent", "manager"],
   "escalation_sensitivity": "medium",
-  "escalation_email_enabled": true
+  "escalation_email_enabled": true,
+  "ai_enabled": true,
+  "auto_escalation_enabled": true
 }
 ```
 
-| Field | Type | Description |
-|---|---|---|
-| `fallback_msg` | string (max 500) | Message shown when AI can't answer |
-| `alert_email` | email | Email address that receives escalation alerts |
-| `agents_enabled` | boolean | Whether human agents can be assigned to conversations |
-| `escalation_keywords` | string[] | Keywords in customer messages that trigger escalation |
-| `escalation_sensitivity` | `"low"` \| `"medium"` \| `"high"` | How aggressively AI classifies messages as escalation-worthy |
-| `escalation_email_enabled` | boolean | Send email to `alert_email` when a conversation is escalated |
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `fallback_msg` | string (max 500) | — | Message shown when AI can't answer |
+| `alert_email` | email | — | Email address that receives escalation alerts |
+| `agents_enabled` | boolean | `false` | Whether human agents can be assigned to conversations |
+| `escalation_keywords` | string[] | built-in list | Keywords in customer messages that trigger escalation |
+| `escalation_sensitivity` | `"low"` \| `"medium"` \| `"high"` | `"medium"` | How aggressively AI classifies messages as escalation-worthy |
+| `escalation_email_enabled` | boolean | `true` | Send email to `alert_email` when a conversation is escalated |
+| `ai_enabled` | boolean | `true` | Whether any AI (RAG or AI agent) responds to messages. When `false`, all messages route directly to human agents (if `agents_enabled` is `true`) with no LLM call at all. |
+| `auto_escalation_enabled` | boolean | `true` | Whether the escalation classifier runs automatically on each message. When `false`, AI always responds and conversations only reach human agents via manual escalation from the dashboard. |
 
-**Response `200`**: Returns updated workspace object (same shape as `GET /api/auth/me` workspace field).
+**Response `200`**:
+```json
+{
+  "status": "updated",
+  "fallback_msg": "...",
+  "alert_email": "...",
+  "agents_enabled": true,
+  "escalation_keywords": ["refund"],
+  "escalation_sensitivity": "medium",
+  "escalation_email_enabled": true,
+  "ai_enabled": true,
+  "auto_escalation_enabled": true
+}
+```
+
+---
+
+### Routing Mode — How the Three Capabilities Combine
+
+The workspace has three independent response capabilities that can be toggled in any combination:
+
+| Capability | Controlled by | Description |
+|---|---|---|
+| **RAG AI** | `ai_enabled: true` + `ai_mode: "rag"` | LLM answers using your knowledge base |
+| **AI Agent** | `ai_enabled: true` + `ai_mode: "ai_agent"` | LLM with tools and custom instructions |
+| **Human Agent** | `agents_enabled: true` | Human agents handle conversations via escalation |
+
+The `ai_mode` field (`"rag"` or `"ai_agent"`) is set separately via `PUT /api/workspace/ai-pipeline`.
+
+#### Combination matrix
+
+| `ai_enabled` | `agents_enabled` | `auto_escalation_enabled` | What happens |
+|---|---|---|---|
+| `true` | `false` | `true` | AI responds to every message. No human handoff possible. |
+| `true` | `true` | `true` | AI responds first. If a message triggers escalation (frustration, urgency, explicit human request), it's routed to a human agent automatically. |
+| `true` | `true` | `false` | AI always responds. Human agents are available but only receive conversations when you manually escalate from the dashboard. No automatic escalation. |
+| `false` | `true` | `*` | **AI is disabled.** Every incoming message is immediately routed to a human agent with no LLM call at all. Useful for teams that want full human handling. |
+| `false` | `false` | `*` | No AI, no agents. Messages are received and stored silently — no reply is sent. |
+
+#### Example: Disable AI, route all to human
+
+```json
+PUT /api/workspace/settings
+{
+  "ai_enabled": false,
+  "agents_enabled": true
+}
+```
+
+When a message arrives, the system immediately calls `process_escalation()` with reason `"direct_routing"` — no LLM is invoked. The customer receives the escalation acknowledgment message (customizable via `escalation_message_with_agents`).
+
+#### Example: AI only, disable auto-escalation
+
+```json
+PUT /api/workspace/settings
+{
+  "ai_enabled": true,
+  "agents_enabled": false,
+  "auto_escalation_enabled": false
+}
+```
+
+AI responds to every message. Even if a customer asks for a human, the escalation classifier never runs. Suitable for fully automated bots with no human support team.
+
+#### Example: Full stack (AI + auto-escalation + human agents)
+
+```json
+PUT /api/workspace/settings
+{
+  "ai_enabled": true,
+  "agents_enabled": true,
+  "auto_escalation_enabled": true,
+  "escalation_sensitivity": "medium"
+}
+```
+
+AI handles conversations. If a message meets the escalation threshold (based on keywords + LLM confidence), it's automatically routed to a human agent.
 
 ---
 

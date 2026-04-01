@@ -471,7 +471,7 @@ class MessageProcessor:
                 channel_id=channel_id,
                 channel_type=channel_type,
             )
-            await self.create_message(
+            customer_message = await self.create_message(
                 conversation_id=str(conversation.id),
                 content=content,
                 role="customer",
@@ -479,12 +479,28 @@ class MessageProcessor:
                 external_message_id=external_message_id,
                 metadata=message_metadata,
             )
-            await self.create_message(
+            error_message = await self.create_message(
                 conversation_id=str(conversation.id),
                 content="We're unable to process your message at this time.",
                 role="assistant",
                 channel_type=channel_type,
             )
+            
+            # Broadcast both messages via websocket
+            from app.services.websocket_events import notify_new_message
+            await notify_new_message(
+                db=self.db,
+                workspace_id=workspace_id,
+                conversation_id=str(conversation.id),
+                message_id=str(customer_message.id),
+            )
+            await notify_new_message(
+                db=self.db,
+                workspace_id=workspace_id,
+                conversation_id=str(conversation.id),
+                message_id=str(error_message.id),
+            )
+            
             raise BlockedContactError("Contact is blocked")
 
         # 5. Get or create conversation
@@ -502,7 +518,7 @@ class MessageProcessor:
             if not is_open and outside_msg:
                 behavior = await get_outside_hours_behavior(workspace_id, self.db)
                 # Always persist customer message for audit trail
-                await self.create_message(
+                customer_message = await self.create_message(
                     conversation_id=str(conversation.id),
                     content=content,
                     role="customer",
@@ -511,12 +527,28 @@ class MessageProcessor:
                     metadata=message_metadata,
                 )
                 # Send outside-hours auto-reply
-                await self.create_message(
+                auto_reply_message = await self.create_message(
                     conversation_id=str(conversation.id),
                     content=outside_msg,
                     role="assistant",
                     channel_type=channel_type,
                 )
+                
+                # Broadcast both messages via websocket
+                from app.services.websocket_events import notify_new_message
+                await notify_new_message(
+                    db=self.db,
+                    workspace_id=workspace_id,
+                    conversation_id=str(conversation.id),
+                    message_id=str(customer_message.id),
+                )
+                await notify_new_message(
+                    db=self.db,
+                    workspace_id=workspace_id,
+                    conversation_id=str(conversation.id),
+                    message_id=str(auto_reply_message.id),
+                )
+                
                 if behavior == "inform_and_pause":
                     conversation.status = "paused"
                     await self.db.commit()
