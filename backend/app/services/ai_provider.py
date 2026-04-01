@@ -259,7 +259,7 @@ class OpenAIProvider:
     def __init__(self):
         try:
             from openai import AsyncOpenAI
-            self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+            self.client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY, timeout=60.0)
             self.llm_model = "gpt-4o-mini"
             self.embedding_model = "text-embedding-3-small"
         except ImportError:
@@ -736,7 +736,7 @@ def get_llm_provider_for_workspace(workspace_metadata: dict) -> AIProvider:
         p = OpenAIProvider.__new__(OpenAIProvider)
         try:
             import openai as openai_lib
-            p.client = openai_lib.AsyncOpenAI(api_key=api_key or settings.OPENAI_API_KEY)
+            p.client = openai_lib.AsyncOpenAI(api_key=api_key or settings.OPENAI_API_KEY, timeout=60.0)
             p.llm_model = workspace_metadata.get("ai_model", "gpt-4o-mini")
             p.embedding_model = "text-embedding-3-small"
         except Exception as e:

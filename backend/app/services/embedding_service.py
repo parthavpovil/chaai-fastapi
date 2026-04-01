@@ -179,12 +179,9 @@ class EmbeddingService:
         document = result.scalar_one()
         
         document.status = status
-        document.processed_at = datetime.now(timezone.utc)
-        
+
         if error_message:
-            metadata = document.metadata or {}
-            metadata['error'] = error_message
-            document.metadata = metadata
+            document.error_message = error_message
         
         await self.db.commit()
         await self.db.refresh(document)
