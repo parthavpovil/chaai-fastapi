@@ -42,6 +42,8 @@ class WorkspaceSettingsUpdate(BaseModel):
     escalation_keywords: Optional[List[str]] = Field(None, max_length=100)
     escalation_sensitivity: Optional[str] = Field(None, pattern="^(low|medium|high)$")
     escalation_email_enabled: Optional[bool] = None
+    ai_enabled: Optional[bool] = None              # False = skip all LLM, route directly to human agents
+    auto_escalation_enabled: Optional[bool] = None # False = escalation classifier never runs automatically
 
 
 class WorkspaceOverview(BaseModel):
@@ -166,6 +168,10 @@ async def update_workspace_settings(
         current_workspace.escalation_sensitivity = request.escalation_sensitivity
     if request.escalation_email_enabled is not None:
         current_workspace.escalation_email_enabled = request.escalation_email_enabled
+    if request.ai_enabled is not None:
+        current_workspace.ai_enabled = request.ai_enabled
+    if request.auto_escalation_enabled is not None:
+        current_workspace.auto_escalation_enabled = request.auto_escalation_enabled
 
     await db.commit()
     await db.refresh(current_workspace)
@@ -177,6 +183,8 @@ async def update_workspace_settings(
         "escalation_keywords": current_workspace.escalation_keywords,
         "escalation_sensitivity": current_workspace.escalation_sensitivity,
         "escalation_email_enabled": current_workspace.escalation_email_enabled,
+        "ai_enabled": current_workspace.ai_enabled,
+        "auto_escalation_enabled": current_workspace.auto_escalation_enabled,
     }
 
 

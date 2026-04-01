@@ -89,7 +89,10 @@ class EscalationRouter:
         Returns:
             Created system message
         """
-        escalation_content = f"Conversation escalated: {escalation_reason}"
+        if escalation_reason == "direct_routing":
+            escalation_content = "Conversation routed directly to human agent (AI disabled in workspace settings)"
+        else:
+            escalation_content = f"Conversation escalated: {escalation_reason}"
         
         message = Message(
             conversation_id=conversation_id,

@@ -34,6 +34,8 @@ class Workspace(Base):
     escalation_email_enabled = Column(Boolean, nullable=False, default=True)
     escalation_message_with_agents = Column(Text, nullable=True)    # custom acknowledgment when agents available
     escalation_message_without_agents = Column(Text, nullable=True) # custom acknowledgment when no agents
+    ai_enabled = Column(Boolean, nullable=False, default=True)              # False = skip all LLM, route directly to human
+    auto_escalation_enabled = Column(Boolean, nullable=False, default=True) # False = escalation classifier never runs automatically
     razorpay_customer_id = Column(String, nullable=True)
     razorpay_subscription_id = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

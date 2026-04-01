@@ -280,13 +280,15 @@ async def _run_message_pipeline(
     message_data: dict,
     channel_type: str,
     telegram_context: dict = None,
+    whatsapp_context: dict = None,
+    instagram_context: dict = None,
 ) -> None:
     """Run the full message pipeline: process → flow check → escalate → RAG → persist response.
 
     Args:
-        telegram_context: For Telegram channels only — dict with keys:
-            - bot_token (str): Decrypted bot token
-            - chat_id (str|int): Telegram chat ID to reply to
+        telegram_context: For Telegram — keys: bot_token, chat_id
+        whatsapp_context: For WhatsApp — keys: access_token, phone_number_id, recipient_phone
+        instagram_context: For Instagram — keys: access_token, page_id, recipient_id
     """
     from app.services.message_processor import process_incoming_message, MessageProcessor
     from app.services.escalation_router import check_and_escalate_message
@@ -353,15 +355,81 @@ async def _run_message_pipeline(
         except Exception as e:
             logger.error(f"Flow engine error: {e}")
 
-    # AI Agent routing — runs after flow engine, before escalation check + RAG
+    # Routing mode resolution — read all three capability flags from workspace
     from sqlalchemy import select as _select
     from app.models.workspace import Workspace as _Workspace
     workspace_result = await db.execute(
         _select(_Workspace).where(_Workspace.id == workspace_id)
     )
     _workspace = workspace_result.scalar_one_or_none()
-    _ai_mode = (_workspace.meta or {}).get("ai_mode", "rag") if _workspace else "rag"
+    _meta             = (_workspace.meta or {}) if _workspace else {}
+    _ai_mode          = _meta.get("ai_mode", "rag")
+    _ai_enabled       = _workspace.ai_enabled if _workspace is not None else True
+    _auto_esc_enabled = _workspace.auto_escalation_enabled if _workspace is not None else True
+    _agents_enabled   = _workspace.agents_enabled if _workspace is not None else False
 
+    # Branch 1: AI disabled + human agents enabled → route directly to human, no LLM call
+    if not _ai_enabled and _agents_enabled:
+        try:
+            from app.services.escalation_router import EscalationRouter
+            await EscalationRouter(db).process_escalation(
+                conversation_id=conversation_id,
+                workspace_id=workspace_id,
+                escalation_reason="direct_routing",
+                classification_data={
+                    "should_escalate": True,
+                    "confidence": 1.0,
+                    "reason": "direct_routing",
+                    "category": "routing_mode",
+                    "classification_method": "workspace_config",
+                },
+                priority="medium",
+            )
+        except Exception as e:
+            logger.error(f"Direct routing escalation failed for conversation {conversation_id}: {e}")
+
+        # Send escalation acknowledgment back through the channel
+        ack_text = (
+            _workspace.escalation_message_with_agents
+            if _workspace and _workspace.escalation_message_with_agents
+            else "Thank you for your message. I've escalated your request to one of our human agents who will assist you shortly."
+        )
+        if channel_type == "telegram" and telegram_context:
+            from app.services.telegram_sender import send_telegram_message
+            sent = await send_telegram_message(
+                bot_token=telegram_context["bot_token"],
+                chat_id=telegram_context["chat_id"],
+                text=ack_text,
+            )
+            if not sent:
+                logger.error("Failed to deliver direct-routing ack to Telegram for conversation_id=%s", conversation_id)
+        elif channel_type == "whatsapp" and whatsapp_context:
+            from app.services.whatsapp_sender import send_whatsapp_message
+            sent = await send_whatsapp_message(
+                access_token=whatsapp_context["access_token"],
+                phone_number_id=whatsapp_context["phone_number_id"],
+                to=whatsapp_context["recipient_phone"],
+                text=ack_text,
+            )
+            if not sent:
+                logger.error("Failed to deliver direct-routing ack to WhatsApp for conversation_id=%s", conversation_id)
+        elif channel_type == "instagram" and instagram_context:
+            from app.services.instagram_sender import send_instagram_message
+            sent = await send_instagram_message(
+                access_token=instagram_context["access_token"],
+                page_id=instagram_context["page_id"],
+                recipient_id=instagram_context["recipient_id"],
+                text=ack_text,
+            )
+            if not sent:
+                logger.error("Failed to deliver direct-routing ack to Instagram for conversation_id=%s", conversation_id)
+        return
+
+    # Branch 2: AI disabled, no human agents → receive message silently, no reply
+    if not _ai_enabled:
+        return
+
+    # Branch 3: AI enabled — AI agent mode
     if _ai_mode == "ai_agent":
         agent_reply_text = None
         try:
@@ -396,7 +464,7 @@ async def _run_message_pipeline(
             logger.error(f"AI agent runner error for conversation {conversation_id}: {e}")
 
         if agent_reply_text is not None:
-            if channel_type == "telegram" and telegram_context and agent_reply_text:
+            if channel_type == "telegram" and telegram_context:
                 from app.services.telegram_sender import send_telegram_message
                 sent = await send_telegram_message(
                     bot_token=telegram_context["bot_token"],
@@ -409,14 +477,41 @@ async def _run_message_pipeline(
                         conversation_id,
                         telegram_context["chat_id"],
                     )
+            elif channel_type == "whatsapp" and whatsapp_context:
+                from app.services.whatsapp_sender import send_whatsapp_message
+                sent = await send_whatsapp_message(
+                    access_token=whatsapp_context["access_token"],
+                    phone_number_id=whatsapp_context["phone_number_id"],
+                    to=whatsapp_context["recipient_phone"],
+                    text=agent_reply_text,
+                )
+                if not sent:
+                    logger.error(
+                        "Failed to deliver AI agent reply to WhatsApp for conversation_id=%s", conversation_id
+                    )
+            elif channel_type == "instagram" and instagram_context:
+                from app.services.instagram_sender import send_instagram_message
+                sent = await send_instagram_message(
+                    access_token=instagram_context["access_token"],
+                    page_id=instagram_context["page_id"],
+                    recipient_id=instagram_context["recipient_id"],
+                    text=agent_reply_text,
+                )
+                if not sent:
+                    logger.error(
+                        "Failed to deliver AI agent reply to Instagram for conversation_id=%s", conversation_id
+                    )
             return
 
-    escalation_result = await check_and_escalate_message(
-        db=db,
-        conversation_id=conversation_id,
-        workspace_id=workspace_id,
-        message_content=text_content
-    )
+    # Auto-escalation check — only runs when both agents and auto-escalation are enabled
+    escalation_result = None
+    if _agents_enabled and _auto_esc_enabled:
+        escalation_result = await check_and_escalate_message(
+            db=db,
+            conversation_id=conversation_id,
+            workspace_id=workspace_id,
+            message_content=text_content
+        )
 
     if not escalation_result:
         rag_response_text = None
@@ -471,6 +566,30 @@ async def _run_message_pipeline(
                     "Failed to deliver RAG reply to Telegram for conversation_id=%s chat_id=%s",
                     conversation_id,
                     telegram_context["chat_id"],
+                )
+        elif channel_type == "whatsapp" and whatsapp_context and rag_response_text:
+            from app.services.whatsapp_sender import send_whatsapp_message
+            sent = await send_whatsapp_message(
+                access_token=whatsapp_context["access_token"],
+                phone_number_id=whatsapp_context["phone_number_id"],
+                to=whatsapp_context["recipient_phone"],
+                text=rag_response_text,
+            )
+            if not sent:
+                logger.error(
+                    "Failed to deliver RAG reply to WhatsApp for conversation_id=%s", conversation_id
+                )
+        elif channel_type == "instagram" and instagram_context and rag_response_text:
+            from app.services.instagram_sender import send_instagram_message
+            sent = await send_instagram_message(
+                access_token=instagram_context["access_token"],
+                page_id=instagram_context["page_id"],
+                recipient_id=instagram_context["recipient_id"],
+                text=rag_response_text,
+            )
+            if not sent:
+                logger.error(
+                    "Failed to deliver RAG reply to Instagram for conversation_id=%s", conversation_id
                 )
 
 
@@ -565,12 +684,36 @@ async def whatsapp_webhook(
 
         if status == "success":
             try:
+                # Extract credentials so the pipeline can send replies back to the customer
+                whatsapp_context = None
+                try:
+                    from app.services.encryption import decrypt_credential
+                    from app.models.channel import Channel
+                    from sqlalchemy import select as _select
+                    ch_result = await db.execute(
+                        _select(Channel).where(Channel.id == result["channel_id"])
+                    )
+                    ch = ch_result.scalar_one_or_none()
+                    if ch and ch.config:
+                        access_token = decrypt_credential(ch.config.get("access_token", ""))
+                        wa_phone_number_id = decrypt_credential(ch.config.get("phone_number_id", ""))
+                        recipient_phone = result["message_data"].get("external_contact_id")
+                        if access_token and wa_phone_number_id and recipient_phone:
+                            whatsapp_context = {
+                                "access_token": access_token,
+                                "phone_number_id": wa_phone_number_id,
+                                "recipient_phone": recipient_phone,
+                            }
+                except Exception as e:
+                    logger.warning("Failed to extract WhatsApp channel credentials: %s", e)
+
                 await _run_message_pipeline(
                     db=db,
                     workspace_id=str(result["workspace_id"]),
                     channel_id=str(result["channel_id"]),
                     message_data=result["message_data"],
-                    channel_type="whatsapp"
+                    channel_type="whatsapp",
+                    whatsapp_context=whatsapp_context,
                 )
             except Exception as e:
                 logger.error(f"WhatsApp pipeline error: {e}")
@@ -641,12 +784,36 @@ async def instagram_webhook(
 
         if result.get("status") == "success":
             try:
+                # Extract credentials so the pipeline can send replies back to the customer
+                instagram_context = None
+                try:
+                    from app.services.encryption import decrypt_credential
+                    from app.models.channel import Channel
+                    from sqlalchemy import select as _select
+                    ch_result = await db.execute(
+                        _select(Channel).where(Channel.id == result["channel_id"])
+                    )
+                    ch = ch_result.scalar_one_or_none()
+                    if ch and ch.config:
+                        access_token = decrypt_credential(ch.config.get("access_token", ""))
+                        ig_page_id = decrypt_credential(ch.config.get("page_id", ""))
+                        recipient_id = result["message_data"].get("external_contact_id")
+                        if access_token and ig_page_id and recipient_id:
+                            instagram_context = {
+                                "access_token": access_token,
+                                "page_id": ig_page_id,
+                                "recipient_id": recipient_id,
+                            }
+                except Exception as e:
+                    logger.warning("Failed to extract Instagram channel credentials: %s", e)
+
                 await _run_message_pipeline(
                     db=db,
                     workspace_id=str(result["workspace_id"]),
                     channel_id=str(result["channel_id"]),
                     message_data=result["message_data"],
-                    channel_type="instagram"
+                    channel_type="instagram",
+                    instagram_context=instagram_context,
                 )
             except Exception as e:
                 logger.error(f"Instagram pipeline error: {e}")
