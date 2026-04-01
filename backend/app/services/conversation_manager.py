@@ -465,125 +465,20 @@ class ConversationManager:
             "updated_at": conversation.updated_at.isoformat()
         }
 
-
-# ─── Convenience Functions ────────────────────────────────────────────────────
-
-async def get_workspace_conversation_list(
-    db: AsyncSession,
-    workspace_id: str,
-    status: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0
-) -> List[Conversation]:
-    """
-    Convenience function to get workspace conversations
-    """
-    manager = ConversationManager(db)
-    return await manager.get_workspace_conversations(
-        workspace_id, status, limit, offset
-    )
-
-
-async def escalate_conversation_by_id(
-    db: AsyncSession,
-    conversation_id: str,
-    workspace_id: str,
-    reason: Optional[str] = None
-) -> Optional[Conversation]:
-    """
-    Convenience function to escalate a conversation
-    """
-    manager = ConversationManager(db)
-    return await manager.escalate_conversation(conversation_id, workspace_id, reason)
-
-    async def get_conversation_detail(
-        self, 
-        conversation_id: str, 
-        workspace_id: str
-    ) -> Optional[Dict[str, Any]]:
-        """
-        Get detailed conversation information with messages
-        
-        Args:
-            conversation_id: Conversation ID
-            workspace_id: Workspace ID for isolation
-            
-        Returns:
-            Detailed conversation data or None if not found
-        """
-        result = await self.db.execute(
-            select(Conversation)
-            .where(Conversation.id == conversation_id)
-            .where(Conversation.workspace_id == workspace_id)
-            .options(
-                selectinload(Conversation.contact),
-                selectinload(Conversation.messages)
-            )
-        )
-        conversation = result.scalar_one_or_none()
-        
-        if not conversation:
-            return None
-        
-        # Get assigned agent info
-        assigned_agent_name = None
-        if conversation.assigned_agent_id:
-            agent_result = await self.db.execute(
-                select(Agent).where(Agent.id == conversation.assigned_agent_id)
-            )
-            agent = agent_result.scalar_one_or_none()
-            if agent:
-                assigned_agent_name = agent.name
-        
-        # Format messages
-        messages = []
-        for msg in conversation.messages:
-            # Get sender name from metadata if available
-            sender_name = None
-            if msg.extra_data and "agent_name" in msg.extra_data:
-                sender_name = msg.extra_data["agent_name"]
-            
-            messages.append({
-                "id": str(msg.id),
-                "content": msg.content,
-                "role": msg.role,
-                "sender_name": sender_name,
-                "created_at": msg.created_at.isoformat(),
-                "metadata": msg.extra_data
-            })
-        
-        return {
-            "id": str(conversation.id),
-            "status": conversation.status,
-            "contact": {
-                "id": str(conversation.contact.id),
-                "name": conversation.contact.name,
-                "external_id": conversation.contact.external_id,
-                "channel_type": conversation.channel_type,
-                "metadata": conversation.contact.meta
-            },
-            "assigned_agent_id": str(conversation.assigned_agent_id) if conversation.assigned_agent_id else None,
-            "assigned_agent_name": assigned_agent_name,
-            "escalation_reason": conversation.escalation_reason,
-            "messages": messages,
-            "created_at": conversation.created_at.isoformat(),
-            "updated_at": conversation.updated_at.isoformat()
-        }
-
     async def claim_conversation(
-        self, 
-        conversation_id: str, 
-        agent_id: str, 
+        self,
+        conversation_id: str,
+        agent_id: str,
         workspace_id: str
     ) -> None:
         """
         Claim an escalated conversation for an agent
-        
+
         Args:
             conversation_id: Conversation ID
             agent_id: Agent ID
             workspace_id: Workspace ID for isolation
-            
+
         Raises:
             ConversationManagementError: If conversation cannot be claimed
         """
@@ -594,16 +489,16 @@ async def escalate_conversation_by_id(
             .where(Conversation.workspace_id == workspace_id)
         )
         conversation = result.scalar_one_or_none()
-        
+
         if not conversation:
             raise ConversationManagementError("Conversation not found")
-        
+
         if conversation.status != "escalated":
             raise ConversationManagementError("Only escalated conversations can be claimed")
-        
+
         if conversation.assigned_agent_id:
             raise ConversationManagementError("Conversation is already assigned to an agent")
-        
+
         # Verify agent exists and is active
         agent_result = await self.db.execute(
             select(Agent)
@@ -612,36 +507,36 @@ async def escalate_conversation_by_id(
             .where(Agent.is_active == True)
         )
         agent = agent_result.scalar_one_or_none()
-        
+
         if not agent:
             raise ConversationManagementError("Agent not found or inactive")
-        
+
         # Claim conversation
         conversation.assigned_agent_id = agent_id
         conversation.status = "agent"
         conversation.updated_at = datetime.now(timezone.utc)
-        
+
         await self.db.commit()
 
     async def send_agent_message(
-        self, 
-        conversation_id: str, 
-        agent_id: str, 
-        content: str, 
+        self,
+        conversation_id: str,
+        agent_id: str,
+        content: str,
         workspace_id: str
     ) -> Message:
         """
         Send a message as an agent in a conversation
-        
+
         Args:
             conversation_id: Conversation ID
             agent_id: Agent ID
             content: Message content
             workspace_id: Workspace ID for isolation
-            
+
         Returns:
             Created message
-            
+
         Raises:
             ConversationManagementError: If message cannot be sent
         """
@@ -652,22 +547,22 @@ async def escalate_conversation_by_id(
             .where(Conversation.workspace_id == workspace_id)
         )
         conversation = result.scalar_one_or_none()
-        
+
         if not conversation:
             raise ConversationManagementError("Conversation not found")
-        
+
         if conversation.assigned_agent_id != agent_id:
             raise ConversationManagementError("Agent is not assigned to this conversation")
-        
+
         # Get agent
         agent_result = await self.db.execute(
             select(Agent).where(Agent.id == agent_id)
         )
         agent = agent_result.scalar_one_or_none()
-        
+
         if not agent:
             raise ConversationManagementError("Agent not found")
-        
+
         # Create message
         message = Message(
             conversation_id=conversation_id,
@@ -676,12 +571,12 @@ async def escalate_conversation_by_id(
             sender_id=agent.user_id,
             metadata={"agent_id": str(agent_id), "agent_name": agent.name}
         )
-        
+
         self.db.add(message)
-        
+
         # Update conversation timestamp
         conversation.updated_at = datetime.now(timezone.utc)
-        
+
         await self.db.commit()
         await self.db.refresh(message)
 
@@ -720,3 +615,34 @@ async def escalate_conversation_by_id(
         await self.db.refresh(message)
 
         return message
+
+
+# ─── Convenience Functions ────────────────────────────────────────────────────
+
+async def get_workspace_conversation_list(
+    db: AsyncSession,
+    workspace_id: str,
+    status: Optional[str] = None,
+    limit: int = 50,
+    offset: int = 0
+) -> List[Conversation]:
+    """
+    Convenience function to get workspace conversations
+    """
+    manager = ConversationManager(db)
+    return await manager.get_workspace_conversations(
+        workspace_id, status, limit, offset
+    )
+
+
+async def escalate_conversation_by_id(
+    db: AsyncSession,
+    conversation_id: str,
+    workspace_id: str,
+    reason: Optional[str] = None
+) -> Optional[Conversation]:
+    """
+    Convenience function to escalate a conversation
+    """
+    manager = ConversationManager(db)
+    return await manager.escalate_conversation(conversation_id, workspace_id, reason)
