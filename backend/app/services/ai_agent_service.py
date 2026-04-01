@@ -25,7 +25,7 @@ async def create_agent(
     agent = AIAgent(workspace_id=workspace_id, **kwargs)
     db.add(agent)
     await db.commit()
-    await db.refresh(agent)
+    await db.refresh(agent, ["tools", "guardrails"])
     return agent
 
 
@@ -64,7 +64,7 @@ async def update_agent(
         if value is not None:
             setattr(agent, key, value)
     await db.commit()
-    await db.refresh(agent)
+    await db.refresh(agent, ["tools", "guardrails"])
     return agent
 
 
@@ -94,7 +94,7 @@ async def publish_agent(db: AsyncSession, agent: AIAgent) -> AIAgent:
 
     agent.is_draft = False
     await db.commit()
-    await db.refresh(agent)
+    await db.refresh(agent, ["tools", "guardrails"])
     return agent
 
 

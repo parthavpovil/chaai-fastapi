@@ -85,7 +85,7 @@ async def create_agent(
     return agent
 
 
-@router.get("", response_model=List[AIAgentResponse])
+@router.get("/", response_model=List[AIAgentResponse])
 async def list_agents(
     current_user: User = Depends(get_current_user),
     workspace: Workspace = Depends(get_current_workspace),
