@@ -78,7 +78,7 @@ class UsageTracker:
         count: int = 1,
         input_tokens: int = 0,
         output_tokens: int = 0
-    ) -> UsageCounter:
+    ) -> Dict[str, int]:
         """
         Increment message count and token usage for current month
         
@@ -89,7 +89,7 @@ class UsageTracker:
             output_tokens: Output tokens consumed
         
         Returns:
-            Updated UsageCounter
+            Dict with updated counts (not ORM object to avoid lazy loading issues)
         """
         month = self.get_current_month()
         
@@ -99,7 +99,7 @@ class UsageTracker:
         # Calculate total tokens
         total_tokens = input_tokens + output_tokens
         
-        # Update counters atomically
+        # Update counters atomically and return values directly
         stmt = update(UsageCounter).where(
             UsageCounter.workspace_id == workspace_id,
             UsageCounter.month == month
@@ -107,15 +107,17 @@ class UsageTracker:
             messages_sent=UsageCounter.messages_sent + count,
             tokens_used=UsageCounter.tokens_used + total_tokens,
             updated_at=datetime.now(timezone.utc)
-        ).returning(UsageCounter)
+        ).returning(UsageCounter.messages_sent, UsageCounter.tokens_used)
         
         result = await self.db.execute(stmt)
         await self.db.commit()
-        # expire_on_commit=False means stale identity map entries persist after commit.
-        # Expire manually so scalar_one() loads fresh values from the RETURNING buffer.
-        self.db.expire_all()
-
-        return result.scalar_one()
+        
+        # Get the values directly from the result
+        row = result.one()
+        return {
+            "messages_sent": row[0],
+            "tokens_used": row[1]
+        }
     
     async def get_monthly_usage(self, workspace_id: str, month: Optional[str] = None) -> Dict[str, int]:
         """
@@ -248,21 +250,16 @@ async def track_message_usage(
         Updated usage statistics for current month
     """
     tracker = UsageTracker(db)
-    counter = await tracker.increment_message_count(
+    result = await tracker.increment_message_count(
         workspace_id=workspace_id,
         count=1,
         input_tokens=input_tokens,
         output_tokens=output_tokens
     )
     
-    # Access attributes immediately while session is active
-    # to avoid lazy-loading issues
-    message_count = counter.messages_sent
-    tokens_used = counter.tokens_used
-    
     return {
-        "message_count": message_count,
-        "tokens_used": tokens_used
+        "message_count": result["messages_sent"],
+        "tokens_used": result["tokens_used"]
     }
 
 
