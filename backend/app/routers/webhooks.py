@@ -450,7 +450,7 @@ async def _run_message_pipeline(
                 ai_msg = await processor.create_message(
                     conversation_id=conversation_id,
                     content=agent_result.reply,
-                    role="ai",
+                    role="assistant",
                     channel_type=channel_type,
                     metadata={"ai_agent": True, "escalated": agent_result.escalated},
                 )

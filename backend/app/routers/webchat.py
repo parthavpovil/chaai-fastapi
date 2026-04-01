@@ -496,7 +496,7 @@ async def send_webchat_message(
                             ai_msg = await processor.create_message(
                                 conversation_id=conversation_id,
                                 content=agent_result.reply,
-                                role="ai",
+                                role="assistant",
                                 channel_type="webchat",
                                 metadata={"ai_agent": True, "escalated": agent_result.escalated},
                             )
