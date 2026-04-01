@@ -568,8 +568,7 @@ class ConversationManager:
             conversation_id=conversation_id,
             content=content,
             role="agent",
-            sender_id=agent.user_id,
-            metadata={"agent_id": str(agent_id), "agent_name": agent.name}
+            extra_data={"agent_id": str(agent_id), "agent_name": agent.name, "sender_id": str(agent.user_id)}
         )
 
         self.db.add(message)
@@ -604,8 +603,7 @@ class ConversationManager:
             conversation_id=conversation_id,
             content=content,
             role="agent",
-            sender_id=owner_user_id,
-            metadata={"sender_type": "owner"}
+            extra_data={"sender_type": "owner", "sender_id": str(owner_user_id)}
         )
 
         self.db.add(message)

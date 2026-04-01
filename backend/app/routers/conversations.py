@@ -824,11 +824,12 @@ async def send_agent_message(
             message_id=str(message.id)
         )
 
-        # Push to customer WS if this is a webchat conversation
+        # Push to customer channel (webchat WS or Telegram delivery)
         try:
             from sqlalchemy import select
             from app.models.conversation import Conversation
             from app.models.contact import Contact
+            from app.models.channel import Channel
             from app.services.websocket_events import notify_customer_new_message
             conv_row = await db.execute(
                 select(Conversation, Contact)
@@ -836,13 +837,33 @@ async def send_agent_message(
                 .where(Conversation.id == message.conversation_id)
             )
             row = conv_row.first()
-            if row and row[0].channel_type == "webchat":
-                await notify_customer_new_message(
-                    db=db,
-                    workspace_id=str(current_workspace.id),
-                    session_token=row[1].external_id,
-                    message_id=str(message.id),
-                )
+            if row:
+                conv, contact = row[0], row[1]
+                if conv.channel_type == "webchat":
+                    await notify_customer_new_message(
+                        db=db,
+                        workspace_id=str(current_workspace.id),
+                        session_token=contact.external_id,
+                        message_id=str(message.id),
+                    )
+                elif conv.channel_type == "telegram":
+                    from app.services.telegram_sender import send_telegram_message
+                    from app.services.encryption import decrypt_credential
+                    ch_row = await db.execute(select(Channel).where(Channel.id == contact.channel_id))
+                    ch = ch_row.scalar_one_or_none()
+                    if ch and ch.config and ch.config.get("bot_token"):
+                        bot_token = decrypt_credential(ch.config["bot_token"])
+                        sent = await send_telegram_message(
+                            bot_token=bot_token,
+                            chat_id=contact.external_id,
+                            text=request.content,
+                        )
+                        if not sent:
+                            import logging
+                            logging.getLogger(__name__).error(
+                                "Failed to deliver owner/agent message to Telegram for conversation_id=%s",
+                                conversation_id,
+                            )
         except Exception:
             pass  # never block the agent reply
 
