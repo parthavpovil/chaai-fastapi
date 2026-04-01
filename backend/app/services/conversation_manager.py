@@ -684,5 +684,39 @@ async def escalate_conversation_by_id(
         
         await self.db.commit()
         await self.db.refresh(message)
-        
+
+        return message
+
+    async def send_owner_message(
+        self,
+        conversation_id: str,
+        owner_user_id: str,
+        content: str,
+        workspace_id: str
+    ) -> Message:
+        """Send a message as the workspace owner, bypassing agent assignment checks."""
+        result = await self.db.execute(
+            select(Conversation)
+            .where(Conversation.id == conversation_id)
+            .where(Conversation.workspace_id == workspace_id)
+        )
+        conversation = result.scalar_one_or_none()
+
+        if not conversation:
+            raise ConversationManagementError("Conversation not found")
+
+        message = Message(
+            conversation_id=conversation_id,
+            content=content,
+            role="agent",
+            sender_id=owner_user_id,
+            metadata={"sender_type": "owner"}
+        )
+
+        self.db.add(message)
+        conversation.updated_at = datetime.now(timezone.utc)
+
+        await self.db.commit()
+        await self.db.refresh(message)
+
         return message

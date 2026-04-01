@@ -778,31 +778,42 @@ async def send_agent_message(
         HTTPException: If not authorized or conversation not found
     """
     try:
-        # Verify user is an active agent
         from sqlalchemy import select
-        result = await db.execute(
-            select(Agent).where(
-                Agent.user_id == current_user.id,
-                Agent.workspace_id == current_workspace.id,
-                Agent.is_active == True
-            )
-        )
-        agent = result.scalar_one_or_none()
-        
-        if not agent:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only active agents can send messages"
-            )
-        
-        # Send message
         manager = ConversationManager(db)
-        message = await manager.send_agent_message(
-            conversation_id=conversation_id,
-            agent_id=agent.id,
-            content=request.content,
-            workspace_id=current_workspace.id
-        )
+
+        # Workspace owners can always send messages
+        is_owner = str(current_workspace.owner_id) == str(current_user.id)
+
+        if is_owner:
+            message = await manager.send_owner_message(
+                conversation_id=conversation_id,
+                owner_user_id=str(current_user.id),
+                content=request.content,
+                workspace_id=str(current_workspace.id)
+            )
+        else:
+            # Verify user is an active agent
+            result = await db.execute(
+                select(Agent).where(
+                    Agent.user_id == current_user.id,
+                    Agent.workspace_id == current_workspace.id,
+                    Agent.is_active == True
+                )
+            )
+            agent = result.scalar_one_or_none()
+
+            if not agent:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Only active agents can send messages"
+                )
+
+            message = await manager.send_agent_message(
+                conversation_id=conversation_id,
+                agent_id=agent.id,
+                content=request.content,
+                workspace_id=str(current_workspace.id)
+            )
         
         # Send WebSocket notification to agents
         from app.services.websocket_events import notify_new_message
