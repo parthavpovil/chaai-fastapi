@@ -100,6 +100,9 @@ class WebSocketManager:
         
         # Lock for thread-safe operations
         self._lock = asyncio.Lock()
+        
+        # Log instance creation
+        logger.info(f"🏗️ WebSocketManager instance created: {id(self)}")
     
     def generate_connection_id(self, workspace_id: str, user_id: str) -> str:
         """
@@ -220,6 +223,11 @@ class WebSocketManager:
                 
                 self.workspace_connections[workspace_id][connection_id] = connection
                 self.connections[connection_id] = connection
+                
+                logger.info(f"✅ Connection added to pools:")
+                logger.info(f"   - workspace_connections[{workspace_id}] now has {len(self.workspace_connections[workspace_id])} connections")
+                logger.info(f"   - Total connections across all workspaces: {len(self.connections)}")
+                logger.info(f"   - All workspace IDs: {list(self.workspace_connections.keys())}")
             
             # Send connection confirmation
             await connection.send_message({
@@ -253,9 +261,12 @@ class WebSocketManager:
         async with self._lock:
             connection = self.connections.get(connection_id)
             if not connection:
+                logger.warning(f"⚠️ Disconnect called for unknown connection: {connection_id}")
                 return False
             
             workspace_id = connection.workspace_id
+            
+            logger.info(f"🔌 Disconnecting: {connection_id} from workspace {workspace_id}")
             
             # Remove from connection pools
             if workspace_id in self.workspace_connections:
@@ -264,8 +275,11 @@ class WebSocketManager:
                 # Clean up empty workspace pools
                 if not self.workspace_connections[workspace_id]:
                     del self.workspace_connections[workspace_id]
+                    logger.info(f"🗑️ Removed empty workspace pool: {workspace_id}")
             
             self.connections.pop(connection_id, None)
+            
+            logger.info(f"📊 After disconnect: {len(self.connections)} total connections, {len(self.workspace_connections)} workspaces")
             
             # Close WebSocket if still open
             try:
@@ -294,6 +308,7 @@ class WebSocketManager:
             Number of connections that received the message
         """
         logger.info(f"🔊 broadcast_to_workspace called: workspace_id={workspace_id}, message_type={message.get('type')}")
+        logger.info(f"📊 Manager instance: {id(self)}")
         logger.info(f"📊 Active workspaces: {list(self.workspace_connections.keys())}")
         
         if workspace_id not in self.workspace_connections:
