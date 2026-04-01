@@ -217,17 +217,23 @@ class WebSocketManager:
             # Add to connection pools
             async with self._lock:
                 workspace_id = connection.workspace_id
-                
-                if workspace_id not in self.workspace_connections:
+                is_first_for_workspace = workspace_id not in self.workspace_connections
+
+                if is_first_for_workspace:
                     self.workspace_connections[workspace_id] = {}
-                
+
                 self.workspace_connections[workspace_id][connection_id] = connection
                 self.connections[connection_id] = connection
-                
+
                 logger.info(f"✅ Connection added to pools:")
                 logger.info(f"   - workspace_connections[{workspace_id}] now has {len(self.workspace_connections[workspace_id])} connections")
                 logger.info(f"   - Total connections across all workspaces: {len(self.connections)}")
                 logger.info(f"   - All workspace IDs: {list(self.workspace_connections.keys())}")
+
+            # Subscribe to Redis channel for this workspace (idempotent)
+            if is_first_for_workspace:
+                from app.services.redis_pubsub import redis_pubsub
+                await redis_pubsub.subscribe(f"ws:agent:{workspace_id}")
             
             # Send connection confirmation
             await connection.send_message({
@@ -269,17 +275,24 @@ class WebSocketManager:
             logger.info(f"🔌 Disconnecting: {connection_id} from workspace {workspace_id}")
             
             # Remove from connection pools
+            workspace_empty = False
             if workspace_id in self.workspace_connections:
                 self.workspace_connections[workspace_id].pop(connection_id, None)
-                
+
                 # Clean up empty workspace pools
                 if not self.workspace_connections[workspace_id]:
                     del self.workspace_connections[workspace_id]
+                    workspace_empty = True
                     logger.info(f"🗑️ Removed empty workspace pool: {workspace_id}")
-            
+
             self.connections.pop(connection_id, None)
-            
+
             logger.info(f"📊 After disconnect: {len(self.connections)} total connections, {len(self.workspace_connections)} workspaces")
+
+        # Unsubscribe from Redis channel when no more local connections for this workspace
+        if workspace_empty:
+            from app.services.redis_pubsub import redis_pubsub
+            await redis_pubsub.unsubscribe(f"ws:agent:{workspace_id}")
             
             # Close WebSocket if still open
             try:
@@ -307,38 +320,12 @@ class WebSocketManager:
         Returns:
             Number of connections that received the message
         """
-        logger.info(f"🔊 broadcast_to_workspace called: workspace_id={workspace_id}, message_type={message.get('type')}")
-        logger.info(f"📊 Manager instance: {id(self)}")
-        logger.info(f"📊 Active workspaces: {list(self.workspace_connections.keys())}")
-        
-        if workspace_id not in self.workspace_connections:
-            logger.warning(f"❌ No connections found for workspace {workspace_id}")
-            return 0
-        
-        connections = self.workspace_connections[workspace_id].copy()
-        logger.info(f"👥 Found {len(connections)} connections for workspace {workspace_id}")
-        
-        sent_count = 0
-        failed_connections = []
-        
-        for connection_id, connection in connections.items():
-            if connection_id == exclude_connection_id:
-                continue
-            
-            success = await connection.send_message(message)
-            if success:
-                sent_count += 1
-                logger.info(f"✅ Sent to connection {connection_id}")
-            else:
-                logger.warning(f"❌ Failed to send to connection {connection_id}")
-                failed_connections.append(connection_id)
-        
-        # Clean up failed connections
-        for failed_id in failed_connections:
-            await self.disconnect(failed_id)
-        
-        logger.info(f"📤 Broadcast complete: {sent_count}/{len(connections)} successful")
-        return sent_count
+        logger.info(f"🔊 broadcast_to_workspace: workspace_id={workspace_id}, message_type={message.get('type')}")
+        from app.services.redis_pubsub import redis_pubsub
+        # Embed exclude hint so the listener can skip it on every worker
+        payload = {**message, "_exclude": exclude_connection_id} if exclude_connection_id else message
+        await redis_pubsub.publish(f"ws:agent:{workspace_id}", payload)
+        return 1
     
     async def send_to_connection(
         self,
@@ -460,6 +447,23 @@ class WebSocketManager:
             "workspace_connections": workspace_counts,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
+
+    async def deliver_to_local(self, workspace_id: str, message: dict) -> None:
+        """
+        Deliver a Redis pub/sub message to local WebSocket connections for this workspace.
+        Called by the Redis listener background task for every worker.
+        """
+        exclude_id = message.pop("_exclude", None)
+        connections = self.workspace_connections.get(workspace_id, {}).copy()
+        failed = []
+        for conn_id, conn in connections.items():
+            if conn_id == exclude_id:
+                continue
+            ok = await conn.send_message(message)
+            if not ok:
+                failed.append(conn_id)
+        for conn_id in failed:
+            await self.disconnect(conn_id)
 
 
 # ─── Global WebSocket Manager Instance ────────────────────────────────────────
@@ -657,7 +661,8 @@ class CustomerWebSocketManager:
             )
 
             async with self._lock:
-                if workspace_id not in self.customer_connections:
+                is_first_for_workspace = workspace_id not in self.customer_connections
+                if is_first_for_workspace:
                     self.customer_connections[workspace_id] = {}
 
                 # Replace any existing connection for this session_token
@@ -671,6 +676,11 @@ class CustomerWebSocketManager:
 
                 self.customer_connections[workspace_id][session_token] = connection
                 self.connections_by_id[connection_id] = connection
+
+            # Subscribe to Redis channel for this workspace (idempotent per worker)
+            if is_first_for_workspace:
+                from app.services.redis_pubsub import redis_pubsub
+                await redis_pubsub.subscribe(f"ws:customer:{workspace_id}")
 
             await connection.send_message({
                 "type": "connection_established",
@@ -692,6 +702,8 @@ class CustomerWebSocketManager:
 
     async def disconnect(self, connection_id: str) -> bool:
         """Remove connection from both pools and close the WebSocket."""
+        workspace_empty = False
+        workspace_id = None
         async with self._lock:
             connection = self.connections_by_id.get(connection_id)
             if not connection:
@@ -707,6 +719,7 @@ class CustomerWebSocketManager:
                 ws_pool.pop(session_token, None)
                 if not ws_pool:
                     self.customer_connections.pop(workspace_id, None)
+                    workspace_empty = True
 
             self.connections_by_id.pop(connection_id, None)
 
@@ -716,7 +729,12 @@ class CustomerWebSocketManager:
                 pass
 
             logger.info(f"Customer WS disconnected: {connection_id}")
-            return True
+
+        if workspace_empty and workspace_id:
+            from app.services.redis_pubsub import redis_pubsub
+            await redis_pubsub.unsubscribe(f"ws:customer:{workspace_id}")
+
+        return True
 
     async def send_to_session(
         self,
@@ -726,21 +744,33 @@ class CustomerWebSocketManager:
     ) -> bool:
         """
         Push a message to the customer identified by session_token.
-        Returns True if sent, False if no active connection (silent — never raises).
+        Publishes to Redis so all workers (including this one) can deliver it.
+        Returns True (fire-and-forget via pub/sub).
         """
         try:
-            ws_pool = self.customer_connections.get(workspace_id, {})
-            connection = ws_pool.get(session_token)
-            if not connection:
-                return False
-
-            success = await connection.send_message(message)
-            if not success:
-                await self.disconnect(connection.connection_id)
-            return success
+            from app.services.redis_pubsub import redis_pubsub
+            payload = {**message, "_session": session_token}
+            await redis_pubsub.publish(f"ws:customer:{workspace_id}", payload)
+            return True
         except Exception as e:
             logger.error(f"customer send_to_session error: {e}", exc_info=True)
             return False
+
+    async def deliver_to_local(self, workspace_id: str, message: dict) -> None:
+        """
+        Deliver a Redis pub/sub message to the local customer connection for this workspace.
+        Called by the Redis listener background task on every worker.
+        """
+        session_token = message.pop("_session", None)
+        if not session_token:
+            return
+        ws_pool = self.customer_connections.get(workspace_id, {})
+        connection = ws_pool.get(session_token)
+        if not connection:
+            return
+        ok = await connection.send_message(message)
+        if not ok:
+            await self.disconnect(connection.connection_id)
 
     async def handle_ping(self, connection_id: str) -> bool:
         """Update last_ping and send pong."""

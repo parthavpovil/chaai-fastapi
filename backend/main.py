@@ -42,6 +42,20 @@ async def lifespan(app: FastAPI):
     import asyncio
     asyncio.create_task(websocket_webchat.cleanup_stale_customer_connections())
 
+    # Start Redis pub/sub listener — forwards cross-worker broadcasts to local WS connections
+    from app.services.redis_pubsub import redis_pubsub
+    from app.services.websocket_manager import websocket_manager, customer_websocket_manager
+
+    async def _redis_dispatch(channel: str, message: dict) -> None:
+        if channel.startswith("ws:agent:"):
+            workspace_id = channel[len("ws:agent:"):]
+            await websocket_manager.deliver_to_local(workspace_id, message)
+        elif channel.startswith("ws:customer:"):
+            workspace_id = channel[len("ws:customer:"):]
+            await customer_websocket_manager.deliver_to_local(workspace_id, message)
+
+    asyncio.create_task(redis_pubsub.start_listener(_redis_dispatch))
+
     yield
     
     # Shutdown
