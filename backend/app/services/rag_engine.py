@@ -468,9 +468,15 @@ async def generate_rag_response(
         max_tokens=max_tokens
     )
     if conversation_id:
-        asyncio.create_task(
-            rag_engine.maybe_generate_summary(conversation_id, workspace_id)
-        )
+        # Fire-and-forget summary generation in background
+        # Use try/except to prevent task creation errors from breaking the response
+        try:
+            asyncio.create_task(
+                rag_engine.maybe_generate_summary(conversation_id, workspace_id)
+            )
+        except Exception:
+            # Silently ignore task creation errors - summary is optional
+            pass
     return result
 
 
