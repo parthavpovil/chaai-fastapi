@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebSocket Test Client</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .container {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .config {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .config input {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 4px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+        }
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        .status.connecting {
+            background: #fff3cd;
+            color: #856404;
+        }
+        button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-right: 10px;
+        }
+        button:hover {
+            background: #0056b3;
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .messages {
+            background: #f9f9f9;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 15px;
+            max-height: 500px;
+            overflow-y: auto;
+            margin-top: 20px;
+        }
+        .message {
+            padding: 10px;
+            margin: 5px 0;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+            background: white;
+        }
+        .message.new_message {
+            border-left-color: #28a745;
+        }
+        .message.escalation {
+            border-left-color: #dc3545;
+        }
+        .message.agent_claim {
+            border-left-color: #ffc107;
+        }
+        .message.connection_established {
+            border-left-color: #17a2b8;
+        }
+        .message-type {
+            font-weight: bold;
+            color: #007bff;
+            margin-bottom: 5px;
+        }
+        .message-content {
+            font-family: monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        .timestamp {
+            color: #666;
+            font-size: 11px;
+            margin-top: 5px;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        .stat-card {
+            background: #f9f9f9;
+            padding: 15px;
+            border-radius: 4px;
+            border-left: 4px solid #007bff;
+        }
+        .stat-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #007bff;
+        }
+        .stat-label {
+            color: #666;
+            font-size: 12px;
+            margin-top: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔌 WebSocket Test Client</h1>
+        
+        <div class="config">
+            <h3>Configuration</h3>
+            <input type="text" id="wsUrl" placeholder="WebSocket URL (e.g., ws://localhost:8000/ws/YOUR_WORKSPACE_ID)" value="ws://localhost:8000/ws/">
+            <input type="text" id="token" placeholder="JWT Token">
+            <div style="margin-top: 10px;">
+                <button id="connectBtn" onclick="connect()">Connect</button>
+                <button id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+                <button onclick="clearMessages()">Clear Messages</button>
+            </div>
+        </div>
+
+        <div id="status" class="status disconnected">
+            ⚫ Disconnected
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="totalMessages">0</div>
+                <div class="stat-label">Total Messages</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="newMessages">0</div>
+                <div class="stat-label">New Messages</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="escalations">0</div>
+                <div class="stat-label">Escalations</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="agentClaims">0</div>
+                <div class="stat-label">Agent Claims</div>
+            </div>
+        </div>
+
+        <h3>📨 Messages</h3>
+        <div id="messages" class="messages">
+            <p style="color: #666; text-align: center;">No messages yet. Connect and send a Telegram message to test.</p>
+        </div>
+    </div>
+
+    <script>
+        let ws = null;
+        let stats = {
+            total: 0,
+            new_message: 0,
+            escalation: 0,
+            agent_claim: 0
+        };
+
+        function updateStatus(status, message) {
+            const statusEl = document.getElementById('status');
+            statusEl.className = `status ${status}`;
+            statusEl.textContent = message;
+        }
+
+        function updateStats() {
+            document.getElementById('totalMessages').textContent = stats.total;
+            document.getElementById('newMessages').textContent = stats.new_message;
+            document.getElementById('escalations').textContent = stats.escalation;
+            document.getElementById('agentClaims').textContent = stats.agent_claim;
+        }
+
+        function addMessage(data) {
+            const messagesEl = document.getElementById('messages');
+            
+            // Clear placeholder
+            if (stats.total === 0) {
+                messagesEl.innerHTML = '';
+            }
+
+            const messageEl = document.createElement('div');
+            messageEl.className = `message ${data.type || 'unknown'}`;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            
+            messageEl.innerHTML = `
+                <div class="message-type">${data.type || 'unknown'}</div>
+                <div class="message-content">${JSON.stringify(data, null, 2)}</div>
+                <div class="timestamp">${timestamp}</div>
+            `;
+            
+            messagesEl.insertBefore(messageEl, messagesEl.firstChild);
+            
+            // Update stats
+            stats.total++;
+            if (data.type && stats.hasOwnProperty(data.type)) {
+                stats[data.type]++;
+            }
+            updateStats();
+
+            // Play sound for new messages
+            if (data.type === 'new_message') {
+                playNotificationSound();
+            }
+        }
+
+        function playNotificationSound() {
+            // Create a simple beep sound
+            const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            const oscillator = audioContext.createOscillator();
+            const gainNode = audioContext.createGain();
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioContext.destination);
+            
+            oscillator.frequency.value = 800;
+            oscillator.type = 'sine';
+            
+            gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+            gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.1);
+            
+            oscillator.start(audioContext.currentTime);
+            oscillator.stop(audioContext.currentTime + 0.1);
+        }
+
+        function connect() {
+            const wsUrl = document.getElementById('wsUrl').value;
+            const token = document.getElementById('token').value;
+
+            if (!wsUrl || !token) {
+                alert('Please enter both WebSocket URL and JWT token');
+                return;
+            }
+
+            const fullUrl = `${wsUrl}?token=${encodeURIComponent(token)}`;
+            
+            updateStatus('connecting', '🟡 Connecting...');
+            console.log('Connecting to:', fullUrl);
+
+            ws = new WebSocket(fullUrl);
+
+            ws.onopen = () => {
+                console.log('✅ WebSocket connected');
+                updateStatus('connected', '🟢 Connected');
+                document.getElementById('connectBtn').disabled = true;
+                document.getElementById('disconnectBtn').disabled = false;
+            };
+
+            ws.onmessage = (event) => {
+                console.log('📨 Received:', event.data);
+                try {
+                    const data = JSON.parse(event.data);
+                    addMessage(data);
+                } catch (e) {
+                    console.error('Failed to parse message:', e);
+                }
+            };
+
+            ws.onerror = (error) => {
+                console.error('❌ WebSocket error:', error);
+                updateStatus('disconnected', '🔴 Error');
+            };
+
+            ws.onclose = () => {
+                console.log('🔌 WebSocket closed');
+                updateStatus('disconnected', '⚫ Disconnected');
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+                ws = null;
+            };
+        }
+
+        function disconnect() {
+            if (ws) {
+                ws.close();
+            }
+        }
+
+        function clearMessages() {
+            document.getElementById('messages').innerHTML = '<p style="color: #666; text-align: center;">No messages yet. Connect and send a Telegram message to test.</p>';
+            stats = {
+                total: 0,
+                new_message: 0,
+                escalation: 0,
+                agent_claim: 0
+            };
+            updateStats();
+        }
+
+        // Auto-fill from localStorage if available
+        window.onload = () => {
+            const savedUrl = localStorage.getItem('wsUrl');
+            const savedToken = localStorage.getItem('token');
+            
+            if (savedUrl) document.getElementById('wsUrl').value = savedUrl;
+            if (savedToken) document.getElementById('token').value = savedToken;
+        };
+
+        // Save to localStorage on change
+        document.getElementById('wsUrl').addEventListener('change', (e) => {
+            localStorage.setItem('wsUrl', e.target.value);
+        });
+        document.getElementById('token').addEventListener('change', (e) => {
+            localStorage.setItem('token', e.target.value);
+        });
+    </script>
+</body>
+</html>

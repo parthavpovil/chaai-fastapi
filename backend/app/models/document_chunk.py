@@ -5,7 +5,7 @@ Vector embeddings for RAG (Retrieval Augmented Generation)
 from uuid import UUID, uuid4
 from datetime import datetime
 from sqlalchemy import Column, Integer, Text, DateTime, func, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import UUID as PostgresUUID, JSONB
+from sqlalchemy.dialects.postgresql import UUID as PostgresUUID, JSONB, TSVECTOR
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
 
@@ -26,6 +26,7 @@ class DocumentChunk(Base):
     start_char = Column(Integer, nullable=True)
     end_char = Column(Integer, nullable=True)
     chunk_metadata = Column("metadata", JSONB, nullable=True)
+    content_tsv = Column(TSVECTOR, nullable=True)  # populated via bulk UPDATE in embedding_service
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships
@@ -35,8 +36,8 @@ class DocumentChunk(Base):
     # Indexes for performance
     __table_args__ = (
         Index("ix_chunks_workspace_embedding", "workspace_id"),
-        # HNSW index for vector similarity search will be created in migration
-        # CREATE INDEX idx_chunks_embedding_hnsw ON document_chunks USING hnsw (embedding vector_cosine_ops);
+        # HNSW index: idx_chunks_embedding_hnsw (created in migration 023)
+        # GIN index:  idx_chunks_content_tsv_gin  (created in migration 023)
     )
 
     def __repr__(self) -> str:
