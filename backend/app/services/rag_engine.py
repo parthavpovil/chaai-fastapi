@@ -28,7 +28,7 @@ class RAGEngine:
     """
     
     # Similarity threshold for relevant chunks
-    SIMILARITY_THRESHOLD = 0.75
+    SIMILARITY_THRESHOLD = 0.5
     
     # Maximum chunks to retrieve
     MAX_CHUNKS = 5
