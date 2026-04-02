@@ -95,23 +95,24 @@ class RAGEngine:
         embedding_str = '[' + ','.join(map(str, query_embedding)) + ']'
         
         # Vector similarity search using cosine similarity
-        # Note: This uses pgvector extension with <=> operator for cosine distance
-        query_sql = text("""
+        # Note: embedding_str is injected directly (not as a bind param) because asyncpg
+        # does not support the ::vector cast syntax on named parameters. The value is
+        # always a list of floats from the embedding provider, so there is no injection risk.
+        query_sql = text(f"""
             SELECT dc.*, d.name as filename, d.workspace_id,
-                   1 - (dc.embedding <=> :query_embedding::vector) as similarity
+                   1 - (dc.embedding <=> '{embedding_str}'::vector) as similarity
             FROM document_chunks dc
             JOIN documents d ON dc.document_id = d.id
             WHERE d.workspace_id = :workspace_id
               AND d.status = 'completed'
-              AND 1 - (dc.embedding <=> :query_embedding::vector) >= :threshold
-            ORDER BY dc.embedding <=> :query_embedding::vector
+              AND 1 - (dc.embedding <=> '{embedding_str}'::vector) >= :threshold
+            ORDER BY dc.embedding <=> '{embedding_str}'::vector
             LIMIT :max_chunks
         """)
-        
+
         result = await self.db.execute(
             query_sql,
             {
-                'query_embedding': embedding_str,
                 'workspace_id': workspace_id,
                 'threshold': similarity_threshold,
                 'max_chunks': max_chunks
