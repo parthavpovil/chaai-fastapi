@@ -28,7 +28,7 @@ class RAGEngine:
     """
     
     # Similarity threshold for relevant chunks
-    SIMILARITY_THRESHOLD = 0.25
+    SIMILARITY_THRESHOLD = 0.20
     
     # Maximum chunks to retrieve
     MAX_CHUNKS = 5
@@ -42,6 +42,25 @@ class RAGEngine:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.embedding_service = EmbeddingService(db)
+    
+    async def expand_query(self, query: str) -> str:
+        """
+        Expand vague or short queries to improve retrieval.
+        Uses LLM to rephrase the query with more context.
+        """
+        if len(query.split()) >= 5:
+            return query  # Query is already detailed enough
+        
+        try:
+            expansion_prompt = f"Rephrase this customer question to be more specific and detailed, keeping the same meaning: '{query}'"
+            expanded, _, _ = await self.generate_response(
+                prompt=expansion_prompt,
+                max_tokens=50,
+                temperature=0.3
+            )
+            return expanded.strip()
+        except:
+            return query  # Fallback to original on error
     
     async def generate_query_embedding(self, query: str) -> List[float]:
         """
@@ -355,30 +374,38 @@ class RAGEngine:
         logger = logging.getLogger(__name__)
         
         try:
-            # 1. Generate query embedding
-            logger.info("🔍 Step 1: Generating query embedding")
-            query_embedding = await self.generate_query_embedding(query)
+            # 1. Expand query if it's too short/vague
+            logger.info("🔍 Step 1: Expanding query if needed")
+            expanded_query = await self.expand_query(query)
+            if expanded_query != query:
+                logger.info(f"✅ Query expanded: '{query}' → '{expanded_query}'")
+            else:
+                logger.info(f"✅ Query used as-is: '{query}'")
+            
+            # 2. Generate query embedding
+            logger.info("🔍 Step 2: Generating query embedding")
+            query_embedding = await self.generate_query_embedding(expanded_query)
             logger.info(f"✅ Query embedding generated: {len(query_embedding)} dimensions")
             
-            # 2. Search for similar chunks
-            logger.info("🔍 Step 2: Searching for similar chunks")
+            # 3. Search for similar chunks
+            logger.info("🔍 Step 3: Searching for similar chunks")
             relevant_chunks = await self.search_similar_chunks(
                 workspace_id, query_embedding
             )
             logger.info(f"✅ Found {len(relevant_chunks)} relevant chunks")
             
-            # 3. Get conversation context if available
+            # 4. Get conversation context if available
             conversation_history = []
             conversation_summary = None
             if conversation_id:
-                logger.info("🔍 Step 3: Getting conversation context")
+                logger.info("🔍 Step 4: Getting conversation context")
                 conversation_history = await self.get_conversation_context(
                     conversation_id, workspace_id
                 )
                 logger.info(f"✅ Got {len(conversation_history)} conversation messages")
                 
                 # Load any existing summary from conversation.metadata
-                logger.info("🔍 Step 3b: Loading conversation summary")
+                logger.info("🔍 Step 4b: Loading conversation summary")
                 conv_result = await self.db.execute(
                     select(Conversation).where(Conversation.id == conversation_id)
                 )
@@ -387,8 +414,8 @@ class RAGEngine:
                     conversation_summary = conv.meta.get("summary")
                 logger.info(f"✅ Conversation summary loaded: {bool(conversation_summary)}")
 
-            # 4. Get workspace fallback message
-            logger.info("🔍 Step 4: Getting workspace fallback message")
+            # 5. Get workspace fallback message
+            logger.info("🔍 Step 5: Getting workspace fallback message")
             workspace_result = await self.db.execute(
                 select(Workspace.fallback_msg)
                 .where(Workspace.id == workspace_id)
@@ -396,8 +423,8 @@ class RAGEngine:
             fallback_message = workspace_result.scalar_one_or_none()
             logger.info(f"✅ Fallback message loaded: {bool(fallback_message)}")
 
-            # 5. Build context messages (system + user split for token efficiency)
-            logger.info("🔍 Step 5: Building context prompt")
+            # 6. Build context messages (system + user split for token efficiency)
+            logger.info("🔍 Step 6: Building context prompt")
             context_messages = self.build_context_prompt(
                 query=query,
                 relevant_chunks=relevant_chunks,
@@ -407,8 +434,8 @@ class RAGEngine:
             )
             logger.info(f"✅ Context prompt built: {len(context_messages)} messages")
 
-            # 6. Generate response
-            logger.info("🔍 Step 6: Generating AI response")
+            # 7. Generate response
+            logger.info("🔍 Step 7: Generating AI response")
             response_text, input_tokens, output_tokens = await self.generate_response(
                 messages=context_messages,
                 max_tokens=max_tokens,
@@ -416,7 +443,7 @@ class RAGEngine:
             )
             logger.info(f"✅ AI response generated: {len(response_text)} chars, {input_tokens} in / {output_tokens} out")
             
-            logger.info("🔍 Step 7: Building result dictionary")
+            logger.info("🔍 Step 8: Building result dictionary")
             result = {
                 'response': response_text,
                 'input_tokens': input_tokens,
