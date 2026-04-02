@@ -103,7 +103,7 @@ class RAGEngine:
                    1 - (dc.embedding <=> '{embedding_str}'::vector) as similarity
             FROM document_chunks dc
             JOIN documents d ON dc.document_id = d.id
-            WHERE d.workspace_id = :workspace_id::uuid
+            WHERE d.workspace_id = CAST(:workspace_id AS UUID)
               AND d.status = 'completed'
               AND 1 - (dc.embedding <=> '{embedding_str}'::vector) >= :threshold
             ORDER BY dc.embedding <=> '{embedding_str}'::vector
