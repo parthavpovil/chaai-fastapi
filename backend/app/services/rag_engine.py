@@ -98,13 +98,13 @@ class RAGEngine:
         # Note: This uses pgvector extension with <=> operator for cosine distance
         query_sql = text("""
             SELECT dc.*, d.name as filename, d.workspace_id,
-                   1 - (dc.embedding <=> :query_embedding) as similarity
+                   1 - (dc.embedding <=> :query_embedding::vector) as similarity
             FROM document_chunks dc
             JOIN documents d ON dc.document_id = d.id
             WHERE d.workspace_id = :workspace_id
               AND d.status = 'completed'
-              AND 1 - (dc.embedding <=> :query_embedding) >= :threshold
-            ORDER BY dc.embedding <=> :query_embedding
+              AND 1 - (dc.embedding <=> :query_embedding::vector) >= :threshold
+            ORDER BY dc.embedding <=> :query_embedding::vector
             LIMIT :max_chunks
         """)
         
