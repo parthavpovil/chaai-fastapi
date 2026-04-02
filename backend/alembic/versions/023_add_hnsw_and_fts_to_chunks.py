@@ -1,24 +1,17 @@
-"""Add content_tsv column and GIN index to document_chunks
+"""Add content_tsv, GIN index, and HNSW index to document_chunks
 
 Revision ID: 023_hnsw_fts_chunks
 Revises: 022_add_routing_settings
 Create Date: 2026-04-02
 
 Changes:
+- Truncate document_chunks and documents (existing data not needed)
 - Add content_tsv tsvector column for BM25 / full-text search
 - Create GIN index on content_tsv
+- Create HNSW index on embedding (vector_cosine_ops)
 
-Both operations are instant: ADD COLUMN is O(1) metadata DDL, and the GIN
-index has nothing to build because existing rows have content_tsv = NULL
-(GIN skips NULLs). New chunks get content_tsv populated by the application.
-
-NOTE: The HNSW vector index must be created manually after deployment because
-it indexes the existing embedding column and takes several minutes:
-
-  docker exec -it chatsaas-postgres psql -U <user> -d <db> -c \
-    "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chunks_embedding_hnsw \
-     ON document_chunks USING hnsw (embedding vector_cosine_ops) \
-     WITH (m = 16, ef_construction = 64);"
+All operations complete in milliseconds because the table is empty after truncation.
+New documents must be re-uploaded after deployment.
 """
 
 from alembic import op
@@ -30,14 +23,27 @@ depends_on = None
 
 
 def upgrade() -> None:
+    # Clear existing data so index builds are instant (empty table = no work)
+    op.execute("TRUNCATE TABLE document_chunks CASCADE")
+    op.execute("TRUNCATE TABLE documents CASCADE")
+
+    # Add content_tsv column
     op.execute(
         "ALTER TABLE document_chunks "
         "ADD COLUMN IF NOT EXISTS content_tsv tsvector"
     )
-    # Fast: GIN skips NULL rows, so this is instant on existing data
+
+    # GIN index for BM25 full-text search (instant on empty table)
     op.execute(
         "CREATE INDEX IF NOT EXISTS idx_chunks_content_tsv_gin "
         "ON document_chunks USING GIN (content_tsv)"
+    )
+
+    # HNSW index for fast vector search (instant on empty table)
+    op.execute(
+        "CREATE INDEX IF NOT EXISTS idx_chunks_embedding_hnsw "
+        "ON document_chunks USING hnsw (embedding vector_cosine_ops) "
+        "WITH (m = 16, ef_construction = 64)"
     )
 
 
