@@ -23,8 +23,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Clear existing data so index builds are instant (empty table = no work)
-    op.execute("TRUNCATE TABLE document_chunks CASCADE")
+    # Clear existing data so index builds are instant (empty table = no work).
+    # CASCADE covers document_chunks via the FK on document_id.
+    # On a fresh server these tables are already empty — TRUNCATE is a no-op.
     op.execute("TRUNCATE TABLE documents CASCADE")
 
     # Add content_tsv column
