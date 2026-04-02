@@ -275,10 +275,10 @@ async def reprocess_document(
         if not document:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-        if document.status not in ["failed", "completed", "processing"]:
+        if document.status not in ["failed", "completed", "processing", "pending"]:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Document can only be reprocessed if failed, completed, or stuck in processing"
+                detail="Document can only be reprocessed if failed, completed, pending, or stuck in processing"
             )
 
         processor = DocumentProcessor(db)

@@ -28,7 +28,7 @@ class RAGEngine:
     """
     
     # Similarity threshold for relevant chunks
-    SIMILARITY_THRESHOLD = 0.5
+    SIMILARITY_THRESHOLD = 0.25
     
     # Maximum chunks to retrieve
     MAX_CHUNKS = 5
@@ -98,51 +98,6 @@ class RAGEngine:
         # Note: embedding_str is injected directly (not as a bind param) because asyncpg
         # does not support the ::vector cast syntax on named parameters. The value is
         # always a list of floats from the embedding provider, so there is no injection risk.
-        
-        # DEBUG: Log workspace_id and check for documents
-        import logging
-        logger = logging.getLogger(__name__)
-        logger.info(f"🔍 search_similar_chunks: workspace_id={workspace_id} (type: {type(workspace_id)})")
-        
-        # Check if there are ANY documents for this workspace
-        debug_query = text("""
-            SELECT COUNT(*) as total_docs, 
-                   COUNT(CASE WHEN status = 'completed' THEN 1 END) as completed_docs
-            FROM documents 
-            WHERE workspace_id = CAST(:workspace_id AS UUID)
-        """)
-        debug_result = await self.db.execute(debug_query, {'workspace_id': workspace_id})
-        debug_row = debug_result.fetchone()
-        logger.info(f"📊 Documents in workspace: total={debug_row.total_docs}, completed={debug_row.completed_docs}")
-        
-        # Check if there are ANY chunks for this workspace
-        chunk_debug_query = text("""
-            SELECT COUNT(*) as total_chunks
-            FROM document_chunks dc
-            JOIN documents d ON dc.document_id = d.id
-            WHERE d.workspace_id = CAST(:workspace_id AS UUID)
-        """)
-        chunk_debug_result = await self.db.execute(chunk_debug_query, {'workspace_id': workspace_id})
-        chunk_debug_row = chunk_debug_result.fetchone()
-        logger.info(f"📊 Chunks in workspace: total={chunk_debug_row.total_chunks}")
-        
-        # Check top similarities WITHOUT threshold to see what we're getting
-        similarity_check_query = text(f"""
-            SELECT d.name as filename,
-                   1 - (dc.embedding <=> '{embedding_str}'::vector) as similarity
-            FROM document_chunks dc
-            JOIN documents d ON dc.document_id = d.id
-            WHERE d.workspace_id = CAST(:workspace_id AS UUID)
-              AND d.status = 'completed'
-            ORDER BY dc.embedding <=> '{embedding_str}'::vector
-            LIMIT 5
-        """)
-        similarity_check_result = await self.db.execute(similarity_check_query, {'workspace_id': workspace_id})
-        top_similarities = similarity_check_result.fetchall()
-        logger.info(f"🎯 Top 5 similarities (threshold={similarity_threshold}):")
-        for row in top_similarities:
-            logger.info(f"   - {row.filename}: {row.similarity:.4f}")
-        
         query_sql = text(f"""
             SELECT dc.*, d.name as filename, d.workspace_id,
                    1 - (dc.embedding <=> '{embedding_str}'::vector) as similarity
