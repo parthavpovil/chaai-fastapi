@@ -20,38 +20,37 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # 1. Add content_tsv column (transactional)
+    # 1. Add content_tsv column
     op.execute(
         "ALTER TABLE document_chunks "
         "ADD COLUMN IF NOT EXISTS content_tsv tsvector"
     )
 
-    # 2. Backfill existing rows (transactional)
+    # 2. Backfill existing rows
     op.execute(
         "UPDATE document_chunks "
         "SET content_tsv = to_tsvector('english', content) "
         "WHERE content_tsv IS NULL"
     )
 
-    # 3. Indexes require CONCURRENTLY which cannot run inside a transaction.
-    #    Commit the current Alembic transaction first — same pattern as migration 010.
-    op.execute("COMMIT")
-
+    # 3. Create indexes inside the Alembic transaction (no CONCURRENTLY).
+    #    Regular CREATE INDEX is faster for migrations; the brief table lock
+    #    is acceptable during a controlled deployment.
     op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chunks_embedding_hnsw "
+        "CREATE INDEX IF NOT EXISTS idx_chunks_embedding_hnsw "
         "ON document_chunks USING hnsw (embedding vector_cosine_ops) "
         "WITH (m = 16, ef_construction = 64)"
     )
 
     op.execute(
-        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chunks_content_tsv_gin "
+        "CREATE INDEX IF NOT EXISTS idx_chunks_content_tsv_gin "
         "ON document_chunks USING GIN (content_tsv)"
     )
 
 
 def downgrade() -> None:
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_chunks_content_tsv_gin")
-    op.execute("DROP INDEX CONCURRENTLY IF EXISTS idx_chunks_embedding_hnsw")
+    op.execute("DROP INDEX IF EXISTS idx_chunks_content_tsv_gin")
+    op.execute("DROP INDEX IF EXISTS idx_chunks_embedding_hnsw")
     op.execute(
         "ALTER TABLE document_chunks DROP COLUMN IF EXISTS content_tsv"
     )
