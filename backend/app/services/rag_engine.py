@@ -323,6 +323,9 @@ class RAGEngine:
             emb = chunk.embedding
             if emb is None:
                 emb = [0.0] * dim
+            elif isinstance(emb, str):
+                import json
+                emb = json.loads(emb)
             emb_list.append(emb)
 
         emb_matrix = np.array(emb_list, dtype=np.float32)
