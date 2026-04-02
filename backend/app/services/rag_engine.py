@@ -126,6 +126,23 @@ class RAGEngine:
         chunk_debug_row = chunk_debug_result.fetchone()
         logger.info(f"📊 Chunks in workspace: total={chunk_debug_row.total_chunks}")
         
+        # Check top similarities WITHOUT threshold to see what we're getting
+        similarity_check_query = text(f"""
+            SELECT d.name as filename,
+                   1 - (dc.embedding <=> '{embedding_str}'::vector) as similarity
+            FROM document_chunks dc
+            JOIN documents d ON dc.document_id = d.id
+            WHERE d.workspace_id = CAST(:workspace_id AS UUID)
+              AND d.status = 'completed'
+            ORDER BY dc.embedding <=> '{embedding_str}'::vector
+            LIMIT 5
+        """)
+        similarity_check_result = await self.db.execute(similarity_check_query, {'workspace_id': workspace_id})
+        top_similarities = similarity_check_result.fetchall()
+        logger.info(f"🎯 Top 5 similarities (threshold={similarity_threshold}):")
+        for row in top_similarities:
+            logger.info(f"   - {row.filename}: {row.similarity:.4f}")
+        
         query_sql = text(f"""
             SELECT dc.*, d.name as filename, d.workspace_id,
                    1 - (dc.embedding <=> '{embedding_str}'::vector) as similarity
