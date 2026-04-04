@@ -11,7 +11,7 @@ from sqlalchemy import select
 from pydantic import BaseModel, Field
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.api_key import APIKey
@@ -19,7 +19,11 @@ from app.services.api_key_service import generate_api_key
 from app.config import TIER_LIMITS
 
 
-router = APIRouter(prefix="/api/api-keys", tags=["api-keys"])
+router = APIRouter(
+    prefix="/api/api-keys",
+    tags=["api-keys"],
+    dependencies=[Depends(require_permission("integrations.api_keys"))],
+)
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────

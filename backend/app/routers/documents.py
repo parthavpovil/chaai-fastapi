@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.document import Document
@@ -16,7 +16,11 @@ from app.services.document_processor import DocumentProcessor, DocumentProcessin
 from app.services.tier_manager import TierManager, TierLimitError
 
 
-router = APIRouter(prefix="/api/documents", tags=["documents"])
+router = APIRouter(
+    prefix="/api/documents",
+    tags=["documents"],
+    dependencies=[Depends(require_permission("knowledge_base.documents"))],
+)
 
 
 # ─── Request/Response Models ──────────────────────────────────────────────────

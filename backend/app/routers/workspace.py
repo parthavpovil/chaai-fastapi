@@ -9,7 +9,7 @@ from sqlalchemy import select, func
 from pydantic import BaseModel, Field
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.conversation import Conversation
@@ -58,7 +58,7 @@ class WorkspaceOverview(BaseModel):
 
 # ─── Endpoints ────────────────────────────────────────────────────────────────
 
-@router.put("/ai-config")
+@router.put("/ai-config", dependencies=[Depends(require_permission("ai.workspace_settings"))])
 async def update_ai_config(
     request: AIConfigUpdate,
     current_user: User = Depends(get_current_user),
@@ -85,7 +85,7 @@ async def update_ai_config(
     return {"status": "updated", "ai_provider": request.ai_provider, "ai_model": meta.get("ai_model")}
 
 
-@router.get("/ai-config")
+@router.get("/ai-config", dependencies=[Depends(require_permission("ai.workspace_settings"))])
 async def get_ai_config(
     current_user: User = Depends(get_current_user),
     current_workspace: Workspace = Depends(get_current_workspace),
@@ -99,7 +99,7 @@ async def get_ai_config(
     }
 
 
-@router.put("/ai-pipeline")
+@router.put("/ai-pipeline", dependencies=[Depends(require_permission("ai.workspace_settings"))])
 async def update_ai_pipeline(
     request: AIPipelineConfigUpdate,
     current_user: User = Depends(get_current_user),
@@ -133,7 +133,7 @@ async def update_ai_pipeline(
     }
 
 
-@router.get("/ai-pipeline")
+@router.get("/ai-pipeline", dependencies=[Depends(require_permission("ai.workspace_settings"))])
 async def get_ai_pipeline(
     current_user: User = Depends(get_current_user),
     current_workspace: Workspace = Depends(get_current_workspace),
@@ -148,7 +148,7 @@ async def get_ai_pipeline(
     }
 
 
-@router.get("/settings")
+@router.get("/settings", dependencies=[Depends(require_permission("workspace.settings"))])
 async def get_workspace_settings(
     current_user: User = Depends(get_current_user),
     current_workspace: Workspace = Depends(get_current_workspace),
@@ -170,7 +170,7 @@ async def get_workspace_settings(
     }
 
 
-@router.put("/settings")
+@router.put("/settings", dependencies=[Depends(require_permission("workspace.settings"))])
 async def update_workspace_settings(
     request: WorkspaceSettingsUpdate,
     current_user: User = Depends(get_current_user),

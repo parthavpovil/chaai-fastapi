@@ -14,7 +14,7 @@ import csv
 import io
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace, get_current_agent
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, get_current_agent, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.agent import Agent
@@ -350,7 +350,7 @@ async def search_conversations(
     )
 
 
-@router.get("/export")
+@router.get("/export", dependencies=[Depends(require_permission("inbox.export"))])
 async def export_conversations_csv(
     q: Optional[str] = Query(None),
     contact_name_filter: Optional[str] = Query(None, alias="contact_name"),
@@ -534,7 +534,7 @@ async def get_conversation(
         )
 
 
-@router.post("/claim", response_model=dict)
+@router.post("/claim", response_model=dict, dependencies=[Depends(require_permission("inbox.claim"))])
 async def claim_conversation(
     request: ConversationClaimRequest,
     current_user: User = Depends(get_current_user),
@@ -977,7 +977,7 @@ async def get_conversation_statistics(
 
 # ─── Agent-Specific Endpoints ─────────────────────────────────────────────────
 
-@router.get("/my/active", response_model=ConversationListResponse)
+@router.get("/my/active", response_model=ConversationListResponse, dependencies=[Depends(require_permission("inbox.my_active"))])
 async def get_my_active_conversations(
     limit: int = Query(50, ge=1, le=100, description="Maximum number of conversations to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),

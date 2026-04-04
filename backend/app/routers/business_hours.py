@@ -10,13 +10,17 @@ from sqlalchemy import select
 from pydantic import BaseModel, Field
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.business_hours import BusinessHours
 
 
-router = APIRouter(prefix="/api/workspace/business-hours", tags=["business-hours"])
+router = APIRouter(
+    prefix="/api/workspace/business-hours",
+    tags=["business-hours"],
+    dependencies=[Depends(require_permission("productivity.business_hours"))],
+)
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────

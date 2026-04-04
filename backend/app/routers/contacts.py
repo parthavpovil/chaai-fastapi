@@ -11,7 +11,7 @@ from sqlalchemy import select, func, or_
 from pydantic import BaseModel, Field
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.contact import Contact
@@ -228,7 +228,7 @@ async def update_contact(
     return _to_out(contact)
 
 
-@router.post("/{contact_id}/block", response_model=dict)
+@router.post("/{contact_id}/block", response_model=dict, dependencies=[Depends(require_permission("contacts.moderation"))])
 async def block_contact(
     contact_id: str,
     current_user: User = Depends(get_current_user),
@@ -250,7 +250,7 @@ async def block_contact(
     return {"message": "Contact blocked", "contact_id": contact_id}
 
 
-@router.post("/{contact_id}/unblock", response_model=dict)
+@router.post("/{contact_id}/unblock", response_model=dict, dependencies=[Depends(require_permission("contacts.moderation"))])
 async def unblock_contact(
     contact_id: str,
     current_user: User = Depends(get_current_user),
@@ -272,7 +272,7 @@ async def unblock_contact(
     return {"message": "Contact unblocked", "contact_id": contact_id}
 
 
-@router.delete("/{contact_id}", status_code=204)
+@router.delete("/{contact_id}", status_code=204, dependencies=[Depends(require_permission("contacts.moderation"))])
 async def delete_contact(
     contact_id: str,
     current_user: User = Depends(get_current_user),

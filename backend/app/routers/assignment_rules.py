@@ -10,14 +10,17 @@ from sqlalchemy import select
 from pydantic import BaseModel, Field
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.assignment_rule import AssignmentRule
-from app.config import TIER_LIMITS
 
 
-router = APIRouter(prefix="/api/assignment-rules", tags=["assignment-rules"])
+router = APIRouter(
+    prefix="/api/assignment-rules",
+    tags=["assignment-rules"],
+    dependencies=[Depends(require_permission("productivity.assignment_rules"))],
+)
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────
@@ -54,15 +57,6 @@ class AssignmentRuleOut(BaseModel):
 
 # ─── Helper ───────────────────────────────────────────────────────────────────
 
-def _require_pro(workspace: Workspace) -> None:
-    tier = workspace.tier or "free"
-    if not TIER_LIMITS.get(tier, {}).get("has_assignment_rules", False):
-        raise HTTPException(
-            status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail="Assignment rules require Pro tier. Please upgrade."
-        )
-
-
 def _to_out(rule: AssignmentRule) -> AssignmentRuleOut:
     return AssignmentRuleOut(
         id=str(rule.id),
@@ -87,9 +81,7 @@ async def create_rule(
     db: AsyncSession = Depends(get_db)
 ):
     """Create an assignment rule (Pro tier, owner only)."""
-    _require_pro(current_workspace)
-
-    target = UUID(request.target_agent_id) if request.target_agent_id else None
+target = UUID(request.target_agent_id) if request.target_agent_id else None
     rule = AssignmentRule(
         workspace_id=current_workspace.id,
         name=request.name,
@@ -112,9 +104,7 @@ async def list_rules(
     db: AsyncSession = Depends(get_db)
 ):
     """List assignment rules (Pro tier, owner only)."""
-    _require_pro(current_workspace)
-
-    result = await db.execute(
+result = await db.execute(
         select(AssignmentRule)
         .where(AssignmentRule.workspace_id == current_workspace.id)
         .order_by(AssignmentRule.priority.asc())
@@ -131,9 +121,7 @@ async def update_rule(
     db: AsyncSession = Depends(get_db)
 ):
     """Update an assignment rule (Pro tier, owner only)."""
-    _require_pro(current_workspace)
-
-    result = await db.execute(
+result = await db.execute(
         select(AssignmentRule)
         .where(AssignmentRule.id == UUID(rule_id))
         .where(AssignmentRule.workspace_id == current_workspace.id)
@@ -168,9 +156,7 @@ async def delete_rule(
     db: AsyncSession = Depends(get_db)
 ):
     """Delete an assignment rule (Pro tier, owner only)."""
-    _require_pro(current_workspace)
-
-    result = await db.execute(
+result = await db.execute(
         select(AssignmentRule)
         .where(AssignmentRule.id == UUID(rule_id))
         .where(AssignmentRule.workspace_id == current_workspace.id)

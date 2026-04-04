@@ -28,6 +28,7 @@ from .whatsapp_template import WhatsAppTemplate
 from .broadcast import Broadcast, BroadcastRecipient
 from .email_log import EmailLog
 from .ai_agent import AIAgent, AIAgentTool, AIAgentGuardrail, AIAgentChannelAssignment, AIAgentConversation, AIAgentTokenLog
+from .permission import TierPermissionTemplate, WorkspacePermissionOverride
 
 __all__ = [
     "User",
@@ -64,4 +65,6 @@ __all__ = [
     "AIAgentChannelAssignment",
     "AIAgentConversation",
     "AIAgentTokenLog",
+    "TierPermissionTemplate",
+    "WorkspacePermissionOverride",
 ]

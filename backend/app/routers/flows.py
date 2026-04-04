@@ -11,11 +11,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_workspace
+from app.middleware.auth_middleware import get_current_workspace, require_permission
 from app.models.flow import Flow, ConversationFlowState
 from app.models.workspace import Workspace
 
-router = APIRouter(prefix="/api/flows", tags=["flows"])
+router = APIRouter(
+    prefix="/api/flows",
+    tags=["flows"],
+    dependencies=[Depends(require_permission("automation.flows"))],
+)
 
 
 class FlowCreate(BaseModel):

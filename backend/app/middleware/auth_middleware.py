@@ -207,6 +207,73 @@ def require_workspace_access(workspace_id: UUID):
     return workspace_checker
 
 
+def require_permission(key: str):
+    """
+    Dependency factory that enforces a single permission key.
+
+    Raises 403 with a stable FEATURE_DISABLED error body if the resolved
+    effective permission for the current workspace+role is False.
+
+    Usage::
+
+        @router.get("/some-endpoint")
+        async def handler(_: None = Depends(require_permission("automation.flows"))):
+            ...
+    """
+    async def _checker(
+        credentials: HTTPAuthorizationCredentials = Depends(security),
+        db: AsyncSession = Depends(get_db),
+    ) -> None:
+        from app.services import permission_service
+
+        token = credentials.credentials
+
+        # Resolve user
+        user = await get_current_user(credentials, db)
+
+        # Resolve workspace + role (mirrors logic in routers/permissions.py)
+        if token.startswith("csk_"):
+            result = await db.execute(
+                select(Workspace).where(Workspace.owner_id == user.id)
+            )
+            workspace = result.scalar_one_or_none()
+            role = "owner"
+        else:
+            payload = auth_service.decode_access_token(token) or {}
+            role = payload.get("role", "owner")
+
+            if role == "agent":
+                result = await db.execute(
+                    select(Agent, Workspace)
+                    .join(Workspace)
+                    .where(Agent.user_id == user.id, Agent.is_active == True)
+                )
+                row = result.first()
+                workspace = row.Workspace if row else None
+            else:
+                result = await db.execute(
+                    select(Workspace).where(Workspace.owner_id == user.id)
+                )
+                workspace = result.scalar_one_or_none()
+
+        if not workspace:
+            raise PermissionError("No workspace found")
+
+        flat = await permission_service.get_effective_permissions(workspace, role, db)
+
+        if not flat.get(key, False):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "FEATURE_DISABLED",
+                    "permission": key,
+                    "message": "This feature is not enabled for your workspace.",
+                },
+            )
+
+    return _checker
+
+
 # Optional token dependency for public endpoints that can use auth
 async def get_optional_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),

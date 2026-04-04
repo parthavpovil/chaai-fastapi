@@ -22,6 +22,7 @@ from app.models import (
     ai_feedback, outbound_webhook, api_key,
     outbound_webhook_log, csat_rating, business_hours,
     flow, whatsapp_template, broadcast,
+    permission,
 )
 
 # this is the Alembic Config object, which provides

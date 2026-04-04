@@ -13,7 +13,7 @@ import logging
 
 from app.database import get_db
 from app.services.metrics_service import MetricsService
-from app.middleware.auth_middleware import get_current_user, get_current_workspace
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.config import TIER_LIMITS
@@ -191,7 +191,7 @@ async def get_alert_status(
         raise HTTPException(status_code=500, detail=f"Failed to get alert status: {str(e)}")
 
 
-@router.get("/csat")
+@router.get("/csat", dependencies=[Depends(require_permission("analytics.csat"))])
 async def get_csat_metrics(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),

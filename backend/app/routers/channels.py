@@ -10,7 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.channel import Channel
@@ -19,7 +19,11 @@ from app.services.tier_manager import TierManager, TierLimitError
 from app.services.encryption import encrypt_credential, decrypt_credential
 
 
-router = APIRouter(prefix="/api/channels", tags=["channels"])
+router = APIRouter(
+    prefix="/api/channels",
+    tags=["channels"],
+    dependencies=[Depends(require_permission("channels.manage"))],
+)
 
 
 # ─── Request/Response Models ──────────────────────────────────────────────────

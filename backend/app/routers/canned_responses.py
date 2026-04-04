@@ -10,14 +10,18 @@ from sqlalchemy import select, func
 from pydantic import BaseModel, Field
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.canned_response import CannedResponse
 from app.config import TIER_LIMITS
 
 
-router = APIRouter(prefix="/api/canned-responses", tags=["canned-responses"])
+router = APIRouter(
+    prefix="/api/canned-responses",
+    tags=["canned-responses"],
+    dependencies=[Depends(require_permission("productivity.canned_responses"))],
+)
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────

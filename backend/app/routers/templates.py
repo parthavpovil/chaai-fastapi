@@ -10,12 +10,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_workspace
+from app.middleware.auth_middleware import get_current_workspace, require_permission
 from app.models.whatsapp_template import WhatsAppTemplate
 from app.models.workspace import Workspace
 from app.services.template_service import submit_template_to_meta
 
-router = APIRouter(prefix="/api/templates", tags=["templates"])
+router = APIRouter(
+    prefix="/api/templates",
+    tags=["templates"],
+    dependencies=[Depends(require_permission("automation.templates"))],
+)
 
 
 class TemplateCreate(BaseModel):

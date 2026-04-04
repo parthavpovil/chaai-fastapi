@@ -12,7 +12,7 @@ from sqlalchemy import select
 from pydantic import BaseModel, Field, HttpUrl
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.outbound_webhook import OutboundWebhook
@@ -29,7 +29,11 @@ VALID_EVENTS = {
     "csat.submitted",
 }
 
-router = APIRouter(prefix="/api/webhooks/outbound", tags=["outbound-webhooks"])
+router = APIRouter(
+    prefix="/api/webhooks/outbound",
+    tags=["outbound-webhooks"],
+    dependencies=[Depends(require_permission("integrations.outbound_webhooks"))],
+)
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────

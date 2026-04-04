@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.ai_agent import AIAgent, AIAgentTool, AIAgentGuardrail, AIAgentChannelAssignment
@@ -33,7 +33,11 @@ from app.config import TIER_LIMITS
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/ai-agents", tags=["ai-agents"])
+router = APIRouter(
+    prefix="/api/ai-agents",
+    tags=["ai-agents"],
+    dependencies=[Depends(require_permission("ai.agents_studio"))],
+)
 
 # In-memory sandbox sessions: {agent_id: conversation_id}
 _sandbox_sessions: dict = {}
