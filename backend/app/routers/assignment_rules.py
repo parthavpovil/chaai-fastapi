@@ -81,7 +81,7 @@ async def create_rule(
     db: AsyncSession = Depends(get_db)
 ):
     """Create an assignment rule (Pro tier, owner only)."""
-target = UUID(request.target_agent_id) if request.target_agent_id else None
+    target = UUID(request.target_agent_id) if request.target_agent_id else None
     rule = AssignmentRule(
         workspace_id=current_workspace.id,
         name=request.name,
@@ -104,7 +104,7 @@ async def list_rules(
     db: AsyncSession = Depends(get_db)
 ):
     """List assignment rules (Pro tier, owner only)."""
-result = await db.execute(
+    result = await db.execute(
         select(AssignmentRule)
         .where(AssignmentRule.workspace_id == current_workspace.id)
         .order_by(AssignmentRule.priority.asc())
@@ -121,7 +121,7 @@ async def update_rule(
     db: AsyncSession = Depends(get_db)
 ):
     """Update an assignment rule (Pro tier, owner only)."""
-result = await db.execute(
+    result = await db.execute(
         select(AssignmentRule)
         .where(AssignmentRule.id == UUID(rule_id))
         .where(AssignmentRule.workspace_id == current_workspace.id)
@@ -156,7 +156,7 @@ async def delete_rule(
     db: AsyncSession = Depends(get_db)
 ):
     """Delete an assignment rule (Pro tier, owner only)."""
-result = await db.execute(
+    result = await db.execute(
         select(AssignmentRule)
         .where(AssignmentRule.id == UUID(rule_id))
         .where(AssignmentRule.workspace_id == current_workspace.id)
