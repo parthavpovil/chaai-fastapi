@@ -183,12 +183,12 @@ def upgrade() -> None:
     )
 
     # Seed default tier templates
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
     tpl_table = sa.table(
         "tier_permission_templates",
         sa.column("tier_id", sa.String),
         sa.column("flags", JSONB),
-        sa.column("updated_at", sa.String),
+        sa.column("updated_at", sa.DateTime(timezone=True)),
     )
     op.bulk_insert(
         tpl_table,
