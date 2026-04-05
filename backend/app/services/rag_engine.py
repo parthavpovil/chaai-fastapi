@@ -60,7 +60,7 @@ class RAGEngine:
 
     # ── Generation ─────────────────────────────────────────────────────────────
     DEFAULT_TEMPERATURE = 0.4    # factual support answers (was 0.7)
-    MAX_CHUNK_CHARS = 600        # truncate chunk content to control token usage
+    MAX_CHUNK_CHARS = 800        # aligned with CHUNK_SIZE * 4 (200 tokens × 4 chars)
 
     # ── Conversation ───────────────────────────────────────────────────────────
     CONTEXT_MESSAGES = 10
@@ -498,14 +498,17 @@ class RAGEngine:
         Build [system, user] message pair for the LLM.
         Chunks are truncated to MAX_CHUNK_CHARS to control token usage.
         """
+        fallback = workspace_fallback_message or "Sorry, I could not find an answer. Our team will get back to you."
         system_parts = [
-            "You are a customer support assistant. "
-            "Answer using only the knowledge base context provided. "
-            "Be concise and direct. "
-            "If the context lacks the answer, use the fallback message."
+            "You are a precise customer support assistant.\n"
+            "RULES:\n"
+            "1. Answer ONLY from the [Knowledge base] passages provided. Do not use prior knowledge.\n"
+            "2. Be concise and direct — one to three sentences unless the question requires more detail.\n"
+            "3. If the passages contain a partial answer, give that partial answer clearly.\n"
+            "4. If the passages do not contain enough information to answer, reply with exactly:\n"
+            f"   {fallback}\n"
+            "5. Never invent facts, numbers, dates, or names not present in the passages."
         ]
-        if workspace_fallback_message:
-            system_parts.append(f"Fallback: {workspace_fallback_message}")
 
         user_parts = []
 

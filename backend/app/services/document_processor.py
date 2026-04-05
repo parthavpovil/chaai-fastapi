@@ -38,8 +38,8 @@ class DocumentProcessor:
     Validates, extracts text in-memory, chunks, and uploads to Cloudflare R2.
     """
 
-    CHUNK_SIZE = 500      # tokens per chunk
-    CHUNK_OVERLAP = 50    # token overlap between chunks
+    CHUNK_SIZE = 200      # tokens per chunk (~800 chars, ≈1 paragraph)
+    CHUNK_OVERLAP = 30    # token overlap between chunks (~15% overlap)
 
     ALLOWED_EXTENSIONS = {'.pdf', '.txt'}
     ALLOWED_MIME_TYPES = {'application/pdf', 'text/plain'}
