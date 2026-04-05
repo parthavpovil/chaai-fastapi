@@ -164,9 +164,9 @@ class DocumentProcessor:
                 })
                 chunk_index += 1
 
-            start = max(start + 1, end - overlap_chars)
-            if start >= text_length:
+            if end >= text_length:
                 break
+            start = max(start + 1, end - overlap_chars)
 
         return chunks
 
