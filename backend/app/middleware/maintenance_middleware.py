@@ -3,6 +3,7 @@ Maintenance Mode Middleware
 Handles maintenance mode checking and admin access control
 """
 import logging
+import time
 from typing import Callable, Optional
 from fastapi import Request, Response, HTTPException, status
 from fastapi.responses import JSONResponse
@@ -16,13 +17,17 @@ from app.models.platform_setting import PlatformSetting
 from app.services.auth_service import AuthService
 from app.config import settings
 
+# Cache TTL in seconds - maintenance mode is rarely changed
+_MAINTENANCE_CACHE_TTL = 30
+_maintenance_cache: tuple[bool, Optional[str], float] | None = None  # (is_maintenance, message, expires_at)
+
 
 class MaintenanceMode:
     """
     Maintenance mode checker and middleware
     Handles system-wide maintenance mode with admin bypass
     """
-    
+
     def __init__(self):
         self.maintenance_endpoints = [
             "/api/health",
@@ -32,17 +37,25 @@ class MaintenanceMode:
             "/redoc",
             "/openapi.json"
         ]
-    
+
     async def is_maintenance_mode(self, db: AsyncSession) -> tuple[bool, Optional[str]]:
         """
-        Check if system is in maintenance mode
-        
+        Check if system is in maintenance mode.
+        Result is cached for _MAINTENANCE_CACHE_TTL seconds to avoid a DB
+        hit on every request.
+
         Args:
             db: Database session
-        
+
         Returns:
             Tuple of (is_maintenance, maintenance_message)
         """
+        global _maintenance_cache
+
+        now = time.monotonic()
+        if _maintenance_cache is not None and now < _maintenance_cache[2]:
+            return _maintenance_cache[0], _maintenance_cache[1]
+
         try:
             # Get maintenance mode setting
             result = await db.execute(
@@ -50,7 +63,7 @@ class MaintenanceMode:
                 .where(PlatformSetting.key == "maintenance_mode")
             )
             maintenance_setting = result.scalar_one_or_none()
-            
+
             if maintenance_setting == "true":
                 # Get maintenance message
                 message_result = await db.execute(
@@ -58,13 +71,16 @@ class MaintenanceMode:
                     .where(PlatformSetting.key == "maintenance_message")
                 )
                 maintenance_message = message_result.scalar_one_or_none()
-                return True, maintenance_message or "System is currently under maintenance."
-            
+                _maintenance_cache = (True, maintenance_message or "System is currently under maintenance.", now + _MAINTENANCE_CACHE_TTL)
+                return True, _maintenance_cache[1]
+
+            _maintenance_cache = (False, None, now + _MAINTENANCE_CACHE_TTL)
             return False, None
-            
+
         except Exception as e:
             logger.error(f"Error checking maintenance mode: {e}", exc_info=True)
-            # Fail safe - assume not in maintenance mode
+            # Fail safe - assume not in maintenance mode; use a short cache to avoid hammering DB
+            _maintenance_cache = (False, None, now + _MAINTENANCE_CACHE_TTL)
             return False, None
     
     def is_admin_user(self, request: Request) -> bool:
@@ -247,7 +263,10 @@ async def enable_maintenance_mode(
         await db.execute(stmt)
         
         await db.commit()
-        
+
+        global _maintenance_cache
+        _maintenance_cache = None  # Invalidate cache so next request re-reads DB
+
         logger.info(f"Maintenance mode enabled by {admin_email or 'system'}")
         return True
 
@@ -289,7 +308,10 @@ async def disable_maintenance_mode(
         await db.execute(stmt)
         
         await db.commit()
-        
+
+        global _maintenance_cache
+        _maintenance_cache = None  # Invalidate cache
+
         logger.info(f"Maintenance mode disabled by {admin_email or 'system'}")
         return True
 

@@ -111,14 +111,14 @@ async def invite_agent(
         )
         
         return AgentInvitationResponse(
-            id=agent.id,
+            id=str(agent.id),
             email=agent.email,
             name=agent.name,
             invitation_token=agent.invitation_token,
             invitation_expires_at=agent.invitation_expires_at.isoformat(),
             invited_at=agent.created_at.isoformat()
         )
-        
+
     except TierLimitError as e:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -174,16 +174,16 @@ async def accept_agent_invitation(
         )
         
         return AgentResponse(
-            id=agent.id,
+            id=str(agent.id),
             email=agent.email,
             name=agent.name,
             is_active=agent.is_active,
-            user_id=agent.user_id,
+            user_id=str(agent.user_id) if agent.user_id else None,
             invited_at=agent.created_at.isoformat(),
             accepted_at=agent.accepted_at.isoformat() if agent.accepted_at else None,
             deactivated_at=agent.deactivated_at.isoformat() if agent.deactivated_at else None
         )
-        
+
     except AgentManagementError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -225,11 +225,11 @@ async def list_agents(
         agent_list = []
         for agent in agents:
             agent_list.append(AgentResponse(
-                id=agent.id,
+                id=str(agent.id),
                 email=agent.email,
                 name=agent.name,
                 is_active=agent.is_active,
-                user_id=agent.user_id,
+                user_id=str(agent.user_id) if agent.user_id else None,
                 invited_at=agent.created_at.isoformat(),
                 accepted_at=agent.accepted_at.isoformat() if agent.accepted_at else None,
                 deactivated_at=agent.deactivated_at.isoformat() if agent.deactivated_at else None
@@ -268,7 +268,7 @@ async def list_pending_invitations(
         invitation_list = []
         for agent in pending_agents:
             invitation_list.append(AgentInvitationResponse(
-                id=agent.id,
+                id=str(agent.id),
                 email=agent.email,
                 name=agent.name,
                 invitation_token=agent.invitation_token,
@@ -326,16 +326,16 @@ async def deactivate_agent(
         )
         
         return AgentResponse(
-            id=agent.id,
+            id=str(agent.id),
             email=agent.email,
             name=agent.name,
             is_active=agent.is_active,
-            user_id=agent.user_id,
+            user_id=str(agent.user_id) if agent.user_id else None,
             invited_at=agent.created_at.isoformat(),
             accepted_at=agent.accepted_at.isoformat() if agent.accepted_at else None,
             deactivated_at=agent.deactivated_at.isoformat() if agent.deactivated_at else None
         )
-        
+
     except AgentManagementError as e:
         if "not found" in str(e).lower():
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -418,16 +418,16 @@ async def activate_agent(
         )
         
         return AgentResponse(
-            id=agent.id,
+            id=str(agent.id),
             email=agent.email,
             name=agent.name,
             is_active=agent.is_active,
-            user_id=agent.user_id,
+            user_id=str(agent.user_id) if agent.user_id else None,
             invited_at=agent.created_at.isoformat(),
             accepted_at=agent.accepted_at.isoformat() if agent.accepted_at else None,
             deactivated_at=agent.deactivated_at.isoformat() if agent.deactivated_at else None
         )
-        
+
     except TierLimitError as e:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -473,14 +473,14 @@ async def resend_agent_invitation(
         )
         
         return AgentInvitationResponse(
-            id=agent.id,
+            id=str(agent.id),
             email=agent.email,
             name=agent.name,
             invitation_token=agent.invitation_token,
             invitation_expires_at=agent.invitation_expires_at.isoformat(),
             invited_at=agent.created_at.isoformat()
         )
-        
+
     except AgentManagementError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
