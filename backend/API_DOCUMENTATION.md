@@ -1025,7 +1025,8 @@ Get detailed conversation information with messages.
       "role": "customer",
       "sender_name": "Customer Name",
       "created_at": "2024-01-01T00:00:00Z",
-      "metadata": {}
+      "metadata": {},
+      "feedback": null
     },
     {
       "id": "uuid",
@@ -1033,7 +1034,14 @@ Get detailed conversation information with messages.
       "role": "assistant",
       "sender_name": null,
       "created_at": "2024-01-01T00:00:01Z",
-      "metadata": {"rag_used": true}
+      "metadata": {"rag_used": true},
+      "feedback": {
+        "id": "uuid",
+        "message_id": "uuid",
+        "rating": "positive",
+        "comment": null,
+        "created_at": "2024-01-01T00:00:05Z"
+      }
     }
   ],
   "created_at": "2024-01-01T00:00:00Z",
@@ -1267,24 +1275,6 @@ Submit feedback on an AI message.
 **Errors:**
 - 404: Conversation or message not found
 - 409: Feedback already submitted for this message
-
-### GET /
-
-Get feedback for a specific message. Returns `null` if none submitted.
-
-**Headers:**
-- `Authorization: Bearer <token>`
-
-**Response (200):**
-```json
-{
-  "id": "uuid",
-  "message_id": "uuid",
-  "rating": "positive",
-  "comment": null,
-  "created_at": "2024-01-01T12:00:00Z"
-}
-```
 
 ---
 

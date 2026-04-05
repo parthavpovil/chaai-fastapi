@@ -29,6 +29,14 @@ router = APIRouter(prefix="/api/conversations", tags=["conversations"])
 
 # ─── Request/Response Models ──────────────────────────────────────────────────
 
+class FeedbackResponse(BaseModel):
+    id: str
+    message_id: str
+    rating: str
+    comment: Optional[str]
+    created_at: str
+
+
 class MessageResponse(BaseModel):
     """Response model for message information"""
     id: str
@@ -37,6 +45,7 @@ class MessageResponse(BaseModel):
     sender_name: Optional[str] = None
     created_at: str
     metadata: Optional[dict] = None
+    feedback: Optional[FeedbackResponse] = None
 
 
 class ContactResponse(BaseModel):
@@ -1154,14 +1163,6 @@ class FeedbackCreate(BaseModel):
     comment: Optional[str] = Field(None, max_length=1000)
 
 
-class FeedbackResponse(BaseModel):
-    id: str
-    message_id: str
-    rating: str
-    comment: Optional[str]
-    created_at: str
-
-
 @router.post("/{conversation_id}/messages/{message_id}/feedback", response_model=FeedbackResponse)
 async def submit_ai_feedback(
     conversation_id: str,
@@ -1229,29 +1230,3 @@ async def submit_ai_feedback(
     )
 
 
-@router.get("/{conversation_id}/messages/{message_id}/feedback", response_model=Optional[FeedbackResponse])
-async def get_ai_feedback(
-    conversation_id: str,
-    message_id: str,
-    current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
-    db: AsyncSession = Depends(get_db)
-):
-    """Get feedback for a specific message."""
-    from sqlalchemy import select
-    from app.models.ai_feedback import AIFeedback
-
-    feedback_result = await db.execute(
-        select(AIFeedback).where(AIFeedback.message_id == UUID(message_id))
-    )
-    feedback = feedback_result.scalar_one_or_none()
-    if not feedback:
-        return None
-
-    return FeedbackResponse(
-        id=str(feedback.id),
-        message_id=str(feedback.message_id),
-        rating=feedback.rating,
-        comment=feedback.comment,
-        created_at=feedback.created_at.isoformat()
-    )

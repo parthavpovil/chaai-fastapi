@@ -417,7 +417,7 @@ class ConversationManager:
             .where(Conversation.workspace_id == workspace_id)
             .options(
                 _sel(Conversation.contact),
-                _sel(Conversation.messages)
+                _sel(Conversation.messages).selectinload(Message.ai_feedback)
             )
         )
         conversation = result.scalar_one_or_none()
@@ -440,13 +440,23 @@ class ConversationManager:
                 sender_name = msg.extra_data["agent_name"]
             elif msg.role == "owner":
                 sender_name = "Owner"
+            feedback = None
+            if msg.ai_feedback:
+                feedback = {
+                    "id": str(msg.ai_feedback.id),
+                    "message_id": str(msg.ai_feedback.message_id),
+                    "rating": msg.ai_feedback.rating,
+                    "comment": msg.ai_feedback.comment,
+                    "created_at": msg.ai_feedback.created_at.isoformat(),
+                }
             messages.append({
                 "id": str(msg.id),
                 "content": msg.content,
                 "role": msg.role,
                 "sender_name": sender_name,
                 "created_at": msg.created_at.isoformat(),
-                "metadata": msg.extra_data
+                "metadata": msg.extra_data,
+                "feedback": feedback
             })
 
         return {
