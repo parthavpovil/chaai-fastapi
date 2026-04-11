@@ -60,26 +60,69 @@
 
   // ── CSS injection ──────────────────────────────────────────────────────────
 
-  function injectStyles(primaryColor) {
+  function _resolveFont(fontFamily) {
+    if (!fontFamily || fontFamily === 'System Default') {
+      return '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    }
+    return '"' + fontFamily + '", sans-serif';
+  }
+
+  function _bubbleSize(launcherSize) {
+    if (launcherSize === 'small') return '48px';
+    if (launcherSize === 'large') return '64px';
+    return '56px'; // medium (default)
+  }
+
+  function _bubbleRadius(launcherShape) {
+    return launcherShape === 'rounded-rectangle' ? '16px' : '50%';
+  }
+
+  function _rootPosition(cfg) {
+    var h = (cfg.horizontal_offset != null ? cfg.horizontal_offset : 20) + 'px';
+    var v = (cfg.vertical_offset != null ? cfg.vertical_offset : 20) + 'px';
+    var pos = cfg.position || 'bottom-right';
+    var parts = pos.split('-'); // ['bottom','right'] etc.
+    var vert = parts[0] || 'bottom';
+    var horiz = parts[1] || 'right';
+    return vert + ': ' + v + '; ' + horiz + ': ' + h + ';';
+  }
+
+  function injectStyles(cfg) {
+    var primary = cfg.primary_color || '#4F46E5';
+    var userBubble = cfg.user_bubble_color || primary;
+    var agentBubble = cfg.agent_bubble_color || '#F3F4F6';
+    var textColor = cfg.text_color || '#FFFFFF';
+    var fontSize = cfg.base_font_size || '13px';
+    var fontFamily = _resolveFont(cfg.font_family);
+    var bubbleSz = _bubbleSize(cfg.launcher_size);
+    var bubbleRadius = _bubbleRadius(cfg.launcher_shape);
+    var windowW = (cfg.chat_window_width || 360) + 'px';
+    var windowH = (cfg.chat_window_height || 520) + 'px';
+    var rootPos = _rootPosition(cfg);
+    var pulseAnim = cfg.pulse_animation
+      ? '@keyframes chatsaas-pulse { 0%,100%{box-shadow:0 4px 12px rgba(0,0,0,0.2),0 0 0 0 ' + primary + '66} 50%{box-shadow:0 4px 12px rgba(0,0,0,0.2),0 0 0 8px transparent} }'
+        + ' #chatsaas-bubble { animation: chatsaas-pulse 2s infinite; }'
+      : '';
+
     var css = [
-      '#chatsaas-root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; position: fixed; bottom: 20px; right: 20px; z-index: 999999; }',
-      '#chatsaas-bubble { width: 56px; height: 56px; border-radius: 50%; background: ' + primaryColor + '; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.2); transition: transform 0.15s; }',
+      '#chatsaas-root { font-family: ' + fontFamily + '; font-size: ' + fontSize + '; position: fixed; ' + rootPos + ' z-index: 999999; }',
+      '#chatsaas-bubble { width: ' + bubbleSz + '; height: ' + bubbleSz + '; border-radius: ' + bubbleRadius + '; background: ' + primary + '; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; box-shadow: 0 4px 12px rgba(0,0,0,0.2); transition: transform 0.15s; }',
       '#chatsaas-bubble:hover { transform: scale(1.08); }',
-      '#chatsaas-bubble svg { fill: #fff; width: 26px; height: 26px; }',
-      '#chatsaas-panel { display: none; flex-direction: column; width: 340px; height: 480px; background: #fff; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.18); overflow: hidden; margin-bottom: 12px; }',
+      '#chatsaas-bubble svg { fill: ' + textColor + '; width: 26px; height: 26px; }',
+      '#chatsaas-panel { display: none; flex-direction: column; width: ' + windowW + '; height: ' + windowH + '; background: #fff; border-radius: 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.18); overflow: hidden; margin-bottom: 12px; }',
       '#chatsaas-panel.open { display: flex; }',
-      '#chatsaas-header { background: ' + primaryColor + '; color: #fff; padding: 14px 16px; font-size: 15px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }',
-      '#chatsaas-close { background: none; border: none; color: #fff; font-size: 20px; cursor: pointer; line-height: 1; padding: 0; }',
+      '#chatsaas-header { background: ' + primary + '; color: ' + textColor + '; padding: 14px 16px; font-size: 15px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }',
+      '#chatsaas-close { background: none; border: none; color: ' + textColor + '; font-size: 20px; cursor: pointer; line-height: 1; padding: 0; }',
       '#chatsaas-messages { flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 8px; }',
-      '.cs-msg { max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: 14px; line-height: 1.45; word-break: break-word; }',
-      '.cs-msg.user { background: ' + primaryColor + '; color: #fff; align-self: flex-end; border-bottom-right-radius: 4px; }',
-      '.cs-msg.assistant { background: #f1f1f1; color: #222; align-self: flex-start; border-bottom-left-radius: 4px; }',
+      '.cs-msg { max-width: 80%; padding: 8px 12px; border-radius: 12px; font-size: inherit; line-height: 1.45; word-break: break-word; }',
+      '.cs-msg.user { background: ' + userBubble + '; color: ' + textColor + '; align-self: flex-end; border-bottom-right-radius: 4px; }',
+      '.cs-msg.assistant { background: ' + agentBubble + '; color: #222; align-self: flex-start; border-bottom-left-radius: 4px; }',
       '#chatsaas-input-area { border-top: 1px solid #eee; display: flex; padding: 8px; gap: 8px; align-items: center; }',
-      '#chatsaas-input { flex: 1; border: 1px solid #ddd; border-radius: 20px; padding: 8px 14px; font-size: 14px; outline: none; resize: none; font-family: inherit; }',
-      '#chatsaas-input:focus { border-color: ' + primaryColor + '; }',
-      '#chatsaas-send { background: ' + primaryColor + '; color: #fff; border: none; border-radius: 50%; width: 38px; height: 38px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }',
+      '#chatsaas-input { flex: 1; border: 1px solid #ddd; border-radius: 20px; padding: 8px 14px; font-size: inherit; outline: none; resize: none; font-family: inherit; }',
+      '#chatsaas-input:focus { border-color: ' + primary + '; }',
+      '#chatsaas-send { background: ' + primary + '; color: ' + textColor + '; border: none; border-radius: 50%; width: 38px; height: 38px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }',
       '#chatsaas-send:disabled { opacity: 0.5; cursor: default; }',
-      '#chatsaas-send svg { fill: #fff; width: 18px; height: 18px; }',
+      '#chatsaas-send svg { fill: ' + textColor + '; width: 18px; height: 18px; }',
       '.cs-typing { font-size: 12px; color: #999; padding: 0 4px; }',
       // Media / attachment styles
       '#chatsaas-attach { background: none; border: none; cursor: pointer; padding: 4px; color: #888; display: flex; align-items: center; flex-shrink: 0; }',
@@ -88,7 +131,8 @@
       '#chatsaas-file-input { display: none; }',
       '.cs-upload-progress { font-size: 12px; color: #999; font-style: italic; padding: 4px 12px; align-self: flex-end; }',
       '.cs-msg img { max-width: 220px; border-radius: 8px; display: block; margin-top: 4px; cursor: pointer; }',
-      '.cs-msg a.doc-link { color: inherit; text-decoration: underline; font-size: 13px; display: block; margin-top: 2px; }'
+      '.cs-msg a.doc-link { color: inherit; text-decoration: underline; font-size: 13px; display: block; margin-top: 2px; }',
+      pulseAnim,
     ].join('\n');
 
     var style = document.createElement('style');
@@ -114,10 +158,11 @@
 
     var inputArea = document.createElement('div');
     inputArea.id = 'chatsaas-input-area';
+    var placeholder = escapeHtml(config.placeholder_text || 'Type a message\u2026');
     inputArea.innerHTML =
       '<input type="file" id="chatsaas-file-input" accept="image/jpeg,image/png,image/webp,application/pdf,video/mp4,audio/mpeg,audio/ogg,audio/aac">' +
       '<button id="chatsaas-attach" title="Attach file"><svg viewBox="0 0 24 24"><path d="M16.5 6v11.5c0 2.21-1.79 4-4 4s-4-1.79-4-4V5a2.5 2.5 0 0 1 5 0v10.5c0 .55-.45 1-1 1s-1-.45-1-1V6h-1.5v9.5a2.5 2.5 0 0 0 5 0V5c0-2.21-1.79-4-4-4S7 2.79 7 5v12.5c0 3.04 2.46 5.5 5.5 5.5s5.5-2.46 5.5-5.5V6H16.5z"/></svg></button>' +
-      '<textarea id="chatsaas-input" rows="1" placeholder="Type a message..."></textarea>' +
+      '<textarea id="chatsaas-input" rows="1" placeholder="' + placeholder + '"></textarea>' +
       '<button id="chatsaas-send"><svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2z"/></svg></button>';
 
     panel.appendChild(header);
@@ -127,7 +172,27 @@
     var bubble = document.createElement('button');
     bubble.id = 'chatsaas-bubble';
     bubble.setAttribute('aria-label', 'Open chat');
-    bubble.innerHTML = '<svg viewBox="0 0 24 24"><path d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>';
+    // Launcher icon SVG paths
+    var iconSvgs = {
+      'chat-bubble': '<svg viewBox="0 0 24 24"><path d="M20 2H4C2.9 2 2 2.9 2 4v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/></svg>',
+      'message-circle': '<svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
+      'headset': '<svg viewBox="0 0 24 24"><path d="M12 1a9 9 0 0 0-9 9v7a3 3 0 0 0 3 3h2v-8H6v-2a6 6 0 0 1 12 0v2h-2v8h2a3 3 0 0 0 3-3v-7a9 9 0 0 0-9-9z"/></svg>',
+      'question-mark': '<svg viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 17h-2v-2h2v2zm2.07-7.75l-.9.92C13.45 12.9 13 13.5 13 15h-2v-.5c0-1.1.45-2.1 1.17-2.83l1.24-1.26c.37-.36.59-.86.59-1.41 0-1.1-.9-2-2-2s-2 .9-2 2H8c0-2.21 1.79-4 4-4s4 1.79 4 4c0 .88-.36 1.68-.93 2.25z"/></svg>',
+    };
+    var launcherIcon = config.launcher_icon || 'chat-bubble';
+    var iconHtml;
+    if (launcherIcon === 'custom-image' && config.launcher_icon_url) {
+      iconHtml = '<img src="' + escapeHtml(config.launcher_icon_url) + '" alt="" style="width:28px;height:28px;object-fit:contain;">';
+    } else {
+      iconHtml = iconSvgs[launcherIcon] || iconSvgs['chat-bubble'];
+    }
+    var launcherLabel = config.launcher_label ? '<span style="margin-left:6px;font-size:13px;font-weight:600;white-space:nowrap;">' + escapeHtml(config.launcher_label) + '</span>' : '';
+    bubble.innerHTML = iconHtml + launcherLabel;
+    if (launcherLabel) {
+      bubble.style.borderRadius = '999px';
+      bubble.style.padding = '0 16px';
+      bubble.style.width = 'auto';
+    }
 
     root.appendChild(panel);
     root.appendChild(bubble);
@@ -590,7 +655,7 @@
         widget_id = data.widget_id;
         session_token = loadSession();
 
-        injectStyles(data.primary_color || '#4f46e5');
+        injectStyles(config);
         buildWidget();
 
         if (!session_token) showWelcome();

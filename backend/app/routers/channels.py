@@ -14,6 +14,7 @@ from app.middleware.auth_middleware import get_current_user, get_current_workspa
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.channel import Channel
+from app.schemas.widget_config import WidgetConfig
 from app.services.channel_validator import ChannelValidator, ChannelValidationError
 from app.services.tier_manager import TierManager, TierLimitError
 from app.services.encryption import encrypt_credential, decrypt_credential
@@ -77,6 +78,36 @@ class ChannelUpdateRequest(BaseModel):
     """Request model for updating a channel"""
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     is_active: Optional[bool] = None
+    credentials: Optional[dict] = None
+
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def _decrypt_channel_config(channel: Channel) -> dict:
+    """Decrypt all fields from channel.config, returning a plain dict."""
+    raw = channel.config or {}
+    decrypted: Dict[str, Any] = {}
+    for key, value in raw.items():
+        if isinstance(value, str) and value:
+            try:
+                decrypted[key] = decrypt_credential(value)
+            except Exception:
+                decrypted[key] = value
+        else:
+            decrypted[key] = value
+    return decrypted
+
+
+def _build_webchat_platform_info(channel: Channel) -> tuple:
+    """
+    Return (widget_id, platform_info_dict) for a webchat channel.
+    platform_info contains all 36 WidgetConfig fields with defaults for missing ones.
+    """
+    decrypted = _decrypt_channel_config(channel)
+    widget_id = decrypted.get("widget_id")
+    config_fields = {k: v for k, v in decrypted.items() if k != "widget_id"}
+    platform_info = WidgetConfig(**config_fields).model_dump()
+    return widget_id, platform_info
 
 
 # ─── Channel Management Endpoints ─────────────────────────────────────────────
@@ -119,7 +150,16 @@ async def create_channel(
         credentials_to_store = {**request.credentials}
         if "widget_id" in validation_result:
             credentials_to_store["widget_id"] = validation_result["widget_id"]
-        
+
+        # For webchat: validate through WidgetConfig so all 36 fields are stored with defaults
+        if request.channel_type == "webchat":
+            config_fields = {k: v for k, v in credentials_to_store.items() if k != "widget_id"}
+            validated_cfg = WidgetConfig(**config_fields)
+            credentials_to_store = {
+                "widget_id": credentials_to_store["widget_id"],
+                **validated_cfg.model_dump(),
+            }
+
         # Encrypt credentials for storage
         encrypted_credentials = {}
         for key, value in credentials_to_store.items():
@@ -151,13 +191,19 @@ async def create_channel(
                 await db.commit()
                 raise
         
+        if channel.type == "webchat":
+            widget_id_val, platform_info = _build_webchat_platform_info(channel)
+        else:
+            widget_id_val = validation_result.get("widget_id")
+            platform_info = validation_result
+
         return ChannelResponse(
             id=str(channel.id),
             channel_type=channel.type,
             name=request.name,
             is_active=channel.is_active,
-            widget_id=validation_result.get("widget_id"),
-            platform_info=validation_result,
+            widget_id=widget_id_val,
+            platform_info=platform_info,
             created_at=channel.created_at.isoformat(),
             updated_at=channel.created_at.isoformat()  # No updated_at in model
         )
@@ -217,13 +263,18 @@ async def list_channels(
         
         channel_list = []
         for channel in channels:
+            if channel.type == "webchat":
+                widget_id_val, platform_info = _build_webchat_platform_info(channel)
+            else:
+                widget_id_val = None
+                platform_info = {}
             channel_list.append(ChannelResponse(
                 id=str(channel.id),
                 channel_type=channel.type,
-                name=f"{channel.type.capitalize()} Channel",  # Generate name from type
+                name=f"{channel.type.capitalize()} Channel",
                 is_active=channel.is_active,
-                widget_id=None,  # Not stored in simple model
-                platform_info={},
+                widget_id=widget_id_val,
+                platform_info=platform_info,
                 created_at=channel.created_at.isoformat(),
                 updated_at=channel.created_at.isoformat()
             ))
@@ -273,17 +324,23 @@ async def get_channel(
                 detail="Channel not found"
             )
         
+        if channel.type == "webchat":
+            widget_id_val, platform_info = _build_webchat_platform_info(channel)
+        else:
+            widget_id_val = None
+            platform_info = {}
+
         return ChannelResponse(
             id=str(channel.id),
             channel_type=channel.type,
             name=f"{channel.type.capitalize()} Channel",
             is_active=channel.is_active,
-            widget_id=None,
-            platform_info={},
+            widget_id=widget_id_val,
+            platform_info=platform_info,
             created_at=channel.created_at.isoformat(),
             updated_at=channel.created_at.isoformat()
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -339,6 +396,23 @@ async def update_channel(
             channel.is_active = request.is_active
         # Note: name is not stored in the simple Channel model
 
+        # Merge and validate webchat credentials
+        if request.credentials is not None and channel.type == "webchat":
+            existing = _decrypt_channel_config(channel)
+            merged = {**existing, **request.credentials}
+            validated_cfg = WidgetConfig(**{k: v for k, v in merged.items() if k != "widget_id"})
+            plain_dict = validated_cfg.model_dump()
+            new_config: Dict[str, Any] = {}
+            for key, value in plain_dict.items():
+                if isinstance(value, str) and value:
+                    new_config[key] = encrypt_credential(value)
+                else:
+                    new_config[key] = value
+            # Preserve the existing encrypted widget_id
+            if "widget_id" in (channel.config or {}):
+                new_config["widget_id"] = channel.config["widget_id"]
+            channel.config = new_config
+
         # Re-activate Telegram webhook when channel transitions to active.
         if channel.type == "telegram" and request.is_active is True and not old_is_active:
             validator = ChannelValidator()
@@ -350,17 +424,23 @@ async def update_channel(
                 )
             bot_token = decrypt_credential(encrypted_token)
             await validator.register_telegram_webhook(bot_token)
-        
+
         await db.commit()
         await db.refresh(channel)
-        
+
+        if channel.type == "webchat":
+            widget_id_val, platform_info = _build_webchat_platform_info(channel)
+        else:
+            widget_id_val = None
+            platform_info = {}
+
         return ChannelResponse(
             id=str(channel.id),
             channel_type=channel.type,
             name=f"{channel.type.capitalize()} Channel",
             is_active=channel.is_active,
-            widget_id=None,
-            platform_info={},
+            widget_id=widget_id_val,
+            platform_info=platform_info,
             created_at=channel.created_at.isoformat(),
             updated_at=channel.created_at.isoformat()
         )

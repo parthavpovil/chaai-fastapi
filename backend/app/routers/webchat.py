@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, model_validator
 from app.database import get_db
 from app.models.workspace import Workspace
 from app.models.channel import Channel
+from app.schemas.widget_config import WidgetConfig
 from app.models.contact import Contact
 from app.models.conversation import Conversation
 from app.models.message import Message
@@ -104,14 +105,10 @@ class WebChatMessagesResponse(BaseModel):
     session_token: str
 
 
-class WebChatConfigResponse(BaseModel):
-    """Response schema for WebChat configuration endpoint"""
+class WebChatConfigResponse(WidgetConfig):
+    """Response schema for WebChat configuration endpoint — all 36 WidgetConfig fields plus identifiers."""
     widget_id: str
     workspace_id: str
-    business_name: str
-    primary_color: str
-    position: str
-    welcome_message: str
 
 
 # ─── Helper Functions ─────────────────────────────────────────────────────────
@@ -279,24 +276,22 @@ async def get_webchat_config(
         # Decrypt the channel configuration
         # Note: channel.config is a dict where each value is encrypted separately
         try:
-            config = {}
+            config: Dict[str, Any] = {}
             if not channel.config:
                 raise HTTPException(
                     status_code=500,
                     detail="WebChat configuration is empty"
                 )
-            
-            # Decrypt each field in the config
+
             for key, value in channel.config.items():
                 if isinstance(value, str) and value:
                     try:
                         config[key] = decrypt_credential(value)
                     except Exception:
-                        # If decryption fails, use the value as-is (might not be encrypted)
                         config[key] = value
                 else:
                     config[key] = value
-                    
+
         except HTTPException:
             raise
         except Exception as e:
@@ -304,23 +299,21 @@ async def get_webchat_config(
                 status_code=500,
                 detail=f"Failed to load WebChat configuration: {str(e)}"
             )
-        
-        # Validate required configuration fields
-        required_fields = ["widget_id", "business_name", "primary_color", "position", "welcome_message"]
-        for field in required_fields:
-            if field not in config:
-                raise HTTPException(
-                    status_code=500,
-                    detail=f"WebChat configuration missing required field: {field}"
-                )
-        
+
+        if "widget_id" not in config:
+            raise HTTPException(
+                status_code=500,
+                detail="WebChat configuration missing widget_id"
+            )
+
+        # Fill any missing fields with WidgetConfig defaults
+        config_fields = {k: v for k, v in config.items() if k != "widget_id"}
+        widget_cfg = WidgetConfig(**config_fields)
+
         return WebChatConfigResponse(
             widget_id=config["widget_id"],
             workspace_id=str(channel.workspace_id),
-            business_name=config["business_name"],
-            primary_color=config["primary_color"],
-            position=config["position"],
-            welcome_message=config["welcome_message"]
+            **widget_cfg.model_dump(),
         )
         
     except HTTPException:
