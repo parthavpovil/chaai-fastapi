@@ -2,8 +2,8 @@
 ChatSaaS Backend - FastAPI Application Entry Point
 """
 from contextlib import asynccontextmanager
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, Request, Response
+from fastapi.middleware.base import BaseHTTPMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -82,13 +82,39 @@ app = FastAPI(
 )
 
 # Configure CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# /api/webchat/* and /ws/webchat/* are public widget endpoints — any origin is allowed
+# because the widget is embedded on arbitrary customer websites we don't know in advance.
+# All other routes (dashboard, agent API) use the strict ALLOWED_ORIGINS allowlist.
+# Abuse prevention on webchat routes is handled by widget_id validation, session tokens,
+# and rate limiting — not by CORS.
+
+_WEBCHAT_PREFIXES = ("/api/webchat/", "/ws/webchat/", "/static/")
+
+class SplitCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
+        is_webchat = any(path.startswith(p) for p in _WEBCHAT_PREFIXES)
+        origin = request.headers.get("origin", "")
+
+        if request.method == "OPTIONS":
+            response = Response(status_code=200)
+        else:
+            response = await call_next(request)
+
+        if is_webchat:
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        elif origin in settings.ALLOWED_ORIGINS:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "*"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+            response.headers["Vary"] = "Origin"
+
+        return response
+
+app.add_middleware(SplitCORSMiddleware)
 
 # Add maintenance mode middleware
 app.middleware("http")(maintenance_mode_middleware)
