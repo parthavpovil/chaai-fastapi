@@ -43,7 +43,6 @@ class AgentResponse(BaseModel):
     user_id: Optional[str] = None
     invited_at: str
     accepted_at: Optional[str] = None
-    deactivated_at: Optional[str] = None
 
 
 class AgentInvitationResponse(BaseModel):
@@ -196,7 +195,7 @@ async def accept_agent_invitation(
         )
 
 
-@router.get("/", response_model=List[AgentResponse])
+@router.get("/", response_model=List[AgentResponse], dependencies=[Depends(require_permission("team.manage"))])
 async def list_agents(
     include_inactive: bool = False,
     current_user: User = Depends(get_current_user),
@@ -231,8 +230,7 @@ async def list_agents(
                 is_active=agent.is_active,
                 user_id=str(agent.user_id) if agent.user_id else None,
                 invited_at=agent.created_at.isoformat(),
-                accepted_at=agent.accepted_at.isoformat() if agent.accepted_at else None,
-                deactivated_at=agent.deactivated_at.isoformat() if agent.deactivated_at else None
+                accepted_at=agent.invitation_accepted_at.isoformat() if agent.invitation_accepted_at else None
             ))
         
         return agent_list
