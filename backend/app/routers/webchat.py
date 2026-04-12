@@ -538,18 +538,20 @@ async def send_webchat_message(
 
                             if rag_result.get("used_fallback"):
                                 logger.warning(
-                                    "webchat RAG returned fallback — workspace_id=%s chunks=%d search_method=%s threshold=%s",
+                                    "webchat RAG returned fallback — workspace_id=%s chunks=%d search_method=%s threshold=%s response=%r",
                                     str(channel.workspace_id),
                                     rag_result.get("relevant_chunks_count", 0),
                                     rag_result.get("search_method"),
                                     rag_result.get("threshold_used"),
+                                    rag_result.get("response", "")[:120],
                                 )
                             else:
                                 logger.info(
-                                    "webchat RAG success — workspace_id=%s chunks=%d search_method=%s",
+                                    "webchat RAG success — workspace_id=%s chunks=%d search_method=%s response=%r",
                                     str(channel.workspace_id),
                                     rag_result.get("relevant_chunks_count", 0),
                                     rag_result.get("search_method"),
+                                    rag_result.get("response", "")[:120],
                                 )
 
                             response_content = rag_result["response"]
