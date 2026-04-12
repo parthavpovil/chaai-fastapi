@@ -525,10 +525,22 @@ class RAGEngine:
                 user_parts.append(f"[{i}] ({filename})\n{content}")
 
         if conversation_history:
-            user_parts.append("[Recent conversation]")
-            for msg in conversation_history[-self.CONTEXT_MESSAGES * 2:]:
-                role = "Customer" if msg.role in ("customer", "user") else "Assistant"
-                user_parts.append(f"{role}: {msg.content}")
+            # Exclude the most recent message if it's the customer's current query.
+            # process_incoming_message writes the message to DB before RAG is called,
+            # so _get_conversation_data picks it up — but it's already appended below
+            # as "Customer: {query}", so including it here creates an unhelpful duplicate.
+            history_to_show = (
+                conversation_history[:-1]
+                if conversation_history
+                and conversation_history[-1].role in ("customer", "user")
+                and conversation_history[-1].content == query
+                else conversation_history
+            )
+            if history_to_show:
+                user_parts.append("[Recent conversation]")
+                for msg in history_to_show[-self.CONTEXT_MESSAGES * 2:]:
+                    role = "Customer" if msg.role in ("customer", "user") else "Assistant"
+                    user_parts.append(f"{role}: {msg.content}")
 
         user_parts.append(f"Customer: {query}\nAssistant:")
 

@@ -392,7 +392,8 @@ async def send_webchat_message(
                     "phone": request.contact_phone,
                     "metadata": request.metadata,
                 },
-                message_metadata={"session_token": session_token}
+                message_metadata={"session_token": session_token},
+                channel_type="webchat",
             )
 
             conversation_id = str(processing_result["conversation"].id)
@@ -523,6 +524,10 @@ async def send_webchat_message(
                     if not escalation_result:
                         # RAG response
                         try:
+                            logger.info(
+                                "webchat RAG call — workspace_id=%s conversation_id=%s query_preview=%r",
+                                str(channel.workspace_id), conversation_id, message_content[:80],
+                            )
                             rag_result = await generate_rag_response(
                                 db=db,
                                 workspace_id=str(channel.workspace_id),
@@ -530,6 +535,22 @@ async def send_webchat_message(
                                 conversation_id=conversation_id,
                                 max_tokens=300
                             )
+
+                            if rag_result.get("used_fallback"):
+                                logger.warning(
+                                    "webchat RAG returned fallback — workspace_id=%s chunks=%d search_method=%s threshold=%s",
+                                    str(channel.workspace_id),
+                                    rag_result.get("relevant_chunks_count", 0),
+                                    rag_result.get("search_method"),
+                                    rag_result.get("threshold_used"),
+                                )
+                            else:
+                                logger.info(
+                                    "webchat RAG success — workspace_id=%s chunks=%d search_method=%s",
+                                    str(channel.workspace_id),
+                                    rag_result.get("relevant_chunks_count", 0),
+                                    rag_result.get("search_method"),
+                                )
 
                             response_content = rag_result["response"]
                             input_tokens = rag_result["input_tokens"]
