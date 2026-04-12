@@ -505,9 +505,11 @@ class RAGEngine:
             "1. Answer ONLY from the [Knowledge base] passages provided. Do not use prior knowledge.\n"
             "2. Be concise and direct — one to three sentences unless the question requires more detail.\n"
             "3. If the passages contain a partial answer, give that partial answer clearly.\n"
-            "4. If the passages do not contain enough information to answer, reply with exactly:\n"
+            "4. If the customer sends a greeting or small talk (e.g. 'hi', 'hello', 'hey', 'how are you'), "
+            "respond with a brief, friendly reply and invite them to ask their question — do NOT use the fallback for greetings.\n"
+            "5. If the passages do not contain enough information to answer a real question, reply with exactly:\n"
             f"   {fallback}\n"
-            "5. Never invent facts, numbers, dates, or names not present in the passages."
+            "6. Never invent facts, numbers, dates, or names not present in the passages."
         ]
 
         user_parts = []
