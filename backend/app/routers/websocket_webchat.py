@@ -45,11 +45,6 @@ async def webchat_websocket_endpoint(
         if not connection:
             return  # already closed with error code inside connect()
 
-        # Verify the workspace_id in the URL path matches the channel's workspace
-        if connection.workspace_id != workspace_id:
-            await websocket.close(code=4003, reason="Workspace mismatch")
-            return
-
         # Message loop — receive-only; only ping is accepted from the customer
         while True:
             try:
