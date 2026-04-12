@@ -150,10 +150,21 @@ async def login_user(
             detail="Account is inactive"
         )
     
+    # Block agent accounts from using the owner login endpoint
+    agent_result = await db.execute(
+        select(Agent).where(Agent.user_id == user.id, Agent.is_active == True)
+    )
+    agent_profile = agent_result.scalar_one_or_none()
+    if agent_profile:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Looks like you're trying to sign in as an owner, but this account is set up as an agent. Try signing in at the agent login instead."
+        )
+
     # Update last login
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
-    
+
     # Load user's workspace
     result = await db.execute(select(Workspace).where(Workspace.owner_id == user.id))
     workspace = result.scalar_one_or_none()
