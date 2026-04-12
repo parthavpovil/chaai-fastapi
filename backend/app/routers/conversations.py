@@ -14,7 +14,7 @@ import csv
 import io
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace, get_current_agent, require_permission
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, get_workspace_from_token, get_current_agent, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.agent import Agent
@@ -127,7 +127,7 @@ async def list_conversations(
     limit: int = Query(50, ge=1, le=100, description="Maximum number of conversations to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -267,7 +267,7 @@ async def search_conversations(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db),
 ):
     """Search conversations by message content and filters."""
@@ -467,7 +467,7 @@ async def export_conversations_csv(
 async def get_conversation_csat(
     conversation_id: str,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db),
 ):
     """Get the CSAT rating for a conversation, if submitted."""
@@ -501,7 +501,7 @@ async def get_conversation_csat(
 async def get_conversation(
     conversation_id: str,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -547,7 +547,7 @@ async def get_conversation(
 async def claim_conversation(
     request: ConversationClaimRequest,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -620,7 +620,7 @@ async def claim_conversation(
 async def update_conversation_status(
     request: ConversationStatusUpdateRequest,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -767,7 +767,7 @@ async def send_agent_message(
     conversation_id: str,
     request: AgentMessageRequest,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -898,7 +898,7 @@ async def send_agent_message(
 @router.get("/stats/summary", response_model=ConversationStatsResponse)
 async def get_conversation_statistics(
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -991,7 +991,7 @@ async def get_my_active_conversations(
     limit: int = Query(50, ge=1, le=100, description="Maximum number of conversations to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """
@@ -1072,7 +1072,7 @@ async def create_internal_note(
     conversation_id: str,
     request: InternalNoteCreate,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """Create an internal agent note on a conversation (not visible to customers)."""
@@ -1121,7 +1121,7 @@ async def create_internal_note(
 async def list_internal_notes(
     conversation_id: str,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """List internal notes for a conversation (agent/owner only)."""
@@ -1169,7 +1169,7 @@ async def submit_ai_feedback(
     message_id: str,
     request: FeedbackCreate,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """Submit thumbs-up/down feedback on an AI-generated message."""

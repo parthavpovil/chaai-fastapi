@@ -147,25 +147,40 @@ class WebSocketManager:
             if not user_id or not workspace_id:
                 return None
             
-            # Verify user and workspace exist
+            # Verify user and workspace exist — try owner first, then agent
             from sqlalchemy import select
-            
+            from app.models.agent import Agent
+
             result = await db.execute(
                 select(User.email, Workspace.id)
                 .join(Workspace, Workspace.owner_id == User.id)
                 .where(User.id == user_id)
                 .where(Workspace.id == workspace_id)
             )
-            
             row = result.first()
+            user_role = "owner"
+
+            if not row:
+                # Fallback: check if user is an active agent in this workspace
+                agent_result = await db.execute(
+                    select(User.email, Workspace.id)
+                    .join(Agent, Agent.user_id == User.id)
+                    .join(Workspace, Workspace.id == Agent.workspace_id)
+                    .where(User.id == user_id)
+                    .where(Workspace.id == workspace_id)
+                    .where(Agent.is_active == True)
+                )
+                row = agent_result.first()
+                user_role = "agent"
+
             if not row:
                 return None
-            
+
             return {
                 "user_id": user_id,
                 "workspace_id": workspace_id,
                 "user_email": row.email,
-                "user_role": "owner"  # For now, only owners can connect
+                "user_role": user_role,
             }
             
         except Exception as e:
