@@ -158,7 +158,10 @@ async def login_user(
     if agent_profile:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Looks like you're trying to sign in as an owner, but this account is set up as an agent. Try signing in at the agent login instead."
+            detail={
+                "message": "Looks like you're trying to sign in as an owner, but this account is set up as an agent. Try signing in at the agent login instead.",
+                "role": "agent"
+            }
         )
 
     # Update last login
@@ -228,9 +231,17 @@ async def login_agent(
     agent = result.scalar_one_or_none()
     
     if not agent:
+        workspace_result = await db.execute(
+            select(Workspace).where(Workspace.owner_id == user.id)
+        )
+        owner_workspace = workspace_result.scalar_one_or_none()
+        role = "owner" if owner_workspace else None
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="No active agent profile found"
+            detail={
+                "message": "No active agent profile found",
+                "role": role
+            }
         )
     
     # Update last login
