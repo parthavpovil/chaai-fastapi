@@ -369,7 +369,7 @@ async def export_conversations_csv(
     date_to: Optional[date] = Query(None),
     assigned_agent_id: Optional[str] = Query(None),
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db),
 ):
     """

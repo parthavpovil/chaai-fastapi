@@ -139,23 +139,32 @@ async def get_workspace_from_token(
     db: AsyncSession = Depends(get_db)
 ) -> Workspace:
     """
-    Dependency to get workspace from JWT token
-    Used for WebSocket connections and agent endpoints
+    Dependency to get workspace from JWT token or API key.
+    Works for owner JWTs, agent JWTs (workspace_id in payload), and csk_* API keys.
     """
     token = credentials.credentials
-    
-    # Get workspace ID from token
+
+    # API key path — validate and return workspace directly
+    if token.startswith("csk_"):
+        from app.services.api_key_service import validate_api_key
+        result = await validate_api_key(token, db)
+        if not result:
+            raise AuthenticationError("Invalid or expired API key")
+        _, workspace = result
+        return workspace
+
+    # JWT path — read workspace_id from token
     workspace_id = auth_service.get_workspace_id_from_token(token)
     if not workspace_id:
         raise AuthenticationError("No workspace in token")
-    
+
     # Load workspace from database
     result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
     workspace = result.scalar_one_or_none()
-    
+
     if not workspace:
         raise AuthenticationError("Workspace not found")
-    
+
     return workspace
 
 

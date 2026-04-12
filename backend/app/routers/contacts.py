@@ -11,7 +11,7 @@ from sqlalchemy import select, func, or_
 from pydantic import BaseModel, Field
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, get_workspace_from_token, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.contact import Contact
@@ -94,7 +94,7 @@ async def list_contacts(
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db),
 ):
     """List contacts for the workspace with optional search and filters."""
@@ -138,7 +138,7 @@ async def list_contacts(
 async def get_contact(
     contact_id: str,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db),
 ):
     """Get contact detail with recent conversation history."""
@@ -180,7 +180,7 @@ async def update_contact(
     contact_id: str,
     request: ContactUpdate,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db),
 ):
     """Update contact fields. custom_fields requires Growth+ tier."""
@@ -232,7 +232,7 @@ async def update_contact(
 async def block_contact(
     contact_id: str,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db),
 ):
     """Block a contact. Blocked contacts receive an auto-reply and are not processed through AI."""
@@ -254,7 +254,7 @@ async def block_contact(
 async def unblock_contact(
     contact_id: str,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db),
 ):
     """Unblock a previously blocked contact."""
@@ -276,7 +276,7 @@ async def unblock_contact(
 async def delete_contact(
     contact_id: str,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db),
 ):
     """

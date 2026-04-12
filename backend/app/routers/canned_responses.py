@@ -10,7 +10,7 @@ from sqlalchemy import select, func
 from pydantic import BaseModel, Field
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, get_workspace_from_token, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.canned_response import CannedResponse
@@ -86,7 +86,7 @@ def _to_out(cr: CannedResponse) -> CannedResponseOut:
 async def create_canned_response(
     request: CannedResponseCreate,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """Create a canned response (workspace owner only)."""
@@ -118,7 +118,7 @@ async def create_canned_response(
 @router.get("", response_model=List[CannedResponseOut])
 async def list_canned_responses(
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """List all canned responses for the workspace (agents + owners)."""
@@ -135,7 +135,7 @@ async def update_canned_response(
     canned_response_id: str,
     request: CannedResponseUpdate,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """Update a canned response (owner only)."""
@@ -173,7 +173,7 @@ async def update_canned_response(
 async def delete_canned_response(
     canned_response_id: str,
     current_user: User = Depends(get_current_user),
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     db: AsyncSession = Depends(get_db)
 ):
     """Delete a canned response (owner only)."""

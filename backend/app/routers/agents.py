@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
 
 from app.database import get_db
-from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
+from app.middleware.auth_middleware import get_current_user, get_current_workspace, get_workspace_from_token, require_permission
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.models.agent import Agent
@@ -704,7 +704,7 @@ class AgentStatusResponse(BaseModel):
 @router.put("/me/status", response_model=AgentStatusResponse, dependencies=[Depends(require_permission("agent_self.presence"))])
 async def update_agent_status(
     request: AgentStatusUpdate,
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
@@ -746,7 +746,7 @@ async def update_agent_status(
 
 @router.get("/me/status", response_model=AgentStatusResponse, dependencies=[Depends(require_permission("agent_self.presence"))])
 async def get_agent_status(
-    current_workspace: Workspace = Depends(get_current_workspace),
+    current_workspace: Workspace = Depends(get_workspace_from_token),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db)
 ):
