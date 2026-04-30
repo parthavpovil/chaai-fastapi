@@ -12,6 +12,7 @@
   var last_message_count = 0;
   var is_open = false;
   var config = {};
+  var is_transitioning_to_ws = false;
 
   // ── WebSocket state ─────────────────────────────────────────────────────────
   var ws = null;
@@ -439,6 +440,7 @@
           saveSession(session_token);
           // Now that we have a session_token, connect WS if not already connected
           if (ws_enabled && config.workspace_id && (!ws || ws.readyState !== WebSocket.OPEN)) {
+            is_transitioning_to_ws = true;
             stopPolling();
             connectWebSocket();
           }
@@ -486,6 +488,9 @@
       apiFetch(url)
         .then(function (r) { return r.json(); })
         .then(function (data) {
+          if (is_transitioning_to_ws || (ws && ws.readyState === WebSocket.OPEN)) {
+            return;
+          }
           var msgs = data.messages || [];
           if (msgs.length > last_message_count) {
             var container = document.getElementById('chatsaas-messages');
@@ -525,6 +530,7 @@
 
     ws.onopen = function () {
       ws_retry_count = 0;
+      is_transitioning_to_ws = false;
       stopPolling(); // WS is up — no need to poll
       startWsPing();
     };
@@ -541,6 +547,7 @@
 
     ws.onclose = function () {
       ws = null;
+      is_transitioning_to_ws = false;
       stopWsPing();
       if (ws_retry_count < WS_MAX_RETRIES) {
         ws_retry_count++;
@@ -556,6 +563,7 @@
 
   function disconnectWebSocket() {
     if (ws_retry_timer) { clearTimeout(ws_retry_timer); ws_retry_timer = null; }
+    is_transitioning_to_ws = false;
     stopWsPing();
     if (ws) {
       ws.onclose = null; // prevent reconnect loop on intentional close
@@ -566,6 +574,7 @@
 
   function fallbackToPolling() {
     ws_enabled = false;
+    is_transitioning_to_ws = false;
     if (is_open && !poll_interval) startPolling();
   }
 
