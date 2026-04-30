@@ -21,6 +21,7 @@
   var WS_MAX_RETRIES = 5;
   var ws_enabled = (typeof WebSocket !== 'undefined');
   var rendered_message_ids = {}; // {message_id: true} — dedup guard
+  var pending_assistant_echoes = []; // [{content, role, expires_at}] for HTTP→WS dedup
 
   // ── Resolve API base from script tag src ──────────────────────────────────
 
@@ -225,6 +226,38 @@
     container.scrollTop = container.scrollHeight;
   }
 
+  function trackPendingAssistantEcho(content, role) {
+    if (!content || (role !== 'assistant' && role !== 'agent')) return;
+    cleanupPendingAssistantEchoes();
+    pending_assistant_echoes.push({
+      content: String(content),
+      role: role,
+      expires_at: Date.now() + 5000
+    });
+  }
+
+  function cleanupPendingAssistantEchoes() {
+    var now = Date.now();
+    pending_assistant_echoes = pending_assistant_echoes.filter(function (entry) {
+      return entry.expires_at > now;
+    });
+  }
+
+  function shouldSuppressAssistantPush(content, role) {
+    cleanupPendingAssistantEchoes();
+    if (!content || (role !== 'assistant' && role !== 'agent')) return false;
+
+    for (var i = 0; i < pending_assistant_echoes.length; i++) {
+      var entry = pending_assistant_echoes[i];
+      if (entry.content === String(content) && entry.role === role) {
+        pending_assistant_echoes.splice(i, 1);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   function appendMediaMessage(mediaData, role) {
     var container = document.getElementById('chatsaas-messages');
     if (!container) return;
@@ -379,6 +412,7 @@
           saveSession(session_token);
         }
         if (sendData.response) {
+          trackPendingAssistantEcho(sendData.response, 'assistant');
           appendMessage(sendData.response, 'assistant');
           last_message_count += 1;
         }
@@ -448,6 +482,7 @@
         if (data.message_id) rendered_message_ids[data.message_id] = true;
         // The AI reply comes back synchronously in the HTTP response — render it directly
         if (data.response) {
+          trackPendingAssistantEcho(data.response, 'assistant');
           appendMessage(data.response, 'assistant');
           last_message_count += 2;
         } else {
@@ -595,11 +630,15 @@
     if (msg.type === 'new_message') {
       // Dedup: skip if already rendered (history load or HTTP response)
       if (msg.message_id && rendered_message_ids[msg.message_id]) return;
-      if (msg.message_id) rendered_message_ids[msg.message_id] = true;
 
       // Only render server-pushed replies (assistant / agent)
       // Customer's own messages are rendered optimistically in sendMessage()
       if (msg.role === 'assistant' || msg.role === 'agent') {
+        if (shouldSuppressAssistantPush(msg.content || '', msg.role)) {
+          if (msg.message_id) rendered_message_ids[msg.message_id] = true;
+          return;
+        }
+        if (msg.message_id) rendered_message_ids[msg.message_id] = true;
         if (msg.msg_type && msg.msg_type !== 'text' && msg.media_url) {
           appendMediaMessage({ url: msg.media_url, filename: msg.media_filename, message_type: msg.msg_type }, 'assistant');
           if (msg.content && msg.content !== '[User sent a file]') {
@@ -609,6 +648,8 @@
           appendMessage(msg.content || '', 'assistant');
         }
         last_message_count += 1;
+      } else if (msg.message_id) {
+        rendered_message_ids[msg.message_id] = true;
       }
       return;
     }
