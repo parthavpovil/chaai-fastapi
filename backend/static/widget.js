@@ -21,7 +21,11 @@
   var ws_ping_interval = null;
   var WS_MAX_RETRIES = 5;
   var ws_enabled = (typeof WebSocket !== 'undefined');
-  var rendered_message_ids = {}; // {message_id: true} — dedup guard
+  var rendered_message_ids = {}; // {message_id: true} — ID-based dedup guard
+  // Content-based dedup for assistant messages: handles cases where the backend
+  // pushes the same reply twice via WS with different IDs (e.g. queued + live).
+  var ws_assistant_seen = {}; // {contentKey: timestamp}
+  var WS_ASSISTANT_DEDUP_TTL = 15000; // 15 s window
 
   // ── Resolve API base from script tag src ──────────────────────────────────
 
@@ -469,7 +473,8 @@
         var container = document.getElementById('chatsaas-messages');
         if (!container) return;
         container.innerHTML = '';
-        rendered_message_ids = {}; // reset on full reload
+        rendered_message_ids = {};
+        ws_assistant_seen = {};
         console.log('[ChatSaaS DEBUG] loadHistory rendering', (data.messages || []).length, 'messages');
         (data.messages || []).forEach(function (msg) {
           renderMessage(msg);
@@ -498,8 +503,10 @@
             var container = document.getElementById('chatsaas-messages');
             if (!container) return;
             container.innerHTML = '';
+            rendered_message_ids = {};
             msgs.forEach(function (msg) {
               renderMessage(msg);
+              if (msg.id) rendered_message_ids[msg.id] = true;
             });
             last_message_count = msgs.length;
           }
@@ -516,7 +523,7 @@
 
   function connectWebSocket() {
     if (!ws_enabled || !widget_id || !session_token || !config.workspace_id) return;
-    if (ws && ws.readyState === WebSocket.OPEN) return;
+    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
 
     var wsBase = API_BASE.replace(/^http/, 'ws');
     var url = wsBase + '/ws/webchat/' + encodeURIComponent(config.workspace_id)
@@ -603,9 +610,19 @@
       // Dedup: skip if already rendered (history load or HTTP response)
       if (msg.message_id && rendered_message_ids[msg.message_id]) return;
 
-      // Only render server-pushed replies (assistant / agent)
-      // Customer's own messages are rendered optimistically in sendMessage()
+      // Only render server-pushed replies (assistant / agent).
+      // Customer's own messages are rendered optimistically in sendMessage().
+      // Nothing from the HTTP /send response is ever rendered here.
       if (msg.role === 'assistant' || msg.role === 'agent') {
+        // Secondary content-based dedup: catches cases where the backend pushes
+        // the same reply twice via WS with different (or missing) message IDs.
+        var contentKey = (msg.content || '') + '|' + (msg.msg_type || 'text') + '|' + (msg.media_url || '');
+        var now = Date.now();
+        if (ws_assistant_seen[contentKey] && (now - ws_assistant_seen[contentKey]) < WS_ASSISTANT_DEDUP_TTL) {
+          return;
+        }
+        ws_assistant_seen[contentKey] = now;
+
         if (msg.message_id) rendered_message_ids[msg.message_id] = true;
         if (msg.msg_type && msg.msg_type !== 'text' && msg.media_url) {
           appendMediaMessage({ url: msg.media_url, filename: msg.media_filename, message_type: msg.msg_type }, 'assistant');
