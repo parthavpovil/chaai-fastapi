@@ -467,13 +467,10 @@ class EscalationRouter:
                 sensitivity=sensitivity
             )
             
-            # Check if escalation is needed
-            should_escalate = (
-                classification['should_escalate'] and
-                classification['confidence'] >= confidence_threshold
-            )
-            
-            if not should_escalate:
+            # Trust the classifier's decision — it already applied the workspace
+            # sensitivity threshold internally. The redundant confidence gate here
+            # was silently blocking keyword-detected escalations.
+            if not classification['should_escalate']:
                 return None
             
             # Get priority level

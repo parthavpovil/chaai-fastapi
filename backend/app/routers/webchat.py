@@ -536,6 +536,7 @@ async def send_webchat_message(
                                 max_tokens=300
                             )
 
+                            rag_escalated = False
                             if rag_result.get("used_fallback"):
                                 logger.warning(
                                     "webchat RAG returned fallback — workspace_id=%s chunks=%d search_method=%s threshold=%s response=%r",
@@ -545,6 +546,37 @@ async def send_webchat_message(
                                     rag_result.get("threshold_used"),
                                     rag_result.get("response", "")[:120],
                                 )
+                                # RAG couldn't answer — escalate to a human agent if possible
+                                if _wc_agents:
+                                    try:
+                                        from app.services.escalation_router import EscalationRouter
+                                        fallback_esc = await EscalationRouter(db).process_escalation(
+                                            conversation_id=conversation_id,
+                                            workspace_id=str(channel.workspace_id),
+                                            escalation_reason="implicit",
+                                            classification_data={
+                                                "should_escalate": True,
+                                                "confidence": 1.0,
+                                                "reason": "RAG knowledge base could not answer the query",
+                                                "category": "complex",
+                                                "classification_method": "rag_fallback",
+                                            },
+                                            priority="medium",
+                                        )
+                                        if fallback_esc:
+                                            rag_escalated = True
+                                            ack_msg_id = fallback_esc.get("acknowledgment_message_id")
+                                            if ack_msg_id:
+                                                from app.services.websocket_events import notify_customer_new_message
+                                                await notify_customer_new_message(
+                                                    db=db,
+                                                    workspace_id=str(channel.workspace_id),
+                                                    session_token=session_token,
+                                                    message_id=str(ack_msg_id),
+                                                )
+                                            response_content = None
+                                    except Exception as esc_err:
+                                        logger.error(f"RAG-fallback escalation failed: {esc_err}")
                             else:
                                 logger.info(
                                     "webchat RAG success — workspace_id=%s chunks=%d search_method=%s response=%r",
@@ -554,44 +586,45 @@ async def send_webchat_message(
                                     rag_result.get("response", "")[:120],
                                 )
 
-                            response_content = rag_result["response"]
-                            input_tokens = rag_result["input_tokens"]
-                            output_tokens = rag_result["output_tokens"]
+                            if not rag_escalated:
+                                response_content = rag_result["response"]
+                                input_tokens = rag_result["input_tokens"]
+                                output_tokens = rag_result["output_tokens"]
 
-                            ai_message = await processor.create_message(
-                                conversation_id=conversation_id,
-                                content=response_content,
-                                role="assistant",
-                                channel_type="webchat",
-                                metadata={
-                                    "rag_used": True,
-                                    "input_tokens": input_tokens,
-                                    "output_tokens": output_tokens,
-                                    "webchat_response": True
-                                }
-                            )
-
-                            await track_message_usage(
-                                db=db,
-                                workspace_id=str(channel.workspace_id),
-                                input_tokens=input_tokens,
-                                output_tokens=output_tokens
-                            )
-
-                            if ai_message:
-                                await notify_new_message(
-                                    db=db,
-                                    workspace_id=str(channel.workspace_id),
+                                ai_message = await processor.create_message(
                                     conversation_id=conversation_id,
-                                    message_id=str(ai_message.id),
+                                    content=response_content,
+                                    role="assistant",
+                                    channel_type="webchat",
+                                    metadata={
+                                        "rag_used": True,
+                                        "input_tokens": input_tokens,
+                                        "output_tokens": output_tokens,
+                                        "webchat_response": True
+                                    }
                                 )
-                                from app.services.websocket_events import notify_customer_new_message
-                                await notify_customer_new_message(
+
+                                await track_message_usage(
                                     db=db,
                                     workspace_id=str(channel.workspace_id),
-                                    session_token=session_token,
-                                    message_id=str(ai_message.id),
+                                    input_tokens=input_tokens,
+                                    output_tokens=output_tokens
                                 )
+
+                                if ai_message:
+                                    await notify_new_message(
+                                        db=db,
+                                        workspace_id=str(channel.workspace_id),
+                                        conversation_id=conversation_id,
+                                        message_id=str(ai_message.id),
+                                    )
+                                    from app.services.websocket_events import notify_customer_new_message
+                                    await notify_customer_new_message(
+                                        db=db,
+                                        workspace_id=str(channel.workspace_id),
+                                        session_token=session_token,
+                                        message_id=str(ai_message.id),
+                                    )
 
                         except Exception as e:
                             logger.error(f"RAG response generation failed: {e}", exc_info=True)
