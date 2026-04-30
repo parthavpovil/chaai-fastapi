@@ -239,14 +239,19 @@ class EscalationClassifier:
                 # Boost confidence if keywords detected
                 if has_keywords:
                     confidence = min(confidence + keyword_confidence * 0.3, 1.0)
-                    if not should_escalate and keyword_confidence > 0.7:
-                        # Override LLM if strong keyword signals
+                    if not should_escalate and keyword_confidence >= 0.5:
+                        # Override LLM when any escalation keyword is detected; raise
+                        # confidence to at least the medium threshold so the sensitivity
+                        # filter below does not immediately reverse this decision.
                         should_escalate = True
+                        confidence = max(confidence, self.MEDIUM_CONFIDENCE_THRESHOLD)
                         reason = f"Keyword override: {reason}"
             else:
                 # Fallback to keyword-only classification
-                should_escalate = has_keywords and keyword_confidence > 0.5
-                confidence = keyword_confidence
+                should_escalate = has_keywords and keyword_confidence >= 0.5
+                # Ensure confidence is at least the medium threshold so the sensitivity
+                # filter below does not reverse a keyword-triggered decision.
+                confidence = max(keyword_confidence, self.MEDIUM_CONFIDENCE_THRESHOLD) if should_escalate else keyword_confidence
                 reason = f"Keywords detected: {', '.join(found_keywords)}" if found_keywords else "No escalation indicators"
                 category = "human_request" if any(kw in ['human', 'agent', 'manager'] for kw in found_keywords) else "none"
             
