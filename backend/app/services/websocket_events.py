@@ -541,6 +541,13 @@ async def notify_customer_new_message(
     Called after AI reply or human-agent reply is saved.
     Returns True if sent, False if no active WS connection (graceful).
     """
+    import traceback as _tb
+    logger.info(
+        "🔔 [DEBUG] notify_customer_new_message called: workspace_id=%s session_token=%s message_id=%s\n  call stack: %s",
+        workspace_id, session_token[:8] + "…" if len(session_token) > 8 else session_token,
+        message_id,
+        "".join(_tb.format_stack(limit=5)),
+    )
     try:
         from sqlalchemy import select
         from app.models.message import Message
@@ -549,6 +556,7 @@ async def notify_customer_new_message(
         result = await db.execute(select(Message).where(Message.id == message_id))
         message = result.scalar_one_or_none()
         if not message:
+            logger.warning("🔔 [DEBUG] notify_customer_new_message: message %s not found in DB", message_id)
             return False
 
         event = {
@@ -563,9 +571,15 @@ async def notify_customer_new_message(
             "created_at": message.created_at.isoformat(),
         }
 
-        return await customer_websocket_manager.send_to_session(
+        logger.info(
+            "🔔 [DEBUG] notify_customer_new_message: publishing event to ws:customer:%s — role=%s content=%r",
+            workspace_id, message.role, (message.content or "")[:80],
+        )
+        result = await customer_websocket_manager.send_to_session(
             workspace_id, session_token, event
         )
+        logger.info("🔔 [DEBUG] notify_customer_new_message: send_to_session returned %s", result)
+        return result
     except Exception as e:
         logger.error(f"notify_customer_new_message error: {e}", exc_info=True)
         return False

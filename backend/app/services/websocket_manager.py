@@ -781,9 +781,21 @@ class CustomerWebSocketManager:
             return
         ws_pool = self.customer_connections.get(workspace_id, {})
         connection = ws_pool.get(session_token)
+        logger.info(
+            "📨 [DEBUG] customer deliver_to_local: workspace_id=%s session_token=%s msg_type=%s message_id=%s connection=%s",
+            workspace_id,
+            session_token[:8] + "…" if len(session_token) > 8 else session_token,
+            message.get("type"),
+            message.get("message_id"),
+            connection.connection_id if connection else "NONE (no active WS for this session)",
+        )
         if not connection:
             return
         ok = await connection.send_message(message)
+        logger.info(
+            "📨 [DEBUG] customer deliver_to_local: send_message returned %s for message_id=%s",
+            ok, message.get("message_id"),
+        )
         if not ok:
             await self.disconnect(connection.connection_id)
 
