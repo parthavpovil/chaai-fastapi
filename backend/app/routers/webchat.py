@@ -511,9 +511,11 @@ async def send_webchat_message(
                         logger.error(f"AI agent runner error for webchat {conversation_id}: {e}")
 
                 if not _wc_handled:
-                    # Auto-escalation check — only when both agents and auto-escalation are enabled
+                    # Auto-escalation check — runs whenever auto-escalation is enabled,
+                    # regardless of agents_enabled. process_escalation handles both cases:
+                    # with agents → WebSocket assignment; without agents → email alert to owner.
                     escalation_result = None
-                    if _wc_agents and _wc_auto_esc:
+                    if _wc_auto_esc:
                         escalation_result = await check_and_escalate_message(
                             db=db,
                             conversation_id=conversation_id,
@@ -546,8 +548,9 @@ async def send_webchat_message(
                                     rag_result.get("threshold_used"),
                                     rag_result.get("response", "")[:120],
                                 )
-                                # RAG couldn't answer — escalate to a human agent if possible
-                                if _wc_agents:
+                                # RAG couldn't answer — escalate if auto-escalation is on.
+                                # Without agents, process_escalation emails the owner instead.
+                                if _wc_auto_esc:
                                     try:
                                         from app.services.escalation_router import EscalationRouter
                                         fallback_esc = await EscalationRouter(db).process_escalation(
