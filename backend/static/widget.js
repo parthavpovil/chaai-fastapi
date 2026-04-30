@@ -439,6 +439,7 @@
           saveSession(session_token);
           // Now that we have a session_token, connect WS if not already connected
           if (ws_enabled && config.workspace_id && (!ws || ws.readyState !== WebSocket.OPEN)) {
+            stopPolling();
             connectWebSocket();
           }
         }
