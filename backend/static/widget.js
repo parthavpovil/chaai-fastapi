@@ -219,6 +219,7 @@
   function appendMessage(content, role) {
     var container = document.getElementById('chatsaas-messages');
     if (!container) return;
+    console.log('[ChatSaaS DEBUG] appendMessage called:', role, JSON.stringify(content), new Error().stack);
     var div = document.createElement('div');
     div.className = 'cs-msg ' + (role === 'user' ? 'user' : 'assistant');
     div.textContent = content;
@@ -469,6 +470,7 @@
         if (!container) return;
         container.innerHTML = '';
         rendered_message_ids = {}; // reset on full reload
+        console.log('[ChatSaaS DEBUG] loadHistory rendering', (data.messages || []).length, 'messages');
         (data.messages || []).forEach(function (msg) {
           renderMessage(msg);
           if (msg.id) rendered_message_ids[msg.id] = true;
@@ -597,6 +599,7 @@
     if (msg.type === 'pong') return; // keepalive, ignore
 
     if (msg.type === 'new_message') {
+      console.log('[ChatSaaS DEBUG] handleServerPush new_message:', msg.message_id, 'role:', msg.role, 'already_rendered:', !!rendered_message_ids[msg.message_id]);
       // Dedup: skip if already rendered (history load or HTTP response)
       if (msg.message_id && rendered_message_ids[msg.message_id]) return;
 
