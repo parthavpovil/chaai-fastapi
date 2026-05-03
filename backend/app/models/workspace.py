@@ -36,6 +36,8 @@ class Workspace(Base):
     escalation_message_without_agents = Column(Text, nullable=True) # custom acknowledgment when no agents
     ai_enabled = Column(Boolean, nullable=False, default=True)              # False = skip all LLM, route directly to human
     auto_escalation_enabled = Column(Boolean, nullable=False, default=True) # False = escalation classifier never runs automatically
+    assistant_name = Column(String(60), nullable=True)                      # bot display name in system prompt; null = default opener
+    assistant_persona = Column(String(300), nullable=True)                  # short role descriptor; null = omit from prompt
     razorpay_customer_id = Column(String, nullable=True)
     razorpay_subscription_id = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

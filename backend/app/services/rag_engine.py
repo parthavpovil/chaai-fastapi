@@ -37,6 +37,27 @@ _embedding_cache: OrderedDict = OrderedDict()
 _EMBEDDING_CACHE_MAX = 512
 
 
+# ─── Small-talk shortcut ──────────────────────────────────────────────────────
+# Filler messages that should skip retrieval entirely. The system prompt's
+# greeting rule already handles these; running the full pipeline wastes tokens
+# and occasionally surfaces spurious chunks.
+_SMALL_TALK = frozenset({
+    "hi", "hello", "hey", "yo", "sup", "hiya",
+    "thanks", "thank you", "thx", "ty", "thank u",
+    "ok", "okay", "k", "kk", "got it", "cool", "nice",
+    "bye", "goodbye", "cya", "later",
+})
+
+
+def _is_small_talk(query: str) -> bool:
+    """Return True if the query is a greeting or filler that should skip RAG."""
+    s = query.strip().lower().rstrip("!.?")
+    if s in _SMALL_TALK:
+        return True
+    # Single short alpha token like "hm", "yo" — almost certainly filler
+    return len(s) <= 3 and s.isalpha()
+
+
 class RAGError(Exception):
     """Base exception for RAG processing errors"""
     pass
@@ -49,8 +70,11 @@ class RAGEngine:
     """
 
     # ── Retrieval ──────────────────────────────────────────────────────────────
-    SIMILARITY_THRESHOLD = 0.20
-    SIMILARITY_FALLBACK_THRESHOLDS = (0.15, 0.10)  # progressive retry tiers
+    # text-embedding-3-small (1536-d normalised cosine): genuine matches ≥ ~0.4,
+    # below ~0.20 is essentially "shares a few common words". BM25 still rescues
+    # exact-keyword queries that fail the vector floor via hybrid RRF.
+    SIMILARITY_THRESHOLD = 0.35
+    SIMILARITY_FALLBACK_THRESHOLDS = (0.25, 0.18)  # progressive retry tiers
     MAX_CHUNKS = 5
     HYBRID_CANDIDATE_POOL = 20   # retrieve top-N before MMR trims to MAX_CHUNKS
     RRF_K = 60                   # standard Reciprocal Rank Fusion constant
@@ -477,14 +501,61 @@ class RAGEngine:
         summary = conv.meta.get("summary") if conv.meta else None
         return messages, summary
 
-    async def _get_workspace_fallback(self, workspace_id: str) -> Optional[str]:
-        """Fetch workspace fallback message."""
+    async def _get_workspace_persona(self, workspace_id: str) -> Dict[str, Optional[str]]:
+        """
+        Fetch workspace fallback message + assistant identity in a single query.
+        Returns {'fallback_msg', 'assistant_name', 'assistant_persona'}.
+        """
         result = await self.db.execute(
-            select(Workspace.fallback_msg).where(Workspace.id == workspace_id)
+            select(
+                Workspace.fallback_msg,
+                Workspace.assistant_name,
+                Workspace.assistant_persona,
+            ).where(Workspace.id == workspace_id)
         )
-        return result.scalar_one_or_none()
+        row = result.first()
+        if row is None:
+            return {"fallback_msg": None, "assistant_name": None, "assistant_persona": None}
+        return {
+            "fallback_msg": row.fallback_msg,
+            "assistant_name": row.assistant_name,
+            "assistant_persona": row.assistant_persona,
+        }
+
+    async def _get_workspace_fallback(self, workspace_id: str) -> Optional[str]:
+        """Fetch workspace fallback message (compatibility wrapper)."""
+        return (await self._get_workspace_persona(workspace_id))["fallback_msg"]
 
     # ─── Prompt Building ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_persona_opener(
+        assistant_name: Optional[str],
+        assistant_persona: Optional[str],
+    ) -> str:
+        """
+        Construct the first line of the system prompt from optional workspace
+        identity fields. Defense-in-depth: strip newlines and clamp length even
+        though the settings endpoint already validates these.
+        """
+        def clean(s: Optional[str], cap: int) -> Optional[str]:
+            if not s:
+                return None
+            s = s.replace("\r", " ").replace("\n", " ").strip()
+            if not s:
+                return None
+            return s[:cap]
+
+        name = clean(assistant_name, 60)
+        persona = clean(assistant_persona, 300)
+
+        if name and persona:
+            return f"You are {name}, {persona}. You provide precise customer support."
+        if name:
+            return f"You are {name}, a precise customer support assistant."
+        if persona:
+            return f"You are {persona}, providing precise customer support."
+        return "You are a precise customer support assistant."
 
     def build_context_prompt(
         self,
@@ -493,23 +564,37 @@ class RAGEngine:
         conversation_history: List[Message],
         workspace_fallback_message: Optional[str] = None,
         conversation_summary: Optional[str] = None,
+        assistant_name: Optional[str] = None,
+        assistant_persona: Optional[str] = None,
     ) -> List[Dict[str, str]]:
         """
         Build [system, user] message pair for the LLM.
         Chunks are truncated to MAX_CHUNK_CHARS to control token usage.
         """
         fallback = workspace_fallback_message or "Sorry, I could not find an answer. Our team will get back to you."
+        opener = self._build_persona_opener(assistant_name, assistant_persona)
         system_parts = [
-            "You are a precise customer support assistant.\n"
+            f"{opener}\n"
             "RULES:\n"
             "1. Answer ONLY from the [Knowledge base] passages provided. Do not use prior knowledge.\n"
-            "2. Be concise and direct — one to three sentences unless the question requires more detail.\n"
-            "3. If the passages contain a partial answer, give that partial answer clearly.\n"
-            "4. If the customer sends a greeting or small talk (e.g. 'hi', 'hello', 'hey', 'how are you'), "
+            "2. After EVERY factual claim, append a citation in the form [N] referencing "
+            "the passage number. If a sentence draws on multiple passages, cite each: [1][3]. "
+            "Citations are not required for greetings, meta-question replies, or the fallback message.\n"
+            "3. Be concise and direct — one to three sentences unless the question requires more detail. "
+            "If the passages contain a partial answer, give that partial answer clearly.\n"
+            "4. When passages conflict, prefer the one with the highest relevance score "
+            "(passages are listed in descending relevance order; later passages may be neighbor "
+            "context with no score).\n"
+            "5. If the customer sends a greeting or small talk (e.g. 'hi', 'hello', 'hey', 'how are you'), "
             "respond with a brief, friendly reply and invite them to ask their question — do NOT use the fallback for greetings.\n"
-            "5. If the passages do not contain enough information to answer a real question, reply with exactly:\n"
+            "6. If the customer asks what you know, what you can help with, what topics you cover, or similar "
+            "meta-questions about your capabilities (e.g. 'what do you know?', 'what can you tell me?', "
+            "'what can you help me with?', 'what topics do you cover?'), respond with a brief, friendly "
+            "message that you're here to help with questions about this service and invite them to ask "
+            "their specific question. Do NOT use the fallback message for these meta-questions.\n"
+            "7. If the passages do not contain enough information to answer a real question, reply with exactly:\n"
             f"   {fallback}\n"
-            "6. Never invent facts, numbers, dates, or names not present in the passages."
+            "8. Never invent facts, numbers, dates, or names not present in the passages."
         ]
 
         user_parts = []
@@ -524,7 +609,9 @@ class RAGEngine:
                 content = chunk.content
                 if len(content) > self.MAX_CHUNK_CHARS:
                     content = content[:self.MAX_CHUNK_CHARS] + "…"
-                user_parts.append(f"[{i}] ({filename})\n{content}")
+                user_parts.append(
+                    f"[{i}] (source: {filename}, chunk {chunk.chunk_index})\n{content}"
+                )
 
         if conversation_history:
             # Exclude the most recent message if it's the customer's current query.
@@ -550,6 +637,81 @@ class RAGEngine:
             {"role": "system", "content": "\n".join(system_parts)},
             {"role": "user", "content": "\n\n".join(user_parts)},
         ]
+
+    # ─── Query Rewriting ───────────────────────────────────────────────────────
+
+    async def _rewrite_query(
+        self,
+        query: str,
+        history: Optional[List[Message]] = None,
+    ) -> str:
+        """
+        Rewrite a conversational query into a self-contained, keyword-rich
+        search query. When `history` is provided the rewriter resolves
+        coreferences ("it", "that") against the prior turns — this is the
+        primary reason the rewriter exists. Falls back to the original on any
+        error. Used only for retrieval; the original query is shown to users.
+        """
+        if not llm_provider:
+            return query
+        stripped = query.strip()
+        if not stripped:
+            return query
+        # Skip rewriting only when there is no history AND the query is short.
+        # Short queries WITH history (e.g. "what about it?") are exactly when
+        # coreference resolution matters most.
+        has_history = bool(history)
+        if not has_history and len(stripped.split()) <= 3:
+            return query
+
+        history_block = ""
+        if has_history:
+            # Last 4 turns max — recent context is what matters for coreference
+            recent = history[-4:]
+            lines = []
+            for msg in recent:
+                role = "Customer" if msg.role in ("customer", "user") else "Assistant"
+                # Truncate each turn so the rewriter doesn't drown in context
+                content = (msg.content or "").strip().replace("\n", " ")
+                if len(content) > 200:
+                    content = content[:200] + "…"
+                lines.append(f"{role}: {content}")
+            history_block = "\n".join(lines)
+
+        try:
+            system_content = (
+                "You rewrite a customer's latest question into a self-contained, "
+                "keyword-rich search query for a knowledge base. Use the prior "
+                "turns ONLY to resolve pronouns and references (it / that / the X) "
+                "— do NOT add new topics. PRESERVE proper nouns, product names, "
+                "error codes, and numeric identifiers exactly as written. "
+                "Output ONLY the rewritten query — no prefix, no quotes, no explanation.\n\n"
+                "Example:\n"
+                "History:\n"
+                "Customer: I was charged twice for my Pro subscription last month.\n"
+                "Assistant: I can help look into that.\n"
+                "Latest: how do I get a refund?\n"
+                "Rewrite: refund duplicate Pro subscription charge"
+            )
+            user_content = (
+                f"History:\n{history_block}\nLatest: {stripped}\nRewrite:"
+                if history_block
+                else stripped
+            )
+            messages = [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": user_content},
+            ]
+            rewritten, _, _ = await llm_provider.generate_response(
+                messages=messages, max_tokens=40, temperature=0.0
+            )
+            rewritten = rewritten.strip().strip('"').strip("'")
+            # Defensive: if model returned a "Rewrite:" prefix anyway, strip it
+            if rewritten.lower().startswith("rewrite:"):
+                rewritten = rewritten[len("rewrite:"):].strip()
+            return rewritten if rewritten else query
+        except Exception:
+            return query
 
     # ─── LLM Generation ────────────────────────────────────────────────────────
 
@@ -593,14 +755,18 @@ class RAGEngine:
         Full RAG pipeline with parallelised I/O and advanced retrieval.
 
         Execution order:
-          1. Parallel: cached embedding + conversation data + workspace fallback
-          2. Progressive hybrid search (BM25 + vector → RRF)
-          3. MMR re-ranking for diversity
-          4. Neighbor chunk expansion for context
-          5. Build prompt and generate LLM response
+          1. Parallel: conversation data + workspace persona
+          2. Conversation-aware query rewriting (uses history from step 1)
+          3. Cached embedding for the rewritten query
+          4. Progressive hybrid search (BM25 + vector → RRF)
+          5. MMR re-ranking for diversity
+          6. Neighbor chunk expansion for context
+          7. Build prompt and generate LLM response
+
+        Small-talk shortcut: greetings/filler skip retrieval entirely.
         """
         try:
-            # ── Step 1: parallel I/O ──────────────────────────────────────────
+            # ── Step 1: parallel fetch — conv data + workspace persona ────────
             async def _empty_conv():
                 return [], None
 
@@ -610,20 +776,73 @@ class RAGEngine:
                 else _empty_conv()
             )
 
-            query_embedding, (conversation_history, conversation_summary), fallback_message = (
-                await asyncio.gather(
-                    self._get_cached_embedding(query),
-                    conv_coro,
-                    self._get_workspace_fallback(workspace_id),
-                )
+            (conversation_history, conversation_summary), persona = await asyncio.gather(
+                conv_coro,
+                self._get_workspace_persona(workspace_id),
             )
 
+            fallback_message = persona["fallback_msg"]
+            assistant_name = persona["assistant_name"]
+            assistant_persona = persona["assistant_persona"]
+
+            # ── Small-talk shortcut: skip retrieval entirely ──────────────────
+            if _is_small_talk(query):
+                logger.debug("RAG small-talk shortcut — query=%r", query)
+                context_messages = self.build_context_prompt(
+                    query=query,
+                    relevant_chunks=[],
+                    conversation_history=conversation_history,
+                    workspace_fallback_message=fallback_message,
+                    conversation_summary=conversation_summary,
+                    assistant_name=assistant_name,
+                    assistant_persona=assistant_persona,
+                )
+                response_text, input_tokens, output_tokens = await self.generate_response(
+                    messages=context_messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                )
+                return {
+                    'response': response_text,
+                    'input_tokens': input_tokens,
+                    'output_tokens': output_tokens,
+                    'total_tokens': input_tokens + output_tokens,
+                    'relevant_chunks_count': 0,
+                    'chunks_used': [],
+                    'has_conversation_context': bool(conversation_history),
+                    'used_fallback': False,
+                    'search_method': 'small_talk',
+                    'threshold_used': None,
+                }
+
+            # ── Step 2: conversation-aware query rewriting ────────────────────
+            # Pass the prior turns so the rewriter can resolve "it"/"that"/etc.
+            # _get_conversation_data appends the customer's current turn (it's
+            # already in the DB), so trim it off before handing to the rewriter.
+            history_for_rewrite = conversation_history
+            if (
+                history_for_rewrite
+                and history_for_rewrite[-1].role in ("customer", "user")
+                and history_for_rewrite[-1].content == query
+            ):
+                history_for_rewrite = history_for_rewrite[:-1]
+
+            search_query = await self._rewrite_query(query, history=history_for_rewrite)
+            if search_query != query:
+                logger.debug(
+                    "RAG query rewritten — original=%r rewritten=%r history_turns=%d",
+                    query, search_query, len(history_for_rewrite),
+                )
+
+            # ── Step 3: embedding (depends on rewritten query) ────────────────
+            query_embedding = await self._get_cached_embedding(search_query)
+
             logger.debug(
-                "RAG parallel fetch — embedding_dims=%d history=%d has_summary=%s",
+                "RAG fetched — embedding_dims=%d history=%d has_summary=%s",
                 len(query_embedding), len(conversation_history), bool(conversation_summary),
             )
 
-            # ── Step 2: progressive hybrid search ────────────────────────────
+            # ── Step 4: progressive hybrid search ─────────────────────────────
             candidates: List[Tuple[DocumentChunk, float]] = []
             search_method = "none"
             threshold_used = None
@@ -631,7 +850,7 @@ class RAGEngine:
             for threshold in (self.SIMILARITY_THRESHOLD,) + self.SIMILARITY_FALLBACK_THRESHOLDS:
                 candidates, search_method = await self._hybrid_search(
                     workspace_id=workspace_id,
-                    query=query,
+                    query=search_query,
                     query_embedding=query_embedding,
                     similarity_threshold=threshold,
                     pool=self.HYBRID_CANDIDATE_POOL,
@@ -645,20 +864,22 @@ class RAGEngine:
                 search_method, threshold_used or 0, len(candidates),
             )
 
-            # ── Step 3: MMR re-ranking ────────────────────────────────────────
+            # ── Step 5: MMR re-ranking ────────────────────────────────────────
             final_chunks = self._apply_mmr(candidates, self.MAX_CHUNKS)
 
-            # ── Step 4: neighbor expansion ────────────────────────────────────
+            # ── Step 6: neighbor expansion ────────────────────────────────────
             if final_chunks:
                 final_chunks = await self._expand_with_neighbors(final_chunks)
 
-            # ── Step 5: build prompt and generate ─────────────────────────────
+            # ── Step 7: build prompt and generate ─────────────────────────────
             context_messages = self.build_context_prompt(
                 query=query,
                 relevant_chunks=final_chunks,
                 conversation_history=conversation_history,
                 workspace_fallback_message=fallback_message,
                 conversation_summary=conversation_summary,
+                assistant_name=assistant_name,
+                assistant_persona=assistant_persona,
             )
 
             response_text, input_tokens, output_tokens = await self.generate_response(

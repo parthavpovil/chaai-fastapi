@@ -6,7 +6,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.database import get_db
 from app.middleware.auth_middleware import get_current_user, get_current_workspace, require_permission
@@ -44,6 +44,27 @@ class WorkspaceSettingsUpdate(BaseModel):
     escalation_email_enabled: Optional[bool] = None
     ai_enabled: Optional[bool] = None              # False = skip all LLM, route directly to human agents
     auto_escalation_enabled: Optional[bool] = None # False = escalation classifier never runs automatically
+    # Assistant identity — single-line strings injected into the RAG system prompt opener.
+    # Empty string is treated as "clear it" (sets the column to NULL).
+    assistant_name: Optional[str] = Field(None, max_length=60)
+    assistant_persona: Optional[str] = Field(None, max_length=300)
+
+    @field_validator("assistant_name", "assistant_persona")
+    @classmethod
+    def _no_newlines_or_internal_markers(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        s = v.strip()
+        if not s:
+            return None  # treat empty/whitespace-only as "clear"
+        if "\n" in s or "\r" in s:
+            raise ValueError("must be a single line (no newlines)")
+        # Defensive: these are our internal prompt markers
+        forbidden = ("RULES:", "[Knowledge base]", "[Recent conversation]", "[Conversation summary]")
+        lowered = s.lower()
+        if any(marker.lower() in lowered for marker in forbidden):
+            raise ValueError("contains a reserved prompt marker")
+        return s
 
 
 class WorkspaceOverview(BaseModel):
@@ -167,6 +188,8 @@ async def get_workspace_settings(
         "outside_hours_behavior": current_workspace.outside_hours_behavior,
         "escalation_message_with_agents": current_workspace.escalation_message_with_agents,
         "escalation_message_without_agents": current_workspace.escalation_message_without_agents,
+        "assistant_name": current_workspace.assistant_name,
+        "assistant_persona": current_workspace.assistant_persona,
     }
 
 
@@ -194,6 +217,10 @@ async def update_workspace_settings(
         current_workspace.ai_enabled = request.ai_enabled
     if request.auto_escalation_enabled is not None:
         current_workspace.auto_escalation_enabled = request.auto_escalation_enabled
+    if "assistant_name" in request.model_fields_set:
+        current_workspace.assistant_name = request.assistant_name
+    if "assistant_persona" in request.model_fields_set:
+        current_workspace.assistant_persona = request.assistant_persona
 
     await db.commit()
     await db.refresh(current_workspace)
@@ -207,6 +234,8 @@ async def update_workspace_settings(
         "escalation_email_enabled": current_workspace.escalation_email_enabled,
         "ai_enabled": current_workspace.ai_enabled,
         "auto_escalation_enabled": current_workspace.auto_escalation_enabled,
+        "assistant_name": current_workspace.assistant_name,
+        "assistant_persona": current_workspace.assistant_persona,
     }
 
 
