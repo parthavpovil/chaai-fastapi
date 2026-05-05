@@ -319,20 +319,31 @@ jobs:
 
       - name: Create deployment summary
         if: always()
+        env:
+          # Pass the commit message via env var so its content is treated as
+          # data, not interpolated into the script source. Without this, any
+          # multi-line commit message containing quotes / parens / lines that
+          # look like commands breaks the step (e.g. "I: command not found").
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
           COMMIT_SHA=${{ inputs.commit_sha || github.sha }}
           SHORT_SHA=${COMMIT_SHA:0:7}
-          
-          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Commit:** ${SHORT_SHA}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Branch:** ${{ github.ref_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Time:** $(date)" >> $GITHUB_STEP_SUMMARY
-          echo "- **Triggered by:** ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Commit Message" >> $GITHUB_STEP_SUMMARY
-          echo "${{ github.event.head_commit.message }}" >> $GITHUB_STEP_SUMMARY
+
+          {
+            echo "## Deployment Summary"
+            echo ""
+            echo "- **Commit:** ${SHORT_SHA}"
+            echo "- **Branch:** ${{ github.ref_name }}"
+            echo "- **Status:** ${{ job.status }}"
+            echo "- **Time:** $(date)"
+            echo "- **Triggered by:** ${{ github.actor }}"
+            echo ""
+            echo "### Commit Message"
+            echo ""
+            echo '```'
+            printf '%s\n' "$COMMIT_MSG"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   notify:
     name: Send Notifications
