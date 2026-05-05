@@ -162,15 +162,37 @@ class RAGEngine:
             LIMIT :pool
         """)
 
+        # BM25 uses OR between tokens so conversational words like "tell" or
+        # "whats" (not English stop words) don't block chunks that contain only
+        # the keyword part of the query (e.g. "ERDI"). plainto_tsquery produces
+        # AND between all tokens; we convert to OR via a regexp_replace on the
+        # cast-to-text representation. The CASE guard handles all-stop-word
+        # queries that produce an empty tsquery string.
         bm25_sql = text("""
             SELECT dc.id,
-                   ts_rank_cd(dc.content_tsv, plainto_tsquery('english', :query)) AS bm25_score
+                   CASE WHEN length(plainto_tsquery('english', :query)::text) > 0
+                        THEN ts_rank_cd(dc.content_tsv, to_tsquery('english',
+                                 regexp_replace(
+                                     plainto_tsquery('english', :query)::text,
+                                     ' & ', ' | ', 'g'
+                                 )
+                             ))
+                        ELSE 0
+                   END AS bm25_score
             FROM document_chunks dc
             JOIN documents d ON dc.document_id = d.id
             WHERE d.workspace_id = CAST(:workspace_id AS UUID)
               AND d.status = 'completed'
               AND dc.content_tsv IS NOT NULL
-              AND dc.content_tsv @@ plainto_tsquery('english', :query)
+              AND CASE WHEN length(plainto_tsquery('english', :query)::text) > 0
+                       THEN dc.content_tsv @@ to_tsquery('english',
+                                regexp_replace(
+                                    plainto_tsquery('english', :query)::text,
+                                    ' & ', ' | ', 'g'
+                                )
+                            )
+                       ELSE FALSE
+                  END
             ORDER BY bm25_score DESC
             LIMIT :pool
         """)
