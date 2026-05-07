@@ -38,12 +38,15 @@ async def log_token_usage(
     output_tokens: int,
     agent_id: Optional[str] = None,
     agent_conversation_id: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+    call_source: Optional[str] = None,
     tool_name: Optional[str] = None,
     tool_latency_ms: Optional[int] = None,
     tool_success: Optional[bool] = None,
 ) -> AIAgentTokenLog:
     """
     Write one row to ai_agent_token_log and update the workspace usage counter.
+    Works for all call types: agent calls, RAG responses, rewrites, summaries, escalation checks.
     """
     cost = _estimate_cost(model, input_tokens, output_tokens)
 
@@ -51,6 +54,8 @@ async def log_token_usage(
         workspace_id=workspace_id,
         agent_id=agent_id,
         agent_conversation_id=agent_conversation_id,
+        conversation_id=conversation_id,
+        call_source=call_source,
         model=model,
         call_type=call_type,
         input_tokens=input_tokens,
@@ -75,12 +80,13 @@ async def log_token_usage(
 
     await db.commit()
 
-    # Also update the unified workspace quota counter
+    # Also update the unified workspace quota counter (with cost)
     await track_message_usage(
         db=db,
         workspace_id=workspace_id,
         input_tokens=input_tokens,
         output_tokens=output_tokens,
+        cost_usd=cost,
     )
 
     return log_entry

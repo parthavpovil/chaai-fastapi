@@ -293,7 +293,6 @@ async def _run_message_pipeline(
     from app.services.message_processor import process_incoming_message, MessageProcessor
     from app.services.escalation_router import check_and_escalate_message
     from app.services.rag_engine import generate_rag_response
-    from app.services.usage_tracker import track_message_usage
     from app.services.websocket_events import notify_new_message
 
     processing_result = await process_incoming_message(
@@ -540,14 +539,6 @@ async def _run_message_pipeline(
                 }
             )
             logger.info(f"✅ AI message created: {ai_msg.id}")
-
-            await track_message_usage(
-                db=db,
-                workspace_id=workspace_id,
-                input_tokens=rag_result["input_tokens"],
-                output_tokens=rag_result["output_tokens"]
-            )
-            logger.info(f"✅ Usage tracked")
 
             await notify_new_message(
                 db=db,

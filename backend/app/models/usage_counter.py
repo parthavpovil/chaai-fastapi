@@ -4,7 +4,7 @@ Monthly usage tracking for tier limits
 """
 from uuid import UUID, uuid4
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, BigInteger, DateTime, func, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, Integer, BigInteger, DateTime, func, ForeignKey, UniqueConstraint, Numeric
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID
 from sqlalchemy.orm import relationship
 
@@ -20,6 +20,7 @@ class UsageCounter(Base):
     month = Column(String, nullable=False)  # format: "2026-03"
     messages_sent = Column(Integer, default=0, nullable=False)
     tokens_used = Column(BigInteger, default=0, nullable=False)
+    total_cost_usd = Column(Numeric(12, 8), nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 

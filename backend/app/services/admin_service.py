@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, and_, desc
+from sqlalchemy import select, func, and_, desc, text
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
@@ -16,6 +16,7 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.models.usage_counter import UsageCounter
 from app.models.tier_change import TierChange
+from app.models.ai_agent import AIAgentTokenLog
 
 
 class AdminService:
@@ -506,4 +507,178 @@ class AdminService:
                 "total_conversations": total_conversations,
                 "escalation_rate": round(escalation_rate, 2)
             }
+        }
+
+    async def get_token_usage_summary(
+        self,
+        month: Optional[str] = None,
+        tier_filter: Optional[str] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> List[Dict[str, Any]]:
+        """
+        Per-workspace monthly token and cost summary for super admin billing view.
+        Sorted by cost descending so the most expensive clients are at the top.
+        """
+        if not month:
+            month = datetime.now(timezone.utc).strftime("%Y-%m")
+
+        query = (
+            select(
+                UsageCounter.workspace_id,
+                UsageCounter.month,
+                UsageCounter.messages_sent,
+                UsageCounter.tokens_used,
+                UsageCounter.total_cost_usd,
+                Workspace.name.label("workspace_name"),
+                Workspace.tier,
+                User.email.label("owner_email"),
+            )
+            .join(Workspace, Workspace.id == UsageCounter.workspace_id)
+            .join(User, User.id == Workspace.owner_id)
+            .where(UsageCounter.month == month)
+            .order_by(desc(UsageCounter.total_cost_usd))
+            .limit(limit)
+            .offset(offset)
+        )
+
+        if tier_filter:
+            query = query.where(Workspace.tier == tier_filter)
+
+        result = await self.db.execute(query)
+        rows = result.all()
+
+        # Fetch input/output token breakdown from token log for this month
+        breakdown_sql = text("""
+            SELECT
+                workspace_id,
+                COALESCE(SUM(input_tokens), 0)  AS total_input_tokens,
+                COALESCE(SUM(output_tokens), 0) AS total_output_tokens
+            FROM ai_agent_token_log
+            WHERE TO_CHAR(created_at AT TIME ZONE 'UTC', 'YYYY-MM') = :month
+            GROUP BY workspace_id
+        """)
+        breakdown_result = await self.db.execute(breakdown_sql, {"month": month})
+        breakdown_map = {
+            str(r.workspace_id): {
+                "total_input_tokens": int(r.total_input_tokens),
+                "total_output_tokens": int(r.total_output_tokens),
+            }
+            for r in breakdown_result.all()
+        }
+
+        return [
+            {
+                "workspace_id": str(row.workspace_id),
+                "workspace_name": row.workspace_name,
+                "owner_email": row.owner_email,
+                "tier": row.tier,
+                "month": row.month,
+                "message_count": row.messages_sent,
+                "tokens_used": row.tokens_used,
+                "total_cost_usd": float(row.total_cost_usd),
+                **breakdown_map.get(str(row.workspace_id), {"total_input_tokens": 0, "total_output_tokens": 0}),
+            }
+            for row in rows
+        ]
+
+    async def get_workspace_token_detail(
+        self,
+        workspace_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Detailed token/cost breakdown for a single workspace:
+        - Last 12 months history
+        - Breakdown by call_source (rag_response, rag_rewrite, escalation_check, etc.)
+        - Breakdown by model
+        """
+        # Monthly history from usage_counters
+        history_result = await self.db.execute(
+            select(
+                UsageCounter.month,
+                UsageCounter.messages_sent,
+                UsageCounter.tokens_used,
+                UsageCounter.total_cost_usd,
+            )
+            .where(UsageCounter.workspace_id == workspace_id)
+            .order_by(desc(UsageCounter.month))
+            .limit(12)
+        )
+        monthly_history = [
+            {
+                "month": row.month,
+                "message_count": row.messages_sent,
+                "tokens_used": row.tokens_used,
+                "total_cost_usd": float(row.total_cost_usd),
+            }
+            for row in history_result.all()
+        ]
+
+        # Call-type breakdown from token log
+        call_type_sql = text("""
+            SELECT
+                COALESCE(call_source, call_type) AS call_label,
+                COALESCE(SUM(input_tokens), 0)   AS input_tokens,
+                COALESCE(SUM(output_tokens), 0)  AS output_tokens,
+                COALESCE(SUM(total_cost_usd), 0) AS cost_usd,
+                COUNT(*)                          AS call_count
+            FROM ai_agent_token_log
+            WHERE workspace_id = CAST(:workspace_id AS UUID)
+            GROUP BY call_label
+            ORDER BY cost_usd DESC
+        """)
+        call_type_result = await self.db.execute(call_type_sql, {"workspace_id": workspace_id})
+        call_type_breakdown = [
+            {
+                "call_type": row.call_label,
+                "input_tokens": int(row.input_tokens),
+                "output_tokens": int(row.output_tokens),
+                "cost_usd": float(row.cost_usd),
+                "call_count": int(row.call_count),
+            }
+            for row in call_type_result.all()
+        ]
+
+        # Model breakdown from token log
+        model_sql = text("""
+            SELECT
+                model,
+                COALESCE(SUM(input_tokens), 0)   AS input_tokens,
+                COALESCE(SUM(output_tokens), 0)  AS output_tokens,
+                COALESCE(SUM(total_cost_usd), 0) AS cost_usd,
+                COUNT(*)                          AS call_count
+            FROM ai_agent_token_log
+            WHERE workspace_id = CAST(:workspace_id AS UUID)
+            GROUP BY model
+            ORDER BY cost_usd DESC
+        """)
+        model_result = await self.db.execute(model_sql, {"workspace_id": workspace_id})
+        model_breakdown = [
+            {
+                "model": row.model,
+                "input_tokens": int(row.input_tokens),
+                "output_tokens": int(row.output_tokens),
+                "cost_usd": float(row.cost_usd),
+                "call_count": int(row.call_count),
+            }
+            for row in model_result.all()
+        ]
+
+        # Workspace info
+        ws_result = await self.db.execute(
+            select(Workspace.name, Workspace.tier)
+            .join(User, User.id == Workspace.owner_id)
+            .add_columns(User.email.label("owner_email"))
+            .where(Workspace.id == workspace_id)
+        )
+        ws_row = ws_result.first()
+
+        return {
+            "workspace_id": workspace_id,
+            "workspace_name": ws_row.name if ws_row else None,
+            "owner_email": ws_row.owner_email if ws_row else None,
+            "tier": ws_row.tier if ws_row else None,
+            "monthly_history": monthly_history,
+            "call_type_breakdown": call_type_breakdown,
+            "model_breakdown": model_breakdown,
         }

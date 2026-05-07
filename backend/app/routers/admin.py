@@ -366,6 +366,47 @@ async def get_feedback_stats(
     return {"feedback_stats": list(stats.values())}
 
 
+@router.get("/token-usage", response_model=List[dict])
+async def get_token_usage_summary(
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+    month: Optional[str] = Query(None, description="Month YYYY-MM, defaults to current month"),
+    tier: Optional[str] = Query(None, description="Filter by workspace tier"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    """
+    Per-workspace monthly token and cost summary.
+    Sorted by total cost descending — highest-spend clients first.
+    Only accessible by super admin.
+    """
+    admin_service = AdminService(db)
+    return await admin_service.get_token_usage_summary(
+        month=month,
+        tier_filter=tier,
+        limit=limit,
+        offset=offset,
+    )
+
+
+@router.get("/token-usage/{workspace_id}", response_model=dict)
+async def get_workspace_token_detail(
+    workspace_id: UUID,
+    current_user: User = Depends(require_super_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Detailed token/cost breakdown for a single workspace.
+    Returns 12-month history, per-call-type and per-model breakdowns.
+    Only accessible by super admin.
+    """
+    admin_service = AdminService(db)
+    detail = await admin_service.get_workspace_token_detail(str(workspace_id))
+    if not detail.get("workspace_name"):
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return detail
+
+
 @router.get("/analytics", response_model=AnalyticsDashboardResponse)
 async def get_analytics_dashboard(
     current_user: User = Depends(require_super_admin),

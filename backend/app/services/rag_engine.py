@@ -26,6 +26,7 @@ from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services.ai_provider import embedding_provider, llm_provider, AIProviderError
 from app.services.embedding_service import EmbeddingService
+from app.services.ai_agent_token_tracker import log_token_usage
 
 logger = logging.getLogger(__name__)
 
@@ -666,7 +667,7 @@ class RAGEngine:
         self,
         query: str,
         history: Optional[List[Message]] = None,
-    ) -> str:
+    ) -> Tuple[str, int, int]:
         """
         Rewrite a conversational query into a self-contained, keyword-rich
         search query. When `history` is provided the rewriter resolves
@@ -675,16 +676,16 @@ class RAGEngine:
         error. Used only for retrieval; the original query is shown to users.
         """
         if not llm_provider:
-            return query
+            return query, 0, 0
         stripped = query.strip()
         if not stripped:
-            return query
+            return query, 0, 0
         # Skip rewriting only when there is no history AND the query is short.
         # Short queries WITH history (e.g. "what about it?") are exactly when
         # coreference resolution matters most.
         has_history = bool(history)
         if not has_history and len(stripped.split()) <= 3:
-            return query
+            return query, 0, 0
 
         history_block = ""
         if has_history:
@@ -724,16 +725,16 @@ class RAGEngine:
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": user_content},
             ]
-            rewritten, _, _ = await llm_provider.generate_response(
+            rewritten, rw_in_tok, rw_out_tok = await llm_provider.generate_response(
                 messages=messages, max_tokens=40, temperature=0.0
             )
             rewritten = rewritten.strip().strip('"').strip("'")
             # Defensive: if model returned a "Rewrite:" prefix anyway, strip it
             if rewritten.lower().startswith("rewrite:"):
                 rewritten = rewritten[len("rewrite:"):].strip()
-            return rewritten if rewritten else query
+            return (rewritten if rewritten else query), rw_in_tok, rw_out_tok
         except Exception:
-            return query
+            return query, 0, 0
 
     # ─── LLM Generation ────────────────────────────────────────────────────────
 
@@ -824,6 +825,16 @@ class RAGEngine:
                     max_tokens=max_tokens,
                     temperature=temperature,
                 )
+                await log_token_usage(
+                    db=self.db,
+                    workspace_id=workspace_id,
+                    model=getattr(llm_provider, "llm_model", "unknown"),
+                    call_type="rag_response",
+                    call_source="rag_response",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    conversation_id=conversation_id,
+                )
                 return {
                     'response': response_text,
                     'input_tokens': input_tokens,
@@ -849,7 +860,18 @@ class RAGEngine:
             ):
                 history_for_rewrite = history_for_rewrite[:-1]
 
-            search_query = await self._rewrite_query(query, history=history_for_rewrite)
+            search_query, rw_in_tok, rw_out_tok = await self._rewrite_query(query, history=history_for_rewrite)
+            if rw_in_tok > 0:
+                await log_token_usage(
+                    db=self.db,
+                    workspace_id=workspace_id,
+                    model=getattr(llm_provider, "llm_model", "unknown"),
+                    call_type="rag_rewrite",
+                    call_source="rag_rewrite",
+                    input_tokens=rw_in_tok,
+                    output_tokens=rw_out_tok,
+                    conversation_id=conversation_id,
+                )
             if search_query != query:
                 logger.debug(
                     "RAG query rewritten — original=%r rewritten=%r history_turns=%d",
@@ -908,6 +930,17 @@ class RAGEngine:
                 messages=context_messages,
                 max_tokens=max_tokens,
                 temperature=temperature,
+            )
+
+            await log_token_usage(
+                db=self.db,
+                workspace_id=workspace_id,
+                model=getattr(llm_provider, "llm_model", "unknown"),
+                call_type="rag_response",
+                call_source="rag_response",
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                conversation_id=conversation_id,
             )
 
             logger.debug(
@@ -1010,7 +1043,7 @@ class RAGEngine:
                 + history_text
             )
 
-            response_text, _, _ = await self.generate_response(
+            response_text, s_in_tok, s_out_tok = await self.generate_response(
                 prompt=summary_prompt, max_tokens=200, temperature=0.3
             )
 
@@ -1024,6 +1057,18 @@ class RAGEngine:
                 meta["summary_generated_at"] = datetime.now(timezone.utc).isoformat()
                 conv.meta = meta
                 await db.commit()
+
+            if s_in_tok > 0:
+                await log_token_usage(
+                    db=db,
+                    workspace_id=workspace_id,
+                    model=getattr(llm_provider, "llm_model", "unknown"),
+                    call_type="rag_summary",
+                    call_source="rag_summary",
+                    input_tokens=s_in_tok,
+                    output_tokens=s_out_tok,
+                    conversation_id=conversation_id,
+                )
 
         except Exception as e:
             logger.warning("Summary generation failed: %s", e)

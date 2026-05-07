@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
+import json
 from app.services.ai_provider import llm_provider, AIProviderError
 from app.models.message import Message
 
@@ -139,43 +140,55 @@ class EscalationClassifier:
         return "\n".join(prompt_parts)
     
     async def classify_with_llm(
-        self, 
-        message: str, 
-        conversation_context: List[str] = None
-    ) -> Dict[str, Any]:
+        self,
+        message: str,
+        conversation_context: List[str] = None,
+    ) -> Tuple[Dict[str, Any], int, int]:
         """
-        Classify message using LLM
-        
-        Args:
-            message: Message to classify
-            conversation_context: Previous messages for context
-        
+        Classify message using LLM.
+
         Returns:
-            Classification result with confidence and reasoning
-        
+            Tuple of (classification_dict, input_tokens, output_tokens)
+
         Raises:
             EscalationError: If LLM classification fails
         """
         try:
             if not llm_provider:
                 raise EscalationError("LLM provider not initialized")
-            
+
             prompt = self.build_classification_prompt(message, conversation_context)
-            
-            classification = await llm_provider.classify_json(prompt)
-            
+
+            # Use generate_response instead of classify_json so we get token counts
+            raw_text, in_tok, out_tok = await llm_provider.generate_response(
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=150,
+                temperature=0.1,
+            )
+
+            # Strip markdown code fences if present (same logic as classify_json impls)
+            text = raw_text.strip()
+            for prefix in ("```json", "```"):
+                if text.startswith(prefix):
+                    text = text[len(prefix):]
+            if text.endswith("```"):
+                text = text[:-3]
+            classification = json.loads(text.strip())
+
             # Validate response structure
             required_keys = ['should_escalate', 'confidence', 'reason', 'category']
             if not all(key in classification for key in required_keys):
                 raise EscalationError(f"Invalid LLM response structure: {classification}")
-            
+
             # Ensure confidence is in valid range
             confidence = float(classification['confidence'])
             confidence = max(0.0, min(1.0, confidence))
             classification['confidence'] = confidence
-            
-            return classification
-            
+
+            return classification, in_tok, out_tok
+
+        except (json.JSONDecodeError, ValueError) as e:
+            raise EscalationError(f"LLM returned invalid JSON: {str(e)}")
         except AIProviderError as e:
             raise EscalationError(f"LLM classification failed: {str(e)}")
         except Exception as e:
@@ -194,7 +207,8 @@ class EscalationClassifier:
         conversation_id: Optional[str] = None,
         use_llm: bool = True,
         workspace_keywords: List[str] = None,
-        sensitivity: str = "medium"
+        sensitivity: str = "medium",
+        workspace_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Complete escalation classification pipeline
@@ -222,9 +236,10 @@ class EscalationClassifier:
             
             # 3. LLM classification (if enabled and available)
             llm_result = None
+            esc_in_tok, esc_out_tok = 0, 0
             if use_llm:
                 try:
-                    llm_result = await self.classify_with_llm(message, conversation_context)
+                    llm_result, esc_in_tok, esc_out_tok = await self.classify_with_llm(message, conversation_context)
                 except EscalationError as e:
                     logger.warning(f"LLM classification failed, using keywords only: {e}")
             
@@ -276,6 +291,20 @@ class EscalationClassifier:
                 reason = f"Below sensitivity threshold ({sensitivity}): {reason}"
                 escalation_type = None
 
+            # Log escalation classifier tokens
+            if workspace_id and esc_in_tok > 0:
+                from app.services.ai_agent_token_tracker import log_token_usage
+                await log_token_usage(
+                    db=self.db,
+                    workspace_id=workspace_id,
+                    model=getattr(llm_provider, "llm_model", "unknown"),
+                    call_type="escalation_check",
+                    call_source="escalation_check",
+                    input_tokens=esc_in_tok,
+                    output_tokens=esc_out_tok,
+                    conversation_id=conversation_id,
+                )
+
             return {
                 'should_escalate': should_escalate,
                 'confidence': confidence,
@@ -289,7 +318,7 @@ class EscalationClassifier:
                 'sensitivity': sensitivity,
                 'timestamp': datetime.now(timezone.utc).isoformat()
             }
-            
+
         except Exception as e:
             raise EscalationError(f"Message classification failed: {str(e)}")
     

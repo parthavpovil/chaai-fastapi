@@ -3,6 +3,7 @@ Usage Counter Management Service
 Tracks monthly usage and token consumption with automatic reset functionality
 """
 from typing import Optional, Dict, Any
+from decimal import Decimal
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update, func
@@ -73,11 +74,12 @@ class UsageTracker:
         return result.scalar_one()
     
     async def increment_message_count(
-        self, 
-        workspace_id: str, 
+        self,
+        workspace_id: str,
         count: int = 1,
         input_tokens: int = 0,
-        output_tokens: int = 0
+        output_tokens: int = 0,
+        cost_usd: Decimal = Decimal("0"),
     ) -> Dict[str, int]:
         """
         Increment message count and token usage for current month
@@ -106,17 +108,18 @@ class UsageTracker:
         ).values(
             messages_sent=UsageCounter.messages_sent + count,
             tokens_used=UsageCounter.tokens_used + total_tokens,
+            total_cost_usd=UsageCounter.total_cost_usd + cost_usd,
             updated_at=datetime.now(timezone.utc)
-        ).returning(UsageCounter.messages_sent, UsageCounter.tokens_used)
-        
+        ).returning(UsageCounter.messages_sent, UsageCounter.tokens_used, UsageCounter.total_cost_usd)
+
         result = await self.db.execute(stmt)
         await self.db.commit()
-        
-        # Get the values directly from the result
+
         row = result.one()
         return {
             "messages_sent": row[0],
-            "tokens_used": row[1]
+            "tokens_used": row[1],
+            "total_cost_usd": float(row[2]),
         }
     
     async def get_monthly_usage(self, workspace_id: str, month: Optional[str] = None) -> Dict[str, int]:
@@ -138,7 +141,8 @@ class UsageTracker:
         return {
             "month": month,
             "message_count": counter.messages_sent,
-            "tokens_used": counter.tokens_used
+            "tokens_used": counter.tokens_used,
+            "total_cost_usd": float(counter.total_cost_usd),
         }
     
     async def get_usage_history(self, workspace_id: str, months: int = 6) -> list[Dict[str, Any]]:
@@ -165,7 +169,8 @@ class UsageTracker:
                 "month": counter.month,
                 "message_count": counter.messages_sent,
                 "tokens_used": counter.tokens_used,
-                "updated_at": counter.updated_at
+                "total_cost_usd": float(counter.total_cost_usd),
+                "updated_at": counter.updated_at,
             }
             for counter in counters
         ]
@@ -235,17 +240,19 @@ async def track_message_usage(
     db: AsyncSession,
     workspace_id: str,
     input_tokens: int = 0,
-    output_tokens: int = 0
+    output_tokens: int = 0,
+    cost_usd: Decimal = Decimal("0"),
 ) -> Dict[str, int]:
     """
     Convenience function to track message usage
-    
+
     Args:
         db: Database session
         workspace_id: Workspace ID
         input_tokens: Input tokens consumed
         output_tokens: Output tokens consumed
-    
+        cost_usd: Estimated cost in USD for this call
+
     Returns:
         Updated usage statistics for current month
     """
@@ -254,12 +261,14 @@ async def track_message_usage(
         workspace_id=workspace_id,
         count=1,
         input_tokens=input_tokens,
-        output_tokens=output_tokens
+        output_tokens=output_tokens,
+        cost_usd=cost_usd,
     )
-    
+
     return {
         "message_count": result["messages_sent"],
-        "tokens_used": result["tokens_used"]
+        "tokens_used": result["tokens_used"],
+        "total_cost_usd": result.get("total_cost_usd", 0.0),
     }
 
 

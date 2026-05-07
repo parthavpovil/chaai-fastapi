@@ -464,7 +464,8 @@ class EscalationRouter:
             classification = await self.classifier.classify_message(
                 message_content, conversation_id,
                 workspace_keywords=workspace_keywords,
-                sensitivity=sensitivity
+                sensitivity=sensitivity,
+                workspace_id=workspace_id,
             )
             
             # Trust the classifier's decision — it already applied the workspace

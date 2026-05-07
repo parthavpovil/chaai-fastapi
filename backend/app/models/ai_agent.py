@@ -139,4 +139,7 @@ class AIAgentTokenLog(Base):
     tool_success = Column(Boolean, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
+    conversation_id = Column(PostgresUUID(as_uuid=True), ForeignKey("conversations.id"), nullable=True)
+    call_source = Column(String(30), nullable=True)
+
     agent_conversation = relationship("AIAgentConversation", back_populates="token_logs")

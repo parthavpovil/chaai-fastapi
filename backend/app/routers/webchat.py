@@ -28,7 +28,6 @@ from app.services.message_processor import (
 )
 from app.services.escalation_router import check_and_escalate_message
 from app.services.rag_engine import generate_rag_response
-from app.services.usage_tracker import track_message_usage
 from app.services.websocket_events import notify_new_message
 from app.services.rate_limiter import check_webchat_rate_limit, RateLimitExceededError
 from app.services.webhook_security import generate_session_token
@@ -605,13 +604,6 @@ async def send_webchat_message(
                                         "output_tokens": output_tokens,
                                         "webchat_response": True
                                     }
-                                )
-
-                                await track_message_usage(
-                                    db=db,
-                                    workspace_id=str(channel.workspace_id),
-                                    input_tokens=input_tokens,
-                                    output_tokens=output_tokens
                                 )
 
                                 if ai_message:
