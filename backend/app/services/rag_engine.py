@@ -198,18 +198,16 @@ class RAGEngine:
             LIMIT :pool
         """)
 
-        vector_result, bm25_result = await asyncio.gather(
-            self.db.execute(vector_sql, {
-                'workspace_id': workspace_id,
-                'threshold': similarity_threshold,
-                'pool': pool,
-            }),
-            self.db.execute(bm25_sql, {
-                'workspace_id': workspace_id,
-                'query': query,
-                'pool': pool,
-            }),
-        )
+        vector_result = await self.db.execute(vector_sql, {
+            'workspace_id': workspace_id,
+            'threshold': similarity_threshold,
+            'pool': pool,
+        })
+        bm25_result = await self.db.execute(bm25_sql, {
+            'workspace_id': workspace_id,
+            'query': query,
+            'pool': pool,
+        })
 
         vector_rows = list(vector_result)
         bm25_rows = list(bm25_result)
