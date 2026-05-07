@@ -84,7 +84,7 @@ async def _reconcile() -> None:
                     Message.conversation_id,
                     Conversation.workspace_id,
                     Contact.external_id.label("session_token"),
-                    Conversation.channel_id,
+                    Contact.channel_id,
                 )
                 .join(Conversation, Conversation.id == Message.conversation_id)
                 .join(Contact, Contact.id == Conversation.contact_id)
