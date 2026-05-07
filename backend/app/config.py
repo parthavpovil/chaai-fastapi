@@ -111,8 +111,11 @@ class Settings(BaseSettings):
     R2_BUCKET_NAME: str = Field(default="chaai-media", description="R2 bucket name")
     R2_PUBLIC_DOMAIN: str = Field(default="media.yourdomain.com", description="R2 public CDN domain — MUST be set via R2_PUBLIC_DOMAIN env var in production")
 
-    # Redis (for broadcast queue)
-    REDIS_URL: str = Field(default="redis://localhost:6379/0", description="Redis connection URL")
+    # Redis (for broadcast queue and pub/sub)
+    REDIS_URL: str = Field(default="redis://localhost:6379/0", description="Redis connection URL (DB 0 — pub/sub)")
+    # Separate DB for arq job queue so queue traffic doesn't mix with pub/sub.
+    # Defaults to REDIS_URL with /0 replaced by /1 if not explicitly set.
+    REDIS_QUEUE_URL: str = Field(default="", description="Redis URL for arq job queue (DB 1). Defaults to REDIS_URL on DB 1.")
 
     # Administration
     SUPER_ADMIN_EMAIL: str = Field(
@@ -120,6 +123,17 @@ class Settings(BaseSettings):
         description="Super administrator email address — MUST be set via SUPER_ADMIN_EMAIL env var in production"
     )
     
+    @property
+    def redis_queue_url(self) -> str:
+        if self.REDIS_QUEUE_URL:
+            return self.REDIS_QUEUE_URL
+        # Derive from REDIS_URL: swap the DB number to 1
+        base = self.REDIS_URL.rstrip("/")
+        # Handle redis://host:port/N and redis://host:port forms
+        if "/" in base.split("://", 1)[-1]:
+            base = base.rsplit("/", 1)[0]
+        return f"{base}/1"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

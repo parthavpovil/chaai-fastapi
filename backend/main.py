@@ -40,6 +40,10 @@ async def lifespan(app: FastAPI):
     from app.tasks.agent_status_tasks import start_agent_status_tasks
     await start_agent_status_tasks()
 
+    # Start reconciliation sweeper — re-enqueues orphaned webchat messages
+    from app.tasks.reconciliation import start_reconciliation_sweeper
+    await start_reconciliation_sweeper()
+
     # Start customer WebSocket stale-connection cleanup
     import asyncio
     asyncio.create_task(websocket_webchat.cleanup_stale_customer_connections())
@@ -67,6 +71,9 @@ async def lifespan(app: FastAPI):
 
     from app.tasks.agent_status_tasks import stop_agent_status_tasks
     await stop_agent_status_tasks()
+
+    from app.tasks.reconciliation import stop_reconciliation_sweeper
+    await stop_reconciliation_sweeper()
 
     await close_db()
 

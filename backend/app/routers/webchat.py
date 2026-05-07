@@ -23,11 +23,9 @@ from app.models.contact import Contact
 from app.models.conversation import Conversation
 from app.models.message import Message
 from app.services.message_processor import (
-    MessageProcessor, process_incoming_message, MessageProcessingError,
+    process_incoming_message, MessageProcessingError,
     BlockedContactError, OutsideBusinessHoursError,
 )
-from app.services.escalation_router import check_and_escalate_message
-from app.services.rag_engine import generate_rag_response
 from app.services.websocket_events import notify_new_message
 from app.services.rate_limiter import check_webchat_rate_limit, RateLimitExceededError
 from app.services.webhook_security import generate_session_token
@@ -416,216 +414,17 @@ async def send_webchat_message(
                 message_id=user_message_id
             )
 
-            processor = MessageProcessor(db)
-
-            # Step 2: Routing mode resolution — read capability flags
-            from sqlalchemy import select as _wc_select
-            from app.models.workspace import Workspace as _WC_Workspace
-            _wc_ws_result = await db.execute(
-                _wc_select(_WC_Workspace).where(_WC_Workspace.id == channel.workspace_id)
+            # Hand off the AI pipeline to the background worker.
+            # The reply will arrive via WebSocket (notify_customer_new_message).
+            from app.tasks.message_tasks import enqueue_message_job
+            await enqueue_message_job(
+                message_id=user_message_id,
+                conversation_id=conversation_id,
+                workspace_id=str(channel.workspace_id),
+                session_token=session_token,
+                channel_id=str(channel.id),
             )
-            _wc_ws = _wc_ws_result.scalar_one_or_none()
-            _wc_meta          = (_wc_ws.meta or {}) if _wc_ws else {}
-            _wc_ai_mode       = _wc_meta.get("ai_mode", "rag")
-            _wc_ai_enabled    = _wc_ws.ai_enabled if _wc_ws is not None else True
-            _wc_auto_esc      = _wc_ws.auto_escalation_enabled if _wc_ws is not None else True
-            _wc_agents        = _wc_ws.agents_enabled if _wc_ws is not None else False
-
             response_content = None
-
-            # Branch 1: AI disabled + human agents enabled → direct routing, no LLM
-            if not _wc_ai_enabled and _wc_agents:
-                try:
-                    from app.services.escalation_router import EscalationRouter
-                    from app.services.websocket_events import notify_customer_new_message
-                    esc_result = await EscalationRouter(db).process_escalation(
-                        conversation_id=conversation_id,
-                        workspace_id=str(channel.workspace_id),
-                        escalation_reason="direct_routing",
-                        classification_data={
-                            "should_escalate": True,
-                            "confidence": 1.0,
-                            "reason": "direct_routing",
-                            "category": "routing_mode",
-                            "classification_method": "workspace_config",
-                        },
-                        priority="medium",
-                    )
-                    # Push the acknowledgment message to the customer via WebSocket.
-                    # process_escalation already stored it in the DB; no need to also
-                    # echo it back in the HTTP response (that would show it twice).
-                    ack_msg_id = esc_result.get("acknowledgment_message_id")
-                    if ack_msg_id:
-                        await notify_customer_new_message(
-                            db=db,
-                            workspace_id=str(channel.workspace_id),
-                            session_token=session_token,
-                            message_id=str(ack_msg_id),
-                        )
-                except Exception as e:
-                    logger.error(f"Direct routing escalation failed for webchat {conversation_id}: {e}")
-                response_content = None  # delivered via WebSocket / message polling
-
-            # Branch 2: AI disabled, no human agents → receive silently
-            elif not _wc_ai_enabled:
-                response_content = None
-
-            else:
-                # Branch 3: AI enabled — AI agent mode
-                _wc_handled = False
-                if _wc_ai_mode == "ai_agent":
-                    try:
-                        from app.services.ai_agent_runner import ai_agent_runner
-                        agent_result = await ai_agent_runner.run(
-                            db=db,
-                            conversation_id=conversation_id,
-                            new_message=message_content,
-                            workspace_id=str(channel.workspace_id),
-                            channel_id=str(channel.id),
-                        )
-                        if agent_result.handled:
-                            _wc_handled = True
-                            response_content = agent_result.reply
-                            ai_msg = await processor.create_message(
-                                conversation_id=conversation_id,
-                                content=agent_result.reply,
-                                role="assistant",
-                                channel_type="webchat",
-                                metadata={"ai_agent": True, "escalated": agent_result.escalated},
-                            )
-                            await notify_new_message(
-                                db=db,
-                                workspace_id=str(channel.workspace_id),
-                                conversation_id=conversation_id,
-                                message_id=str(ai_msg.id),
-                            )
-                            from app.services.websocket_events import notify_customer_new_message
-                            await notify_customer_new_message(
-                                db=db,
-                                workspace_id=str(channel.workspace_id),
-                                session_token=session_token,
-                                message_id=str(ai_msg.id),
-                            )
-                    except Exception as e:
-                        logger.error(f"AI agent runner error for webchat {conversation_id}: {e}")
-
-                if not _wc_handled:
-                    # Auto-escalation check — runs whenever auto-escalation is enabled,
-                    # regardless of agents_enabled. process_escalation handles both cases:
-                    # with agents → WebSocket assignment; without agents → email alert to owner.
-                    escalation_result = None
-                    if _wc_auto_esc:
-                        escalation_result = await check_and_escalate_message(
-                            db=db,
-                            conversation_id=conversation_id,
-                            workspace_id=str(channel.workspace_id),
-                            message_content=message_content
-                        )
-
-                    if not escalation_result:
-                        # RAG response
-                        try:
-                            logger.info(
-                                "webchat RAG call — workspace_id=%s conversation_id=%s query_preview=%r",
-                                str(channel.workspace_id), conversation_id, message_content[:80],
-                            )
-                            rag_result = await generate_rag_response(
-                                db=db,
-                                workspace_id=str(channel.workspace_id),
-                                query=message_content,
-                                conversation_id=conversation_id,
-                                max_tokens=300
-                            )
-
-                            rag_escalated = False
-                            if rag_result.get("used_fallback"):
-                                logger.warning(
-                                    "webchat RAG returned fallback — workspace_id=%s chunks=%d search_method=%s threshold=%s response=%r",
-                                    str(channel.workspace_id),
-                                    rag_result.get("relevant_chunks_count", 0),
-                                    rag_result.get("search_method"),
-                                    rag_result.get("threshold_used"),
-                                    rag_result.get("response", "")[:120],
-                                )
-                                # RAG couldn't answer — escalate if auto-escalation is on.
-                                # Without agents, process_escalation emails the owner instead.
-                                if _wc_auto_esc:
-                                    try:
-                                        from app.services.escalation_router import EscalationRouter
-                                        fallback_esc = await EscalationRouter(db).process_escalation(
-                                            conversation_id=conversation_id,
-                                            workspace_id=str(channel.workspace_id),
-                                            escalation_reason="implicit",
-                                            classification_data={
-                                                "should_escalate": True,
-                                                "confidence": 1.0,
-                                                "reason": "RAG knowledge base could not answer the query",
-                                                "category": "complex",
-                                                "classification_method": "rag_fallback",
-                                            },
-                                            priority="medium",
-                                        )
-                                        if fallback_esc:
-                                            rag_escalated = True
-                                            ack_msg_id = fallback_esc.get("acknowledgment_message_id")
-                                            if ack_msg_id:
-                                                from app.services.websocket_events import notify_customer_new_message
-                                                await notify_customer_new_message(
-                                                    db=db,
-                                                    workspace_id=str(channel.workspace_id),
-                                                    session_token=session_token,
-                                                    message_id=str(ack_msg_id),
-                                                )
-                                            response_content = None
-                                    except Exception as esc_err:
-                                        logger.error(f"RAG-fallback escalation failed: {esc_err}")
-                            else:
-                                logger.info(
-                                    "webchat RAG success — workspace_id=%s chunks=%d search_method=%s response=%r",
-                                    str(channel.workspace_id),
-                                    rag_result.get("relevant_chunks_count", 0),
-                                    rag_result.get("search_method"),
-                                    rag_result.get("response", "")[:120],
-                                )
-
-                            if not rag_escalated:
-                                response_content = rag_result["response"]
-                                input_tokens = rag_result["input_tokens"]
-                                output_tokens = rag_result["output_tokens"]
-
-                                ai_message = await processor.create_message(
-                                    conversation_id=conversation_id,
-                                    content=response_content,
-                                    role="assistant",
-                                    channel_type="webchat",
-                                    metadata={
-                                        "rag_used": True,
-                                        "input_tokens": input_tokens,
-                                        "output_tokens": output_tokens,
-                                        "webchat_response": True
-                                    }
-                                )
-
-                                if ai_message:
-                                    await notify_new_message(
-                                        db=db,
-                                        workspace_id=str(channel.workspace_id),
-                                        conversation_id=conversation_id,
-                                        message_id=str(ai_message.id),
-                                    )
-                                    from app.services.websocket_events import notify_customer_new_message
-                                    await notify_customer_new_message(
-                                        db=db,
-                                        workspace_id=str(channel.workspace_id),
-                                        session_token=session_token,
-                                        message_id=str(ai_message.id),
-                                    )
-
-                        except Exception as e:
-                            logger.error(f"RAG response generation failed: {e}", exc_info=True)
-                            response_content = "I'm sorry, I'm having trouble processing your request right now. Please try again later."
-                    else:
-                        response_content = "Thank you for your message. I've escalated your request to our support team who will get back to you shortly."
             
         except BlockedContactError:
             # Return a polite response without revealing the contact is blocked
