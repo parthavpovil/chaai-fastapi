@@ -65,7 +65,7 @@ async def enqueue_message_job(
     (e.g. from the reconciliation sweeper when the job is still running).
     """
     pool = await _get_pool()
-    await pool.enqueue_job(
+    job = await pool.enqueue_job(
         "process_message_job",
         message_id=message_id,
         conversation_id=conversation_id,
@@ -74,6 +74,10 @@ async def enqueue_message_job(
         channel_id=channel_id,
         _job_id=f"msg:{message_id}",
     )
+    if job is None:
+        logger.info("[enqueue] msg:%s already queued/running — skipped (dedup)", message_id)
+    else:
+        logger.info("[enqueue] msg:%s enqueued to Redis queue (job_id=%s)", message_id, job.job_id)
 
 
 # ── Semaphore helpers ─────────────────────────────────────────────────────────
@@ -117,6 +121,9 @@ async def process_message_job(
     from app.services.escalation_router import check_and_escalate_message
     from app.services.rag_engine import generate_rag_response
     from app.services.websocket_events import notify_new_message, notify_customer_new_message
+
+    logger.info("[worker] picked up msg:%s conversation=%s workspace=%s",
+                message_id, conversation_id, workspace_id)
 
     redis_client: aioredis.Redis = aioredis.from_url(
         settings.redis_queue_url, decode_responses=True
