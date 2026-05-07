@@ -787,20 +787,15 @@ class RAGEngine:
         Small-talk shortcut: greetings/filler skip retrieval entirely.
         """
         try:
-            # ── Step 1: parallel fetch — conv data + workspace persona ────────
-            async def _empty_conv():
-                return [], None
+            # ── Step 1: sequential fetch — conv data + workspace persona ───────
+            if conversation_id:
+                conversation_history, conversation_summary = await self._get_conversation_data(
+                    conversation_id, workspace_id
+                )
+            else:
+                conversation_history, conversation_summary = [], None
 
-            conv_coro = (
-                self._get_conversation_data(conversation_id, workspace_id)
-                if conversation_id
-                else _empty_conv()
-            )
-
-            (conversation_history, conversation_summary), persona = await asyncio.gather(
-                conv_coro,
-                self._get_workspace_persona(workspace_id),
-            )
+            persona = await self._get_workspace_persona(workspace_id)
 
             fallback_message = persona["fallback_msg"]
             assistant_name = persona["assistant_name"]
