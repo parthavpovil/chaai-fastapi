@@ -36,8 +36,12 @@ class MonitoringMiddleware(BaseHTTPMiddleware):
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Process request and collect metrics"""
+        # WebSocket upgrade requests never return an HTTP response — pass through.
+        if request.scope.get("type") == "websocket":
+            return await call_next(request)
+
         start_time = time.time()
-        
+
         # Extract endpoint pattern
         endpoint = self._get_endpoint_pattern(request)
         

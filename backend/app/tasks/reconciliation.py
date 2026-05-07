@@ -10,12 +10,9 @@ import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
 
-from sqlalchemy import select, exists
+from sqlalchemy import text
 
 from app.database import AsyncSessionLocal
-from app.models.message import Message
-from app.models.conversation import Conversation
-from app.models.contact import Contact
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +20,28 @@ _SWEEP_INTERVAL = 60       # seconds between sweeps
 _MESSAGE_AGE_THRESHOLD = 60  # only consider messages older than this
 
 _task: asyncio.Task = None
+
+_ORPHAN_QUERY = text("""
+    SELECT
+        m.id            AS id,
+        m.conversation_id,
+        c.workspace_id,
+        ct.external_id  AS session_token,
+        ct.channel_id
+    FROM messages m
+    JOIN conversations c  ON c.id  = m.conversation_id
+    JOIN contacts     ct ON ct.id = c.contact_id
+    WHERE m.role = 'customer'
+      AND m.created_at < :cutoff
+      AND c.channel_type = 'webchat'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM messages am
+          WHERE am.conversation_id = c.id
+            AND am.role = 'assistant'
+      )
+    LIMIT 50
+""")
 
 
 async def start_reconciliation_sweeper() -> None:
@@ -62,66 +81,26 @@ async def _reconcile() -> None:
 
     async with AsyncSessionLocal() as db:
         try:
-            # Find webchat customer messages older than threshold with no assistant
-            # reply in the same conversation created after them.
-            reply_exists = (
-                select(Message.id)
-                .where(Message.conversation_id == Message.conversation_id)
-                .where(Message.role == "assistant")
-                .where(Message.created_at > Message.created_at)
-                .correlate(Message)
-                .exists()
-            )
-
-            # Subquery: assistant message in same conversation after customer message
-            customer_msg = Message.__table__.alias("cm")
-            assistant_reply = Message.__table__.alias("ar")
-
-            from sqlalchemy import and_, not_
-            stmt = (
-                select(
-                    Message.id,
-                    Message.conversation_id,
-                    Conversation.workspace_id,
-                    Contact.external_id.label("session_token"),
-                    Contact.channel_id,
-                )
-                .join(Conversation, Conversation.id == Message.conversation_id)
-                .join(Contact, Contact.id == Conversation.contact_id)
-                .where(Message.role == "customer")
-                .where(Message.created_at < cutoff)
-                .where(Conversation.channel_type == "webchat")
-                .where(
-                    not_(
-                        exists(
-                            select(Message.id)
-                            .where(Message.conversation_id == Conversation.id)
-                            .where(Message.role == "assistant")
-                        )
-                    )
-                )
-                .limit(50)  # cap each sweep to avoid thundering herd
-            )
-
-            result = await db.execute(stmt)
+            result = await db.execute(_ORPHAN_QUERY, {"cutoff": cutoff})
             rows = result.fetchall()
-
-            if not rows:
-                return
-
-            logger.info("Reconciliation: re-enqueueing %d orphaned messages", len(rows))
-            for row in rows:
-                try:
-                    await enqueue_message_job(
-                        message_id=str(row.id),
-                        conversation_id=str(row.conversation_id),
-                        workspace_id=str(row.workspace_id),
-                        session_token=row.session_token or "",
-                        channel_id=str(row.channel_id),
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "Reconciliation: failed to enqueue message %s: %s", row.id, e
-                    )
         except Exception as e:
             logger.error("Reconciliation query failed: %s", e, exc_info=True)
+            return
+
+        if not rows:
+            return
+
+        logger.info("Reconciliation: re-enqueueing %d orphaned messages", len(rows))
+        for row in rows:
+            try:
+                await enqueue_message_job(
+                    message_id=str(row.id),
+                    conversation_id=str(row.conversation_id),
+                    workspace_id=str(row.workspace_id),
+                    session_token=row.session_token or "",
+                    channel_id=str(row.channel_id),
+                )
+            except Exception as e:
+                logger.warning(
+                    "Reconciliation: failed to enqueue message %s: %s", row.id, e
+                )
