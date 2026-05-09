@@ -540,6 +540,7 @@
     ws.onopen = function () {
       ws_retry_count = 0;
       is_transitioning_to_ws = false;
+      ws.send(JSON.stringify({ type: 'auth', session_token: session_token }));
       stopPolling(); // WS is up — no need to poll
       startWsPing();
     };
