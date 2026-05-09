@@ -2,6 +2,7 @@
 Maintenance Mode Middleware
 Handles maintenance mode checking and admin access control
 """
+import asyncio
 import logging
 import time
 from typing import Callable, Optional
@@ -12,7 +13,7 @@ from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
-from app.database import get_db
+from app.database import AsyncSessionLocal
 from app.models.platform_setting import PlatformSetting
 from app.services.auth_service import AuthService
 from app.config import settings
@@ -20,6 +21,14 @@ from app.config import settings
 # Cache TTL in seconds - maintenance mode is rarely changed
 _MAINTENANCE_CACHE_TTL = 30
 _maintenance_cache: tuple[bool, Optional[str], float] | None = None  # (is_maintenance, message, expires_at)
+_maintenance_check_lock: asyncio.Lock | None = None
+
+
+def _get_check_lock() -> asyncio.Lock:
+    global _maintenance_check_lock
+    if _maintenance_check_lock is None:
+        _maintenance_check_lock = asyncio.Lock()
+    return _maintenance_check_lock
 
 
 class MaintenanceMode:
@@ -38,14 +47,11 @@ class MaintenanceMode:
             "/openapi.json"
         ]
 
-    async def is_maintenance_mode(self, db: AsyncSession) -> tuple[bool, Optional[str]]:
+    async def is_maintenance_mode(self) -> tuple[bool, Optional[str]]:
         """
         Check if system is in maintenance mode.
         Result is cached for _MAINTENANCE_CACHE_TTL seconds to avoid a DB
-        hit on every request.
-
-        Args:
-            db: Database session
+        hit on every request. A lock prevents concurrent cache-miss stampedes.
 
         Returns:
             Tuple of (is_maintenance, maintenance_message)
@@ -56,32 +62,36 @@ class MaintenanceMode:
         if _maintenance_cache is not None and now < _maintenance_cache[2]:
             return _maintenance_cache[0], _maintenance_cache[1]
 
-        try:
-            # Get maintenance mode setting
-            result = await db.execute(
-                select(PlatformSetting.value)
-                .where(PlatformSetting.key == "maintenance_mode")
-            )
-            maintenance_setting = result.scalar_one_or_none()
+        async with _get_check_lock():
+            # Re-check inside lock in case another coroutine already refreshed it
+            if _maintenance_cache is not None and now < _maintenance_cache[2]:
+                return _maintenance_cache[0], _maintenance_cache[1]
 
-            if maintenance_setting == "true":
-                # Get maintenance message
-                message_result = await db.execute(
-                    select(PlatformSetting.value)
-                    .where(PlatformSetting.key == "maintenance_message")
-                )
-                maintenance_message = message_result.scalar_one_or_none()
-                _maintenance_cache = (True, maintenance_message or "System is currently under maintenance.", now + _MAINTENANCE_CACHE_TTL)
-                return True, _maintenance_cache[1]
+            try:
+                async with AsyncSessionLocal() as db:
+                    result = await db.execute(
+                        select(PlatformSetting.value)
+                        .where(PlatformSetting.key == "maintenance_mode")
+                    )
+                    maintenance_setting = result.scalar_one_or_none()
 
-            _maintenance_cache = (False, None, now + _MAINTENANCE_CACHE_TTL)
-            return False, None
+                    if maintenance_setting == "true":
+                        message_result = await db.execute(
+                            select(PlatformSetting.value)
+                            .where(PlatformSetting.key == "maintenance_message")
+                        )
+                        maintenance_message = message_result.scalar_one_or_none()
+                        _maintenance_cache = (True, maintenance_message or "System is currently under maintenance.", now + _MAINTENANCE_CACHE_TTL)
+                        return True, _maintenance_cache[1]
 
-        except Exception as e:
-            logger.error(f"Error checking maintenance mode: {e}", exc_info=True)
-            # Fail safe - assume not in maintenance mode; use a short cache to avoid hammering DB
-            _maintenance_cache = (False, None, now + _MAINTENANCE_CACHE_TTL)
-            return False, None
+                    _maintenance_cache = (False, None, now + _MAINTENANCE_CACHE_TTL)
+                    return False, None
+
+            except Exception as e:
+                logger.error(f"Error checking maintenance mode: {e}", exc_info=True)
+                # Fail safe - assume not in maintenance mode; use a short cache to avoid hammering DB
+                _maintenance_cache = (False, None, now + _MAINTENANCE_CACHE_TTL)
+                return False, None
     
     def is_admin_user(self, request: Request) -> bool:
         """
@@ -180,39 +190,25 @@ async def maintenance_mode_middleware(request: Request, call_next: Callable) -> 
         # Skip maintenance check for allowed endpoints
         if maintenance_mode.is_allowed_endpoint(request.url.path):
             return await call_next(request)
-        
-        # Get database session
-        db = None
-        try:
-            db = await anext(get_db())
-            
-            # Check if system is in maintenance mode
-            is_maintenance, maintenance_message = await maintenance_mode.is_maintenance_mode(db)
-            
-            if is_maintenance:
-                # Check if user is admin
-                if not maintenance_mode.is_admin_user(request):
-                    return await maintenance_mode.create_maintenance_response(
-                        maintenance_message, 
-                        request.url.path
-                    )
-                
-                # Admin user - add maintenance header but allow request
-                response = await call_next(request)
-                response.headers["X-Maintenance-Mode"] = "true"
-                response.headers["X-Admin-Access"] = "true"
-                return response
-            
-            # Not in maintenance mode - proceed normally
-            return await call_next(request)
-            
-        finally:
-            if db:
-                await db.close()
-                
+
+        is_maintenance, maintenance_message = await maintenance_mode.is_maintenance_mode()
+
+        if is_maintenance:
+            if not maintenance_mode.is_admin_user(request):
+                return await maintenance_mode.create_maintenance_response(
+                    maintenance_message,
+                    request.url.path
+                )
+
+            response = await call_next(request)
+            response.headers["X-Maintenance-Mode"] = "true"
+            response.headers["X-Admin-Access"] = "true"
+            return response
+
+        return await call_next(request)
+
     except Exception as e:
         logger.error(f"Maintenance middleware error: {e}", exc_info=True)
-        # On error, allow request to proceed
         return await call_next(request)
 
 
@@ -321,26 +317,18 @@ async def disable_maintenance_mode(
         return False
 
 
-async def get_maintenance_status(db: AsyncSession) -> dict:
-    """
-    Get current maintenance mode status
-    
-    Args:
-        db: Database session
-    
-    Returns:
-        Maintenance status information
-    """
+async def get_maintenance_status() -> dict:
+    """Get current maintenance mode status"""
     try:
-        is_maintenance, message = await maintenance_mode.is_maintenance_mode(db)
-        
+        is_maintenance, message = await maintenance_mode.is_maintenance_mode()
+
         return {
             "maintenance_mode": is_maintenance,
             "message": message,
             "admin_email": settings.SUPER_ADMIN_EMAIL,
             "allowed_endpoints": maintenance_mode.maintenance_endpoints
         }
-        
+
     except Exception as e:
         return {
             "maintenance_mode": False,
