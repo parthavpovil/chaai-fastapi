@@ -53,6 +53,10 @@
     try { localStorage.setItem(getStorageKey(), token); } catch (e) {}
   }
 
+  function clearSession() {
+    try { localStorage.removeItem(getStorageKey()); } catch (e) {}
+  }
+
   function loadSession() {
     try { return localStorage.getItem(getStorageKey()); } catch (e) { return null; }
   }
@@ -529,8 +533,7 @@
 
     var wsBase = API_BASE.replace(/^http/, 'ws');
     var url = wsBase + '/ws/webchat/' + encodeURIComponent(config.workspace_id)
-      + '?widget_id=' + encodeURIComponent(widget_id)
-      + '&session_token=' + encodeURIComponent(session_token);
+      + '?widget_id=' + encodeURIComponent(widget_id);
 
     try {
       ws = new WebSocket(url);
@@ -557,10 +560,15 @@
       // onclose fires after onerror — handle reconnect there
     };
 
-    ws.onclose = function () {
+    ws.onclose = function (event) {
       ws = null;
       is_transitioning_to_ws = false;
       stopWsPing();
+      if (event && event.code === 4001) {
+        session_token = null;
+        clearSession();
+        return;
+      }
       if (ws_retry_count < WS_MAX_RETRIES) {
         ws_retry_count++;
         var delay = Math.min(1000 * Math.pow(2, ws_retry_count - 1), 30000);
