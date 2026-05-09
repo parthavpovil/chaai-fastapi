@@ -57,7 +57,8 @@ jobs:
           REDIS_URL: redis://localhost:6379/0
           JWT_SECRET_KEY: test-secret-key-not-for-production
           JWT_ALGORITHM: HS256
-          ENCRYPTION_KEY: dGVzdC1lbmNyeXB0aW9uLWtleS0zMmJ5dGVzLS0t
+          ENCRYPTION_KEY: "6465762d656e6372797074696f6e2d6b65792d666f722d74657374696e672d21"
+          PROCESS_SECRET: "test-process-secret-not-for-production-use"
           DEBUG: "true"
         run: |
           pytest \

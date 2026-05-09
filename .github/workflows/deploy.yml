@@ -218,9 +218,9 @@ jobs:
           echo "Starting new container..."
           docker compose -f docker-compose.prod.yml up -d --no-deps backend
 
-          # Start (or restart) the message worker
-          echo "Starting message worker..."
-          docker compose -f docker-compose.prod.yml up -d --no-deps message-worker
+          # Start (or restart) the message workers (paid + free queues)
+          echo "Starting message workers..."
+          docker compose -f docker-compose.prod.yml up -d --no-deps message-worker-paid message-worker-free
 
           # Wait for backend container to be healthy
           echo "Waiting for container to be healthy..."
