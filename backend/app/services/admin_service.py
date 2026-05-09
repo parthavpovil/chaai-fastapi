@@ -44,19 +44,21 @@ class AdminService:
         Returns:
             Dictionary with platform statistics
         """
-        # Get workspace counts by tier
+        # Get workspace counts by tier (exclude soft-deleted)
         tier_result = await self.db.execute(
             select(
                 Workspace.tier,
                 func.count(Workspace.id).label('count')
             )
+            .where(Workspace.deleted_at.is_(None))
             .group_by(Workspace.tier)
         )
         tier_breakdown = {row.tier: row.count for row in tier_result}
-        
-        # Get total workspace count
+
+        # Get total workspace count (exclude soft-deleted)
         total_workspaces_result = await self.db.execute(
             select(func.count(Workspace.id))
+            .where(Workspace.deleted_at.is_(None))
         )
         total_workspaces = total_workspaces_result.scalar() or 0
         
@@ -94,6 +96,7 @@ class AdminService:
         recent_signups_result = await self.db.execute(
             select(func.count(Workspace.id))
             .where(Workspace.created_at >= seven_days_ago)
+            .where(Workspace.deleted_at.is_(None))
         )
         recent_signups = recent_signups_result.scalar() or 0
         
@@ -132,11 +135,12 @@ class AdminService:
         query = (
             select(Workspace, User)
             .join(User, Workspace.owner_id == User.id)
+            .where(Workspace.deleted_at.is_(None))
             .order_by(desc(Workspace.created_at))
             .limit(limit)
             .offset(offset)
         )
-        
+
         if tier_filter:
             query = query.where(Workspace.tier == tier_filter)
         
@@ -326,9 +330,12 @@ class AdminService:
         workspace.tier = new_tier
         workspace.tier_changed_at = datetime.now(timezone.utc)
         workspace.tier_changed_by = admin_email
-        
+
         await self.db.commit()
-        
+
+        from app.services.workspace_cache import invalidate_workspace_cache
+        await invalidate_workspace_cache(str(workspace_id))
+
         return True
     
     async def get_tier_change_history(
@@ -407,10 +414,12 @@ class AdminService:
         if workspace.name != confirmation_name:
             raise ValueError("Workspace name confirmation does not match")
         
-        # Delete workspace (cascade will handle related records)
-        await self.db.delete(workspace)
+        # Soft-delete: stamp deleted_at instead of hard-deleting.
+        # All child data (conversations, messages, documents, contacts) is preserved.
+        # A hard-delete reaper should purge rows with deleted_at older than 30 days.
+        workspace.deleted_at = datetime.now(timezone.utc)
         await self.db.commit()
-        
+
         return True
 
     async def get_analytics_dashboard(self) -> Dict[str, Any]:

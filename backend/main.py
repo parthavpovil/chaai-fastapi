@@ -1,8 +1,14 @@
 """
 ChatSaaS Backend - FastAPI Application Entry Point
 """
+import asyncio
+import functools
+import time
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Response
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
@@ -23,12 +29,49 @@ from app.routers import permissions as permissions_router
 from app.routers import admin_permissions as admin_permissions_router
 from app.middleware.maintenance_middleware import maintenance_mode_middleware
 from app.middleware.monitoring_middleware import init_monitoring_middleware, MonitoringMiddleware
+from app.middleware.request_id_middleware import RequestIDMiddleware
+
+
+def _init_sentry() -> None:
+    """Init Sentry SDK if SENTRY_DSN is configured. Scrubs auth headers before sending."""
+    if not settings.SENTRY_DSN:
+        return
+
+    import sentry_sdk
+    from sentry_sdk.integrations.fastapi import FastApiIntegration
+    from sentry_sdk.integrations.starlette import StarletteIntegration
+    from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
+
+    _SENSITIVE_HEADERS = frozenset({
+        "authorization", "cookie", "x-api-key", "x-process-secret",
+    })
+
+    def _before_send(event, hint):
+        headers = (event.get("request") or {}).get("headers") or {}
+        for h in list(headers):
+            if h.lower() in _SENSITIVE_HEADERS:
+                headers[h] = "[Filtered]"
+        return event
+
+    sentry_sdk.init(
+        dsn=settings.SENTRY_DSN,
+        integrations=[
+            FastApiIntegration(),
+            StarletteIntegration(),
+            SqlalchemyIntegration(),
+        ],
+        traces_sample_rate=settings.SENTRY_TRACES_SAMPLE_RATE,
+        send_default_pii=False,
+        before_send=_before_send,
+    )
+    logger.info("Sentry initialised (traces_sample_rate=%.2f)", settings.SENTRY_TRACES_SAMPLE_RATE)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager"""
     # Startup
+    _init_sentry()
     await init_db()
     
     # Start monitoring tasks in production
@@ -88,6 +131,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Prometheus metrics — exposes GET /metrics (Prometheus scrape format)
+from prometheus_fastapi_instrumentator import Instrumentator
+Instrumentator().instrument(app).expose(app, include_in_schema=False)
+
 # Configure CORS
 # /api/webchat/* and /ws/webchat/* are public widget endpoints — any origin is allowed
 # because the widget is embedded on arbitrary customer websites we don't know in advance.
@@ -130,6 +177,10 @@ app.middleware("http")(maintenance_mode_middleware)
 monitoring_middleware = init_monitoring_middleware(app)
 app.add_middleware(MonitoringMiddleware, max_history=1000)
 
+# Request-ID middleware — outermost so every downstream log line carries the ID.
+# In Starlette, the last add_middleware call wraps all previous layers.
+app.add_middleware(RequestIDMiddleware)
+
 # Mount static files (widget.js, etc.)
 import os
 _static_dir = os.path.join(os.path.dirname(__file__), "static")
@@ -163,46 +214,115 @@ app.include_router(permissions_router.router)
 app.include_router(admin_permissions_router.router)
 app.include_router(websocket_webchat.router)
 
-@app.get("/health")
-async def health_check():
-    """Simple health check endpoint for load balancer"""
-    import time
-    
-    start_time = time.time()
-    checks = {
+# ── Global exception handlers ─────────────────────────────────────────────────
+# All three handlers inject the X-Request-ID into the response body so operators
+# can correlate a client-reported error with the log lines from that request.
+
+from app.utils.request_context import get_request_id as _get_request_id
+
+
+@app.exception_handler(StarletteHTTPException)
+async def _http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    """Normalize HTTPException responses and add request_id.
+
+    Preserves exc.headers (e.g. WWW-Authenticate: Bearer on 401s).
+    For 5xx responses the internal detail is logged but NOT sent to the client
+    to prevent accidental leakage of table names, query fragments, or data values.
+    """
+    if exc.status_code >= 500:
+        logger.error(
+            "HTTP %s: %s %s rid=%s — %s",
+            exc.status_code, request.method, request.url.path,
+            _get_request_id(), exc.detail,
+        )
+        safe_detail = "Internal server error"
+    else:
+        safe_detail = exc.detail
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": safe_detail, "request_id": _get_request_id() or None},
+        headers=getattr(exc, "headers", None),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_exception_handler(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """Return 422 validation errors with request_id for client-side debugging."""
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "request_id": _get_request_id() or None},
+    )
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    """Catch-all for unhandled exceptions.
+
+    Logs the full traceback (never leaks it to the client) and returns a
+    generic 500 with the request_id so the caller can report a correlatable ID.
+    """
+    logger.error(
+        "Unhandled exception: %s %s rid=%s",
+        request.method, request.url.path, _get_request_id(),
+        exc_info=True,
+    )
+    return JSONResponse(
+        status_code=500,
+        content={"detail": "Internal server error", "request_id": _get_request_id() or None},
+    )
+
+
+# ── Health check with result cache ────────────────────────────────────────────
+# Load balancers probe /health every few seconds.  Running a DB query and a
+# synchronous boto3 head_bucket on every probe burns a DB connection and blocks
+# the event loop on the network round-trip.  Cache the result for
+# _HEALTH_CACHE_TTL seconds; only one concurrent refresh is allowed (lock).
+
+_HEALTH_CACHE_TTL = 10.0  # seconds
+_health_cache: dict | None = None
+_health_cache_expires: float = 0.0
+_health_cache_lock = asyncio.Lock()
+
+
+async def _run_health_checks() -> dict:
+    start = time.monotonic()
+    wall = time.time()
+    checks: dict = {
         "status": "healthy",
         "service": "chatsaas-backend",
-        "timestamp": time.time(),
-        "checks": {}
+        "timestamp": wall,
+        "checks": {},
     }
-    
-    # Basic database connectivity check
+
+    # Database — use engine.connect() directly (lighter than a full session)
+    db_start = time.monotonic()
     try:
-        from app.database import get_db
-        async for db in get_db():
-            from sqlalchemy import text
-            await db.execute(text("SELECT 1"))
-            checks["checks"]["database"] = {
-                "status": "healthy",
-                "response_time_ms": round((time.time() - start_time) * 1000, 2)
-            }
-            break
-    except Exception as e:
+        from app.database import engine
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
         checks["checks"]["database"] = {
-            "status": "unhealthy",
-            "error": str(e)
+            "status": "healthy",
+            "response_time_ms": round((time.monotonic() - db_start) * 1000, 2),
         }
+    except Exception as e:
+        checks["checks"]["database"] = {"status": "unhealthy", "error": str(e)}
         checks["status"] = "unhealthy"
-    
-    # R2 storage connectivity check
+
+    # R2 — boto3 is synchronous; run in thread pool so the event loop is free
+    r2_start = time.monotonic()
     try:
         from app.services.r2_storage import _get_r2_client
         r2 = _get_r2_client()
-        r2.head_bucket(Bucket=settings.R2_BUCKET_NAME)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            functools.partial(r2.head_bucket, Bucket=settings.R2_BUCKET_NAME),
+        )
         checks["checks"]["storage"] = {
             "status": "healthy",
             "backend": "cloudflare-r2",
             "bucket": settings.R2_BUCKET_NAME,
+            "response_time_ms": round((time.monotonic() - r2_start) * 1000, 2),
         }
     except Exception as e:
         checks["checks"]["storage"] = {
@@ -211,10 +331,31 @@ async def health_check():
             "error": str(e),
         }
         checks["status"] = "unhealthy"
-    
-    checks["response_time_ms"] = round((time.time() - start_time) * 1000, 2)
-    
+
+    checks["response_time_ms"] = round((time.monotonic() - start) * 1000, 2)
     return checks
+
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for load balancer. Result is cached for 10 s."""
+    global _health_cache, _health_cache_expires
+
+    # Fast path — return cached result without acquiring the lock
+    now = time.monotonic()
+    if _health_cache is not None and now < _health_cache_expires:
+        return _health_cache
+
+    # Slow path — one coroutine refreshes; others wait and then use the result
+    async with _health_cache_lock:
+        now = time.monotonic()
+        if _health_cache is not None and now < _health_cache_expires:
+            return _health_cache
+
+        result = await _run_health_checks()
+        _health_cache = result
+        _health_cache_expires = time.monotonic() + _HEALTH_CACHE_TTL
+        return result
 
 @app.get("/metrics/middleware")
 async def get_middleware_metrics():
@@ -222,7 +363,7 @@ async def get_middleware_metrics():
     try:
         from app.middleware.monitoring_middleware import get_monitoring_middleware
         middleware = get_monitoring_middleware()
-        return middleware.get_metrics()
+        return await middleware.get_metrics()
     except Exception as e:
         return {"error": str(e)}
 

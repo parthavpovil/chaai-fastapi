@@ -92,16 +92,11 @@ def verify_resend_signature(
     secret: str
 ) -> bool:
     """
-    Verify Resend webhook signature using Svix standard
-    
-    Args:
-        body: Raw request body
-        signature: Signature from svix-signature header
-        timestamp: Timestamp from svix-timestamp header
-        secret: Webhook signing secret
-        
-    Returns:
-        True if signature is valid, False otherwise
+    Verify Resend webhook signature using Svix standard.
+
+    Only catches parsing / encoding errors (KeyError, ValueError, UnicodeDecodeError).
+    Other exceptions propagate so they are visible in Sentry rather than
+    silently returning False and masking broken config or library issues.
     """
     try:
         # Svix signature format: "v1,signature1 v1,signature2"
@@ -109,28 +104,50 @@ def verify_resend_signature(
         for sig in signature.split(" "):
             version, value = sig.split(",", 1)
             signatures[version] = value
-        
-        # Get v1 signature
+
         expected_sig = signatures.get("v1")
         if not expected_sig:
             return False
-        
-        # Construct signed content: timestamp.body
+
         signed_content = f"{timestamp}.{body.decode('utf-8')}"
-        
-        # Compute HMAC
         computed_sig = hmac.new(
             secret.encode('utf-8'),
             signed_content.encode('utf-8'),
             hashlib.sha256
         ).hexdigest()
-        
-        # Compare signatures
+
         return hmac.compare_digest(computed_sig, expected_sig)
-        
-    except Exception as e:
-        logger.error("Resend signature verification error: %s", e)
+
+    except (KeyError, ValueError, UnicodeDecodeError) as e:
+        logger.warning("Resend signature verification error: %s", e)
         return False
+
+
+# ─── Inbound channel signature helpers ───────────────────────────────────────
+
+def _verify_meta_signature(payload: bytes, sig_header: str, app_secret: str) -> None:
+    """
+    Raise HTTPException(401) if the Meta X-Hub-Signature-256 header is absent
+    or does not match HMAC-SHA256(app_secret, payload).
+
+    Meta (WhatsApp + Instagram) sends:
+        X-Hub-Signature-256: sha256=<lowercase_hex_digest>
+    """
+    if not sig_header.startswith("sha256="):
+        raise HTTPException(status_code=401, detail="Missing or malformed X-Hub-Signature-256")
+    expected = sig_header[7:]  # strip "sha256="
+    computed = hmac.new(app_secret.encode(), payload, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(computed, expected):
+        raise HTTPException(status_code=401, detail="Invalid webhook signature")
+
+
+def _verify_telegram_secret_token(header_value: str, expected: str) -> None:
+    """
+    Raise HTTPException(401) if X-Telegram-Bot-Api-Secret-Token doesn't match.
+    Uses hmac.compare_digest to prevent timing-based leaks.
+    """
+    if not hmac.compare_digest(header_value, expected):
+        raise HTTPException(status_code=401, detail="Invalid Telegram secret token")
 
 
 async def _persist_email_log(
@@ -227,12 +244,21 @@ async def handle_email_clicked(data: dict, db: AsyncSession) -> None:
 
 # ─── Razorpay Webhook ─────────────────────────────────────────────────────────
 
+_RZP_EVENT_TTL = 172_800  # 48 h — covers Razorpay's retry window
+
+
 @router.post("/razorpay")
 async def razorpay_webhook(
     request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """Handle Razorpay subscription lifecycle events."""
+    """Handle Razorpay subscription lifecycle events.
+
+    Idempotency: each Razorpay event carries a unique `id` field. We claim it
+    in Redis with a 48-hour TTL before processing. Duplicate deliveries return
+    200 immediately. If processing fails, the key is deleted so the next retry
+    can re-claim it, and we return 500 so Razorpay actually retries.
+    """
     if not settings.RAZORPAY_WEBHOOK_SECRET:
         return {"status": "ok"}
 
@@ -253,12 +279,31 @@ async def razorpay_webhook(
     try:
         event = json.loads(payload)
     except Exception as e:
-        logger.error(f"Razorpay webhook JSON parse error: {e}")
+        logger.error("Razorpay webhook JSON parse error: %s", e)
         raise HTTPException(status_code=400, detail="Invalid JSON payload")
 
     event_type = event.get("event", "")
+    event_id = event.get("id", "")
     event_data = event.get("payload", {})
 
+    # ── Idempotency gate ──────────────────────────────────────────────────────
+    import redis.asyncio as _aioredis
+
+    idempotency_key = f"rzp_event:{event_id}" if event_id else None
+    redis_client = None
+
+    if idempotency_key:
+        try:
+            redis_client = _aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+            acquired = await redis_client.set(idempotency_key, "1", nx=True, ex=_RZP_EVENT_TTL)
+            if not acquired:
+                logger.info("Razorpay event %s already processed — skipping", event_id)
+                return {"status": "ok"}
+        except Exception as e:
+            logger.warning("Razorpay idempotency Redis error (proceeding): %s", e)
+            redis_client = None  # don't try to delete a key we never set
+
+    # ── Process event ─────────────────────────────────────────────────────────
     try:
         if event_type == "subscription.activated":
             await handle_subscription_activated(event_data, db)
@@ -266,12 +311,84 @@ async def razorpay_webhook(
             await handle_subscription_cancelled(event_data, db)
         # subscription.charged is a no-op — subscription is already active
     except Exception as e:
-        logger.error(f"Razorpay event handling error ({event_type}): {e}")
+        logger.error("Razorpay event handling error (%s): %s", event_type, e, exc_info=True)
+        # Release the idempotency key so Razorpay's next retry can re-claim it.
+        if idempotency_key and redis_client:
+            try:
+                await redis_client.delete(idempotency_key)
+            except Exception:
+                pass
+        raise HTTPException(status_code=500, detail="Event processing failed")
+    finally:
+        if redis_client:
+            try:
+                await redis_client.aclose()
+            except Exception:
+                pass
 
     return {"status": "ok"}
 
 
 # ─── Channel Webhooks ─────────────────────────────────────────────────────────
+
+# 24-hour TTL covers all carrier retry windows (Telegram: 60 s; Meta: up to 72 h but
+# messages are deduplicated by external_message_id unique constraint as a second layer).
+_INBOUND_MSG_TTL = 86_400  # 24 hours
+
+
+async def _claim_inbound_message(provider: str, external_message_id: str) -> bool:
+    """
+    Claim an inbound message idempotency slot in Redis.
+
+    Returns True if this is the *first* time we've seen this (provider, id) pair
+    (i.e. the caller should process it), False if it was already claimed.
+
+    Fail-open: if Redis is unavailable, returns True so no messages are silently
+    dropped.  The external_message_id unique DB constraint acts as a second guard.
+    """
+    try:
+        import redis.asyncio as _aioredis
+        key = f"inbound:{provider}:{external_message_id}"
+        r = _aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+        try:
+            acquired = await r.set(key, "1", nx=True, ex=_INBOUND_MSG_TTL)
+            return bool(acquired)
+        finally:
+            await r.aclose()
+    except Exception as e:
+        logger.warning("Inbound idempotency Redis error for %s/%s (fail-open): %s",
+                       provider, external_message_id, e)
+        return True
+
+
+async def _run_pipeline_with_own_session(
+    workspace_id: str,
+    channel_id: str,
+    message_data: dict,
+    channel_type: str,
+    telegram_context: dict = None,
+    whatsapp_context: dict = None,
+    instagram_context: dict = None,
+) -> None:
+    """Open a fresh AsyncSession and run _run_message_pipeline.
+
+    Used as the body of safe_create_task so the HTTP response is returned
+    immediately (before the 60-90 s RAG call), meeting the carrier timeout
+    budget (Meta: 5-10 s, Telegram: 60 s).
+    """
+    from app.database import AsyncSessionLocal
+    async with AsyncSessionLocal() as db:
+        await _run_message_pipeline(
+            db=db,
+            workspace_id=workspace_id,
+            channel_id=channel_id,
+            message_data=message_data,
+            channel_type=channel_type,
+            telegram_context=telegram_context,
+            whatsapp_context=whatsapp_context,
+            instagram_context=instagram_context,
+        )
+
 
 async def _run_message_pipeline(
     db: AsyncSession,
@@ -604,46 +721,62 @@ async def telegram_webhook(
     payload = await request.body()
     headers = dict(request.headers)
 
+    if settings.TELEGRAM_SECRET_TOKEN:
+        _verify_telegram_secret_token(
+            request.headers.get("X-Telegram-Bot-Api-Secret-Token", ""),
+            settings.TELEGRAM_SECRET_TOKEN,
+        )
+
+    from app.services.webhook_handlers import WebhookHandlers, WebhookProcessingError
     try:
-        from app.services.webhook_handlers import WebhookHandlers, WebhookProcessingError
         result = await WebhookHandlers(db).handle_telegram_webhook(payload, headers, bot_token)
-
-        if result.get("status") == "success":
-            try:
-                # Extract chat_id from message_metadata (set by _extract_telegram_message)
-                chat_id = result["message_data"].get("message_metadata", {}).get("chat_id")
-
-                # Decrypt bot token for sending replies
-                from app.services.encryption import decrypt_credential
-                from app.models.channel import Channel
-                from sqlalchemy import select as _select
-                ch_result = await db.execute(
-                    _select(Channel).where(Channel.id == result["channel_id"])
-                )
-                ch = ch_result.scalar_one_or_none()
-                decrypted_token = None
-                if ch and ch.config and ch.config.get("bot_token"):
-                    decrypted_token = decrypt_credential(ch.config["bot_token"])
-
-                telegram_context = None
-                if chat_id and decrypted_token:
-                    telegram_context = {"bot_token": decrypted_token, "chat_id": chat_id}
-
-                await _run_message_pipeline(
-                    db=db,
-                    workspace_id=str(result["workspace_id"]),
-                    channel_id=str(result["channel_id"]),
-                    message_data=result["message_data"],
-                    channel_type="telegram",
-                    telegram_context=telegram_context,
-                )
-            except Exception as e:
-                logger.error(f"Telegram pipeline error: {e}")
-
+    except WebhookProcessingError as e:
+        if e.status_code == 200:
+            return {"ok": True}  # permanent no-op — stop retries silently
+        raise HTTPException(status_code=e.status_code, detail=str(e))
     except Exception as e:
-        logger.error(f"Telegram webhook error: {e}")
+        logger.error("Unexpected Telegram webhook error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal processing error")
 
-    # Always return 200 to prevent Telegram retries
+    if result.get("status") == "success":
+        external_msg_id = result["message_data"].get("external_message_id", "")
+        if not await _claim_inbound_message("telegram", external_msg_id):
+            logger.info("Telegram message %s already claimed — skipping", external_msg_id)
+            return {"ok": True}
+
+        # Extract chat_id from message_metadata (set by _extract_telegram_message)
+        chat_id = result["message_data"].get("message_metadata", {}).get("chat_id")
+
+        # Decrypt bot token for sending replies
+        from app.services.encryption import decrypt_credential
+        from app.models.channel import Channel
+        from sqlalchemy import select as _select
+        from app.utils.tasks import safe_create_task
+        ch_result = await db.execute(
+            _select(Channel).where(Channel.id == result["channel_id"])
+        )
+        ch = ch_result.scalar_one_or_none()
+        decrypted_token = None
+        if ch and ch.config and ch.config.get("bot_token"):
+            decrypted_token = decrypt_credential(ch.config["bot_token"])
+
+        telegram_context = None
+        if chat_id and decrypted_token:
+            telegram_context = {"bot_token": decrypted_token, "chat_id": chat_id}
+
+        # Return 200 immediately — pipeline runs in background to meet Telegram's
+        # 60-second webhook timeout and prevent duplicate-delivery retries.
+        safe_create_task(
+            _run_pipeline_with_own_session(
+                workspace_id=str(result["workspace_id"]),
+                channel_id=str(result["channel_id"]),
+                message_data=result["message_data"],
+                channel_type="telegram",
+                telegram_context=telegram_context,
+            ),
+            name=f"pipeline.telegram.{external_msg_id}",
+        )
+
     return {"ok": True}
 
 
@@ -675,76 +808,93 @@ async def whatsapp_webhook(
     payload = await request.body()
     headers = dict(request.headers)
 
+    if settings.WHATSAPP_APP_SECRET:
+        _verify_meta_signature(
+            payload,
+            request.headers.get("X-Hub-Signature-256", ""),
+            settings.WHATSAPP_APP_SECRET,
+        )
+
+    from app.services.webhook_handlers import WebhookHandlers, WebhookProcessingError
     try:
-        from app.services.webhook_handlers import WebhookHandlers, WebhookProcessingError
         result = await WebhookHandlers(db).handle_whatsapp_webhook(payload, headers, phone_number_id)
+    except WebhookProcessingError as e:
+        if e.status_code == 200:
+            return {"status": "ok"}
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    except Exception as e:
+        logger.error("Unexpected WhatsApp webhook error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal processing error")
 
-        status = result.get("status")
+    result_status = result.get("status")
 
-        if status == "success":
-            try:
-                # Extract credentials so the pipeline can send replies back to the customer
-                whatsapp_context = None
-                try:
-                    from app.services.encryption import decrypt_credential
-                    from app.models.channel import Channel
-                    from sqlalchemy import select as _select
-                    ch_result = await db.execute(
-                        _select(Channel).where(Channel.id == result["channel_id"])
-                    )
-                    ch = ch_result.scalar_one_or_none()
-                    if ch and ch.config:
-                        access_token = decrypt_credential(ch.config.get("access_token", ""))
-                        wa_phone_number_id = decrypt_credential(ch.config.get("phone_number_id", ""))
-                        recipient_phone = result["message_data"].get("external_contact_id")
-                        if access_token and wa_phone_number_id and recipient_phone:
-                            whatsapp_context = {
-                                "access_token": access_token,
-                                "phone_number_id": wa_phone_number_id,
-                                "recipient_phone": recipient_phone,
-                            }
-                except Exception as e:
-                    logger.warning("Failed to extract WhatsApp channel credentials: %s", e)
+    if result_status == "success":
+        external_msg_id = result["message_data"].get("external_message_id", "")
+        if not await _claim_inbound_message("whatsapp", external_msg_id):
+            logger.info("WhatsApp message %s already claimed — skipping", external_msg_id)
+            return {"status": "ok"}
 
-                await _run_message_pipeline(
-                    db=db,
-                    workspace_id=str(result["workspace_id"]),
-                    channel_id=str(result["channel_id"]),
-                    message_data=result["message_data"],
-                    channel_type="whatsapp",
-                    whatsapp_context=whatsapp_context,
+        # Extract credentials so the pipeline can send replies back to the customer
+        whatsapp_context = None
+        try:
+            from app.services.encryption import decrypt_credential
+            from app.models.channel import Channel
+            from sqlalchemy import select as _select
+            ch_result = await db.execute(
+                _select(Channel).where(Channel.id == result["channel_id"])
+            )
+            ch = ch_result.scalar_one_or_none()
+            if ch and ch.config:
+                access_token = decrypt_credential(ch.config.get("access_token", ""))
+                wa_phone_number_id = decrypt_credential(ch.config.get("phone_number_id", ""))
+                recipient_phone = result["message_data"].get("external_contact_id")
+                if access_token and wa_phone_number_id and recipient_phone:
+                    whatsapp_context = {
+                        "access_token": access_token,
+                        "phone_number_id": wa_phone_number_id,
+                        "recipient_phone": recipient_phone,
+                    }
+        except Exception as e:
+            logger.warning("Failed to extract WhatsApp channel credentials: %s", e)
+
+        from app.utils.tasks import safe_create_task
+        # Return 200 within Meta's 5-10 s window — pipeline runs in background.
+        safe_create_task(
+            _run_pipeline_with_own_session(
+                workspace_id=str(result["workspace_id"]),
+                channel_id=str(result["channel_id"]),
+                message_data=result["message_data"],
+                channel_type="whatsapp",
+                whatsapp_context=whatsapp_context,
+            ),
+            name=f"pipeline.whatsapp.{external_msg_id}",
+        )
+
+    elif result_status == "status_update":
+        try:
+            from app.services.message_processor import MessageProcessor
+            from app.services.websocket_events import notify_message_status_update
+            processor = MessageProcessor(db)
+            workspace_id = str(result["workspace_id"])
+            for s in result.get("statuses", []):
+                msg = await processor.update_message_delivery_status(
+                    whatsapp_msg_id=s["whatsapp_msg_id"],
+                    status=s["status"],
+                    timestamp=s["timestamp"],
+                    workspace_id=workspace_id,
+                    error=s.get("error"),
                 )
-            except Exception as e:
-                logger.error(f"WhatsApp pipeline error: {e}")
-
-        elif status == "status_update":
-            try:
-                from app.services.message_processor import MessageProcessor
-                from app.services.websocket_events import notify_message_status_update
-                processor = MessageProcessor(db)
-                workspace_id = str(result["workspace_id"])
-                for s in result.get("statuses", []):
-                    msg = await processor.update_message_delivery_status(
+                if msg:
+                    await notify_message_status_update(
+                        db=db,
+                        workspace_id=workspace_id,
+                        message_id=str(msg.id),
                         whatsapp_msg_id=s["whatsapp_msg_id"],
                         status=s["status"],
                         timestamp=s["timestamp"],
-                        workspace_id=workspace_id,
-                        error=s.get("error"),
                     )
-                    if msg:
-                        await notify_message_status_update(
-                            db=db,
-                            workspace_id=workspace_id,
-                            message_id=str(msg.id),
-                            whatsapp_msg_id=s["whatsapp_msg_id"],
-                            status=s["status"],
-                            timestamp=s["timestamp"],
-                        )
-            except Exception as e:
-                logger.error(f"WhatsApp status update error: {e}")
-
-    except Exception as e:
-        logger.error(f"WhatsApp webhook error: {e}")
+        except Exception as e:
+            logger.error("WhatsApp status update error: %s", e, exc_info=True)
 
     return {"status": "ok"}
 
@@ -777,47 +927,64 @@ async def instagram_webhook(
     payload = await request.body()
     headers = dict(request.headers)
 
+    if settings.INSTAGRAM_APP_SECRET:
+        _verify_meta_signature(
+            payload,
+            request.headers.get("X-Hub-Signature-256", ""),
+            settings.INSTAGRAM_APP_SECRET,
+        )
+
+    from app.services.webhook_handlers import WebhookHandlers, WebhookProcessingError
     try:
-        from app.services.webhook_handlers import WebhookHandlers, WebhookProcessingError
         result = await WebhookHandlers(db).handle_instagram_webhook(payload, headers, page_id)
-
-        if result.get("status") == "success":
-            try:
-                # Extract credentials so the pipeline can send replies back to the customer
-                instagram_context = None
-                try:
-                    from app.services.encryption import decrypt_credential
-                    from app.models.channel import Channel
-                    from sqlalchemy import select as _select
-                    ch_result = await db.execute(
-                        _select(Channel).where(Channel.id == result["channel_id"])
-                    )
-                    ch = ch_result.scalar_one_or_none()
-                    if ch and ch.config:
-                        access_token = decrypt_credential(ch.config.get("access_token", ""))
-                        ig_page_id = decrypt_credential(ch.config.get("page_id", ""))
-                        recipient_id = result["message_data"].get("external_contact_id")
-                        if access_token and ig_page_id and recipient_id:
-                            instagram_context = {
-                                "access_token": access_token,
-                                "page_id": ig_page_id,
-                                "recipient_id": recipient_id,
-                            }
-                except Exception as e:
-                    logger.warning("Failed to extract Instagram channel credentials: %s", e)
-
-                await _run_message_pipeline(
-                    db=db,
-                    workspace_id=str(result["workspace_id"]),
-                    channel_id=str(result["channel_id"]),
-                    message_data=result["message_data"],
-                    channel_type="instagram",
-                    instagram_context=instagram_context,
-                )
-            except Exception as e:
-                logger.error(f"Instagram pipeline error: {e}")
-
+    except WebhookProcessingError as e:
+        if e.status_code == 200:
+            return {"status": "ok"}
+        raise HTTPException(status_code=e.status_code, detail=str(e))
     except Exception as e:
-        logger.error(f"Instagram webhook error: {e}")
+        logger.error("Unexpected Instagram webhook error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal processing error")
+
+    if result.get("status") == "success":
+        external_msg_id = result["message_data"].get("external_message_id", "")
+        if not await _claim_inbound_message("instagram", external_msg_id):
+            logger.info("Instagram message %s already claimed — skipping", external_msg_id)
+            return {"status": "ok"}
+
+        # Extract credentials so the pipeline can send replies back to the customer
+        instagram_context = None
+        try:
+            from app.services.encryption import decrypt_credential
+            from app.models.channel import Channel
+            from sqlalchemy import select as _select
+            ch_result = await db.execute(
+                _select(Channel).where(Channel.id == result["channel_id"])
+            )
+            ch = ch_result.scalar_one_or_none()
+            if ch and ch.config:
+                access_token = decrypt_credential(ch.config.get("access_token", ""))
+                ig_page_id = decrypt_credential(ch.config.get("page_id", ""))
+                recipient_id = result["message_data"].get("external_contact_id")
+                if access_token and ig_page_id and recipient_id:
+                    instagram_context = {
+                        "access_token": access_token,
+                        "page_id": ig_page_id,
+                        "recipient_id": recipient_id,
+                    }
+        except Exception as e:
+            logger.warning("Failed to extract Instagram channel credentials: %s", e)
+
+        from app.utils.tasks import safe_create_task
+        # Return 200 within Meta's 5-10 s window — pipeline runs in background.
+        safe_create_task(
+            _run_pipeline_with_own_session(
+                workspace_id=str(result["workspace_id"]),
+                channel_id=str(result["channel_id"]),
+                message_data=result["message_data"],
+                channel_type="instagram",
+                instagram_context=instagram_context,
+            ),
+            name=f"pipeline.instagram.{external_msg_id}",
+        )
 
     return {"status": "ok"}

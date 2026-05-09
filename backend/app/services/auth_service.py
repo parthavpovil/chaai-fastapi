@@ -48,7 +48,8 @@ class AuthService:
         email: str,
         role: str,
         workspace_id: Optional[UUID] = None,
-        expires_delta: Optional[timedelta] = None
+        expires_delta: Optional[timedelta] = None,
+        refresh_token_id: Optional[str] = None,
     ) -> str:
         """
         Create JWT access token with user claims
@@ -77,6 +78,7 @@ class AuthService:
             "exp": expire,
             "iat": datetime.now(timezone.utc),  # Issued at
             "jti": str(uuid4()),               # Unique token ID (used for blocklist on logout)
+            "rt": refresh_token_id,            # Linked refresh token ID (revoked on logout)
         }
         
         # Encode JWT token

@@ -16,6 +16,14 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
+# Queue names — paid tenants get an isolated pool; free tenants share theirs.
+QUEUE_PAID = "messages_paid"
+QUEUE_FREE = "messages_free"
+_FREE_TIERS = frozenset({"free"})
+
+# Max job attempts — must match both WorkerSettings below
+_MAX_TRIES = 4
+
 # Per-tier max concurrent jobs per workspace
 _TIER_CONCURRENCY = {
     "free":    2,
@@ -33,6 +41,19 @@ if cur >= tonumber(ARGV[1]) then return 0 end
 redis.call('INCR', KEYS[1])
 redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2]))
 return 1
+"""
+
+# Lua script: atomic decrement-only-if-positive.
+# The non-atomic GET+DECR pattern lets two concurrent workers both read the
+# same positive value, both pass the guard, and both DECR — driving the counter
+# negative.  A negative counter lets the acquire script keep granting slots
+# indefinitely, breaking the concurrency cap.
+_RELEASE_LUA = """
+local val = tonumber(redis.call('GET', KEYS[1]) or '0')
+if val > 0 then
+    redis.call('DECR', KEYS[1])
+end
+return val
 """
 
 # Module-level arq pool — created once, reused across requests
@@ -58,12 +79,15 @@ async def enqueue_message_job(
     workspace_id: str,
     session_token: str,
     channel_id: str,
+    tier: str = "free",
 ) -> None:
     """Enqueue a webchat message for async AI processing.
 
     Uses _job_id=msg:<message_id> so arq silently drops duplicate enqueues
     (e.g. from the reconciliation sweeper when the job is still running).
+    Routes to QUEUE_PAID for paying tiers so free workspaces cannot starve them.
     """
+    queue = QUEUE_FREE if tier in _FREE_TIERS else QUEUE_PAID
     pool = await _get_pool()
     job = await pool.enqueue_job(
         "process_message_job",
@@ -73,6 +97,7 @@ async def enqueue_message_job(
         session_token=session_token,
         channel_id=channel_id,
         _job_id=f"msg:{message_id}",
+        _queue_name=queue,
     )
     if job is None:
         logger.info("[enqueue] msg:%s already queued/running — skipped (dedup)", message_id)
@@ -81,6 +106,40 @@ async def enqueue_message_job(
 
 
 # ── Semaphore helpers ─────────────────────────────────────────────────────────
+
+DLQ_KEY = "dlq:messages"
+_DLQ_MAX_LEN = 1000  # cap list to prevent unbounded growth
+
+
+async def _push_dlq(
+    redis_client: aioredis.Redis,
+    message_id: str,
+    conversation_id: str,
+    workspace_id: str,
+    error: Exception,
+) -> None:
+    """Push a terminal job failure record to the Redis DLQ for operator review."""
+    import json
+    from datetime import datetime, timezone
+
+    entry = json.dumps({
+        "message_id": message_id,
+        "conversation_id": conversation_id,
+        "workspace_id": workspace_id,
+        "error": repr(error),
+        "failed_at": datetime.now(timezone.utc).isoformat(),
+    })
+    try:
+        await redis_client.lpush(DLQ_KEY, entry)
+        # Keep at most _DLQ_MAX_LEN entries so the list doesn't grow without bound.
+        await redis_client.ltrim(DLQ_KEY, 0, _DLQ_MAX_LEN - 1)
+        logger.error(
+            "[dlq] Terminal failure after %d tries — msg:%s pushed to dlq:messages",
+            _MAX_TRIES, message_id,
+        )
+    except Exception as dlq_err:
+        logger.error("[dlq] Failed to push msg:%s to DLQ: %s", message_id, dlq_err)
+
 
 async def _acquire_semaphore(redis_client: aioredis.Redis, workspace_id: str, limit: int) -> bool:
     key = f"ws_concurrency:{workspace_id}"
@@ -91,11 +150,15 @@ async def _acquire_semaphore(redis_client: aioredis.Redis, workspace_id: str, li
 async def _release_semaphore(redis_client: aioredis.Redis, workspace_id: str) -> None:
     key = f"ws_concurrency:{workspace_id}"
     try:
-        val = await redis_client.get(key)
-        if val is not None and int(val) > 0:
-            await redis_client.decr(key)
+        await redis_client.eval(_RELEASE_LUA, 1, key)
     except Exception as e:
-        logger.warning("Failed to release semaphore for workspace %s: %s", workspace_id, e)
+        # Swallow intentionally — a release failure must not mask the original
+        # job exception that is propagating through the outer finally block.
+        # The TTL (_SEMAPHORE_TTL) reclaims the slot automatically.
+        logger.error(
+            "Failed to release semaphore for workspace %s — slot leaked for up to %ds: %s",
+            workspace_id, _SEMAPHORE_TTL, e,
+        )
 
 
 # ── Job function ──────────────────────────────────────────────────────────────
@@ -132,6 +195,7 @@ async def process_message_job(
     try:
         async with AsyncSessionLocal() as db:
             # ── 1. Idempotency ────────────────────────────────────────────────
+
             # Find the customer message to get its created_at timestamp
             msg_result = await db.execute(
                 select(Message).where(Message.id == message_id)
@@ -374,17 +438,42 @@ async def process_message_job(
             finally:
                 await _release_semaphore(redis_client, workspace_id)
 
+    except Exception as exc:
+        from arq.worker import Retry
+        if not isinstance(exc, Retry) and ctx.get("job_try", 1) >= _MAX_TRIES:
+            await _push_dlq(redis_client, message_id, conversation_id, workspace_id, exc)
+        raise
     finally:
         await redis_client.aclose()
 
 
 # ── arq WorkerSettings ────────────────────────────────────────────────────────
 
-class MessageWorkerSettings:
-    """Run with: arq app.tasks.message_tasks.MessageWorkerSettings"""
+class PaidMessageWorkerSettings:
+    """Dedicated worker for starter / growth / pro workspaces.
+    Run with: arq app.tasks.message_tasks.PaidMessageWorkerSettings
+    """
     functions = [process_message_job]
+    queue_name = QUEUE_PAID
     redis_settings = RedisSettings.from_dsn(settings.redis_queue_url)
-    max_jobs = 20
-    job_timeout = 120      # 2-minute hard cap per job
-    max_tries = 4          # 4 attempts total (1 original + 3 retries)
-    keep_result = 3600     # keep result 1h for deduplication
+    max_jobs = 10
+    job_timeout = 120
+    max_tries = _MAX_TRIES
+    keep_result = 3600
+
+
+class FreeMessageWorkerSettings:
+    """Dedicated worker for free-tier workspaces.
+    Run with: arq app.tasks.message_tasks.FreeMessageWorkerSettings
+    """
+    functions = [process_message_job]
+    queue_name = QUEUE_FREE
+    redis_settings = RedisSettings.from_dsn(settings.redis_queue_url)
+    max_jobs = 10
+    job_timeout = 120
+    max_tries = _MAX_TRIES
+    keep_result = 3600
+
+
+# Backward-compatibility alias — superseded by the split classes above.
+MessageWorkerSettings = FreeMessageWorkerSettings

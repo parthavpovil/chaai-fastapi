@@ -2,7 +2,6 @@
 Contact Management Router
 Full CRUD for contacts: search, tag, block, and GDPR delete
 """
-import asyncio
 from typing import List, Optional, Any, Dict
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status, Query
@@ -214,16 +213,13 @@ async def update_contact(
     await db.refresh(contact)
 
     # Fire outbound webhook (fire-and-forget)
-    try:
-        from app.services.outbound_webhook_service import trigger_event
-        asyncio.create_task(trigger_event(
-            db=db,
-            workspace_id=str(current_workspace.id),
-            event_type="contact.updated",
-            payload={"workspace_id": str(current_workspace.id), "contact_id": str(contact.id)},
-        ))
-    except Exception:
-        pass
+    from app.services.outbound_webhook_service import trigger_event
+    from app.utils.tasks import safe_create_task
+    safe_create_task(trigger_event(
+        workspace_id=str(current_workspace.id),
+        event_type="contact.updated",
+        payload={"workspace_id": str(current_workspace.id), "contact_id": str(contact.id)},
+    ), name="outbound_webhook.contact.updated")
 
     return _to_out(contact)
 

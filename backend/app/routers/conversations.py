@@ -691,41 +691,32 @@ async def update_conversation_status(
 
         # Fire outbound webhook for resolved conversations (fire-and-forget)
         if request.status == "resolved":
-            try:
-                import asyncio
-                from app.services.outbound_webhook_service import trigger_event
-                asyncio.create_task(trigger_event(
-                    db=db,
-                    workspace_id=str(current_workspace.id),
-                    event_type="conversation.resolved",
-                    payload={
-                        "workspace_id": str(current_workspace.id),
-                        "conversation_id": request.conversation_id,
-                        "resolved_by": str(current_user.id),
-                        "note": request.note,
-                    }
-                ))
-            except Exception:
-                pass
+            from app.services.outbound_webhook_service import trigger_event
+            from app.services.csat_service import generate_and_send_csat_prompt
+            from app.utils.tasks import safe_create_task
+            safe_create_task(trigger_event(
+                workspace_id=str(current_workspace.id),
+                event_type="conversation.resolved",
+                payload={
+                    "workspace_id": str(current_workspace.id),
+                    "conversation_id": request.conversation_id,
+                    "resolved_by": str(current_user.id),
+                    "note": request.note,
+                },
+            ), name="outbound_webhook.conversation.resolved")
 
             # Send CSAT prompt for webchat conversations (fire-and-forget)
-            try:
-                conv_result = await db.execute(
-                    select(Conversation)
-                    .where(Conversation.id == UUID(request.conversation_id))
-                    .where(Conversation.workspace_id == current_workspace.id)
-                )
-                resolved_conv = conv_result.scalar_one_or_none()
-                if resolved_conv and resolved_conv.channel_type == "webchat":
-                    import asyncio
-                    from app.services.csat_service import generate_and_send_csat_prompt
-                    asyncio.create_task(generate_and_send_csat_prompt(
-                        db=db,
-                        conversation_id=request.conversation_id,
-                        workspace_id=str(current_workspace.id),
-                    ))
-            except Exception:
-                pass
+            conv_result = await db.execute(
+                select(Conversation)
+                .where(Conversation.id == UUID(request.conversation_id))
+                .where(Conversation.workspace_id == current_workspace.id)
+            )
+            resolved_conv = conv_result.scalar_one_or_none()
+            if resolved_conv and resolved_conv.channel_type == "webchat":
+                safe_create_task(generate_and_send_csat_prompt(
+                    conversation_id=request.conversation_id,
+                    workspace_id=str(current_workspace.id),
+                ), name="csat_prompt")
 
         # Push status change to customer WS for relevant transitions
         if request.status in ("escalated", "agent", "resolved"):

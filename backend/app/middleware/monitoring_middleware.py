@@ -4,6 +4,7 @@ Monitoring Middleware
 Collects request metrics and performance data for monitoring
 """
 
+import asyncio
 import time
 import logging
 from typing import Callable
@@ -11,8 +12,6 @@ from fastapi import Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from collections import defaultdict, deque
 from datetime import datetime, timezone
-import asyncio
-import threading
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +31,7 @@ class MonitoringMiddleware(BaseHTTPMiddleware):
             "error_count": 0,
             "active_requests": 0
         }
-        self.lock = threading.Lock()
+        self.lock = asyncio.Lock()
     
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Process request and collect metrics"""
@@ -46,7 +45,7 @@ class MonitoringMiddleware(BaseHTTPMiddleware):
         endpoint = self._get_endpoint_pattern(request)
         
         # Increment active requests
-        with self.lock:
+        async with self.lock:
             self.metrics["active_requests"] += 1
         
         try:
@@ -82,7 +81,7 @@ class MonitoringMiddleware(BaseHTTPMiddleware):
         
         finally:
             # Decrement active requests
-            with self.lock:
+            async with self.lock:
                 self.metrics["active_requests"] -= 1
     
     def _get_endpoint_pattern(self, request: Request) -> str:
@@ -119,7 +118,7 @@ class MonitoringMiddleware(BaseHTTPMiddleware):
         endpoint: str
     ):
         """Record successful request metrics"""
-        with self.lock:
+        async with self.lock:
             # Basic counters
             self.metrics["total_requests"] += 1
             self.metrics["requests_by_method"][request.method] += 1
@@ -152,7 +151,7 @@ class MonitoringMiddleware(BaseHTTPMiddleware):
         endpoint: str
     ):
         """Record error metrics"""
-        with self.lock:
+        async with self.lock:
             # Basic counters
             self.metrics["total_requests"] += 1
             self.metrics["requests_by_method"][request.method] += 1
@@ -178,9 +177,9 @@ class MonitoringMiddleware(BaseHTTPMiddleware):
         # Log the error
         logger.error(f"Request error: {request.method} {endpoint} - {str(error)}")
     
-    def get_metrics(self) -> dict:
+    async def get_metrics(self) -> dict:
         """Get current metrics snapshot"""
-        with self.lock:
+        async with self.lock:
             response_times = list(self.metrics["response_times"])
             
             # Calculate response time statistics
@@ -213,14 +212,14 @@ class MonitoringMiddleware(BaseHTTPMiddleware):
                 "response_time_stats": response_time_stats
             }
     
-    def get_recent_requests(self, limit: int = 50) -> list:
+    async def get_recent_requests(self, limit: int = 50) -> list:
         """Get recent request history"""
-        with self.lock:
+        async with self.lock:
             return list(self.request_history)[-limit:]
     
-    def reset_metrics(self):
+    async def reset_metrics(self):
         """Reset all metrics (useful for testing)"""
-        with self.lock:
+        async with self.lock:
             self.metrics = {
                 "total_requests": 0,
                 "requests_by_method": defaultdict(int),

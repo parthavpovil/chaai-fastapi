@@ -8,14 +8,25 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
+from app.config import settings
 from app.models.channel import Channel
 from app.services.webhook_security import verify_webhook_signature, WebhookSecurityError
 from app.services.encryption import decrypt_credential
 
 
 class WebhookProcessingError(Exception):
-    """Base exception for webhook processing errors"""
-    pass
+    """Webhook processing error with an HTTP status hint for the router.
+
+    status_code semantics:
+      400 — bad request (auth failure, malformed payload); provider should NOT
+            keep retrying with the same payload.
+      200 — permanent no-op (channel not found / inactive); return 200 so the
+            provider stops retrying (retries can never succeed).
+      500 — transient error; provider should retry.
+    """
+    def __init__(self, message: str, status_code: int = 400):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class WebhookHandlers:
@@ -130,9 +141,13 @@ class WebhookHandlers:
             WebhookProcessingError: If processing fails
         """
         try:
-            # Verify secret token if provided
+            # Enforce secret token when TELEGRAM_SECRET_TOKEN is configured.
+            # Rejecting absent headers closes the bypass where forged requests
+            # omit the header entirely and skip all verification.
             secret_token = headers.get("X-Telegram-Bot-Api-Secret-Token")
-            if secret_token:
+            if settings.TELEGRAM_SECRET_TOKEN:
+                if not secret_token:
+                    raise WebhookProcessingError("Missing X-Telegram-Bot-Api-Secret-Token header")
                 if not verify_webhook_signature("telegram", payload, token=secret_token):
                     raise WebhookProcessingError("Invalid Telegram secret token")
             
@@ -150,7 +165,7 @@ class WebhookHandlers:
             # Get channel
             channel = await self.get_channel_by_webhook_path("telegram", bot_token)
             if not channel:
-                raise WebhookProcessingError("Channel not found or inactive")
+                raise WebhookProcessingError("Channel not found or inactive", status_code=200)
             
             return {
                 "status": "success",
@@ -165,7 +180,7 @@ class WebhookHandlers:
         except Exception as e:
             if isinstance(e, WebhookProcessingError):
                 raise
-            raise WebhookProcessingError(f"Telegram webhook processing failed: {str(e)}")
+            raise WebhookProcessingError(f"Telegram webhook processing failed: {str(e)}", status_code=500)
     
     def _extract_telegram_message(self, webhook_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
@@ -228,9 +243,11 @@ class WebhookHandlers:
             WebhookProcessingError: If processing fails
         """
         try:
-            # Verify HMAC signature
+            # Enforce HMAC signature when WHATSAPP_APP_SECRET is configured.
             signature = headers.get("X-Hub-Signature-256")
-            if signature:
+            if settings.WHATSAPP_APP_SECRET:
+                if not signature:
+                    raise WebhookProcessingError("Missing X-Hub-Signature-256 header")
                 if not verify_webhook_signature("whatsapp", payload, signature=signature):
                     raise WebhookProcessingError("Invalid WhatsApp signature")
 
@@ -249,7 +266,7 @@ class WebhookHandlers:
             if statuses:
                 channel = await self.get_channel_by_webhook_path("whatsapp", phone_number_id)
                 if not channel:
-                    raise WebhookProcessingError("Channel not found or inactive")
+                    raise WebhookProcessingError("Channel not found or inactive", status_code=200)
                 return {
                     "status": "status_update",
                     "channel_id": channel.id,
@@ -266,7 +283,7 @@ class WebhookHandlers:
             # Get channel
             channel = await self.get_channel_by_webhook_path("whatsapp", phone_number_id)
             if not channel:
-                raise WebhookProcessingError("Channel not found or inactive")
+                raise WebhookProcessingError("Channel not found or inactive", status_code=200)
 
             return {
                 "status": "success",
@@ -281,7 +298,7 @@ class WebhookHandlers:
         except Exception as e:
             if isinstance(e, WebhookProcessingError):
                 raise
-            raise WebhookProcessingError(f"WhatsApp webhook processing failed: {str(e)}")
+            raise WebhookProcessingError(f"WhatsApp webhook processing failed: {str(e)}", status_code=500)
     
     def _extract_whatsapp_message(
         self,
@@ -446,9 +463,11 @@ class WebhookHandlers:
             WebhookProcessingError: If processing fails
         """
         try:
-            # Verify HMAC signature
+            # Enforce HMAC signature when INSTAGRAM_APP_SECRET is configured.
             signature = headers.get("X-Hub-Signature-256")
-            if signature:
+            if settings.INSTAGRAM_APP_SECRET:
+                if not signature:
+                    raise WebhookProcessingError("Missing X-Hub-Signature-256 header")
                 if not verify_webhook_signature("instagram", payload, signature=signature):
                     raise WebhookProcessingError("Invalid Instagram signature")
             
@@ -470,7 +489,7 @@ class WebhookHandlers:
             # Get channel
             channel = await self.get_channel_by_webhook_path("instagram", page_id)
             if not channel:
-                raise WebhookProcessingError("Channel not found or inactive")
+                raise WebhookProcessingError("Channel not found or inactive", status_code=200)
             
             return {
                 "status": "success",
@@ -485,7 +504,7 @@ class WebhookHandlers:
         except Exception as e:
             if isinstance(e, WebhookProcessingError):
                 raise
-            raise WebhookProcessingError(f"Instagram webhook processing failed: {str(e)}")
+            raise WebhookProcessingError(f"Instagram webhook processing failed: {str(e)}", status_code=500)
     
     def _extract_instagram_message(
         self, 

@@ -4,7 +4,7 @@ Handles agent invitations, acceptance, and management endpoints
 """
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel, Field, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
@@ -78,7 +78,7 @@ class AgentStatsResponse(BaseModel):
 
 # ─── Agent Management Endpoints ───────────────────────────────────────────────
 
-@router.post("/invite", response_model=AgentInvitationResponse)
+@router.post("/invite", response_model=AgentInvitationResponse, status_code=201)
 async def invite_agent(
     request: AgentInviteRequest,
     current_user: User = Depends(get_current_user),
@@ -491,7 +491,7 @@ async def resend_agent_invitation(
         )
 
 
-@router.delete("/{agent_id}")
+@router.delete("/{agent_id}", status_code=204)
 async def delete_agent(
     agent_id: str,
     current_user: User = Depends(get_current_user),
@@ -540,7 +540,7 @@ async def delete_agent(
         await db.delete(agent)
         await db.commit()
         
-        return {"message": "Agent invitation deleted successfully"}
+        return Response(status_code=204)
         
     except HTTPException:
         raise

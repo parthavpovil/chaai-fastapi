@@ -40,7 +40,9 @@ class TestAdminTierManagement:
         )
         
         assert result is True
-        db_mock.delete.assert_called_once_with(workspace)
+        # Workspace is soft-deleted (deleted_at set) rather than hard-deleted.
+        assert workspace.deleted_at is not None
+        db_mock.delete.assert_not_called()
         db_mock.commit.assert_called_once()
     
     @pytest.mark.asyncio

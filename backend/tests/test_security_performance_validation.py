@@ -211,7 +211,6 @@ class TestSecurityPerformanceValidation:
         Test basic rate limiting logic
         Validates: Rate limiting effectiveness
         """
-        from app.services.rate_limiter import WebChatRateLimiter
         from app.models.rate_limit import RateLimit
         from datetime import datetime, timedelta
         

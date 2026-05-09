@@ -387,23 +387,19 @@ class EscalationRouter:
             }
 
             # Fire outbound webhook event (fire-and-forget)
-            try:
-                import asyncio
-                from app.services.outbound_webhook_service import trigger_event
-                asyncio.create_task(trigger_event(
-                    db=self.db,
-                    workspace_id=workspace_id,
-                    event_type="conversation.escalated",
-                    payload={
-                        "workspace_id": workspace_id,
-                        "conversation_id": conversation_id,
-                        "escalation_reason": escalation_reason,
-                        "priority": priority,
-                        "escalated_at": result["escalated_at"],
-                    }
-                ))
-            except Exception:
-                logger.warning("Failed to schedule outbound webhook for conversation.escalated", exc_info=True)
+            from app.services.outbound_webhook_service import trigger_event
+            from app.utils.tasks import safe_create_task
+            safe_create_task(trigger_event(
+                workspace_id=workspace_id,
+                event_type="conversation.escalated",
+                payload={
+                    "workspace_id": workspace_id,
+                    "conversation_id": conversation_id,
+                    "escalation_reason": escalation_reason,
+                    "priority": priority,
+                    "escalated_at": result["escalated_at"],
+                },
+            ), name="outbound_webhook.conversation.escalated")
 
             # Push escalation status to customer WS if this is a webchat conversation
             try:

@@ -32,6 +32,9 @@ class Settings(BaseSettings):
         default="postgresql+asyncpg://postgres:password@localhost:5432/chatsaas",
         description="PostgreSQL database connection URL"
     )
+    DB_POOL_SIZE: int = Field(default=10, description="SQLAlchemy async engine pool_size (production)")
+    DB_MAX_OVERFLOW: int = Field(default=5, description="SQLAlchemy async engine max_overflow (production)")
+    DB_POOL_TIMEOUT: int = Field(default=10, description="Seconds to wait for a pool connection before raising")
     
     # JWT Authentication
     JWT_SECRET_KEY: str = Field(
@@ -39,7 +42,8 @@ class Settings(BaseSettings):
         description="JWT secret key (minimum 32 characters)"
     )
     JWT_ALGORITHM: str = Field(default="HS256", description="JWT signing algorithm")
-    JWT_EXPIRE_MINUTES: int = Field(default=10080, description="JWT token expiration in minutes (7 days)")
+    JWT_EXPIRE_MINUTES: int = Field(default=15, description="Access token expiration in minutes (short-lived)")
+    JWT_REFRESH_EXPIRE_DAYS: int = Field(default=7, description="Refresh token expiration in days")
     
     # AI Provider Selection
     AI_PROVIDER: str = Field(
@@ -116,6 +120,10 @@ class Settings(BaseSettings):
     # Separate DB for arq job queue so queue traffic doesn't mix with pub/sub.
     # Defaults to REDIS_URL with /0 replaced by /1 if not explicitly set.
     REDIS_QUEUE_URL: str = Field(default="", description="Redis URL for arq job queue (DB 1). Defaults to REDIS_URL on DB 1.")
+
+    # Observability
+    SENTRY_DSN: str = Field(default="", description="Sentry DSN — leave empty to disable Sentry")
+    SENTRY_TRACES_SAMPLE_RATE: float = Field(default=0.1, description="Sentry performance traces sample rate (0.0–1.0)")
 
     # Administration
     SUPER_ADMIN_EMAIL: str = Field(

@@ -505,20 +505,14 @@ class RAGEngine:
 
         conv_result = await self.db.execute(
             select(Conversation)
-            .where(Conversation.id == conversation_id)
-            .where(Conversation.workspace_id == workspace_id)
+            .where(Conversation.id == conversation_id, Conversation.workspace_id == workspace_id)
+            .options(selectinload(Conversation.messages))
         )
         conv = conv_result.scalar_one_or_none()
         if not conv:
             return [], None
 
-        msg_result = await self.db.execute(
-            select(Message)
-            .where(Message.conversation_id == conversation_id)
-            .order_by(desc(Message.created_at))
-            .limit(max_messages)
-        )
-        messages = list(reversed(msg_result.scalars().all()))
+        messages = sorted(conv.messages, key=lambda m: m.created_at)[-max_messages:]
         summary = conv.meta.get("summary") if conv.meta else None
         return messages, summary
 

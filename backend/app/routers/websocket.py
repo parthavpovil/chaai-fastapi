@@ -6,7 +6,7 @@ import json
 import asyncio
 import logging
 from typing import Optional
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException, status
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
@@ -22,52 +22,56 @@ from app.services.websocket_events import WebSocketEventBroadcaster
 router = APIRouter()
 
 
+_AUTH_TIMEOUT = 10.0  # seconds the client has to send the auth message
+
+
 @router.websocket("/ws/{workspace_id}")
 async def websocket_endpoint(
     websocket: WebSocket,
     workspace_id: str,
-    token: str = Query(..., description="JWT authentication token"),
     db: AsyncSession = Depends(get_db)
 ):
     """
-    WebSocket endpoint for real-time communication
-    
-    Args:
-        websocket: WebSocket connection
-        workspace_id: Workspace ID from URL path
-        token: JWT token from query parameter
-        db: Database session
-    
-    Authentication:
-        - JWT token must be provided in query parameter
-        - Token must contain valid user_id and workspace_id
-        - workspace_id in URL must match token workspace_id
-    
+    WebSocket endpoint for real-time communication.
+
+    Authentication via first message — the client must send
+    {"type": "auth", "token": "<jwt>"} within 10 seconds of connecting.
+    The JWT is never placed in the URL so it is not logged by proxies or
+    stored in browser history.
+
     Message Format:
-        Incoming messages should be JSON with 'type' field:
+        - {"type": "auth", "token": "<jwt>"} - Authentication (first message)
         - {"type": "ping"} - Keep-alive ping
-        - {"type": "subscribe", "events": ["escalation", "new_message"]} - Event subscription
+        - {"type": "subscribe", "events": [...]} - Event subscription
         - {"type": "get_stats"} - Request workspace statistics
-    
-    Outgoing message types:
-        - connection_established - Connection confirmation
-        - ping/pong - Keep-alive messages
-        - escalation - New escalation events
-        - agent_claim - Agent claiming conversations
-        - new_message - New messages in conversations
-        - conversation_status_change - Status updates
-        - system_notification - System notifications
     """
     connection: Optional[WebSocketConnection] = None
-    
+
     try:
-        # Establish connection with authentication
-        connection = await websocket_manager.connect(websocket, token, db)
-        
-        if not connection:
-            # Connection failed (authentication error)
+        # Accept TCP upgrade first so close frames carry proper WS close codes.
+        await websocket.accept()
+
+        # Expect {"type": "auth", "token": "..."} as the very first message.
+        try:
+            raw = await asyncio.wait_for(websocket.receive_text(), timeout=_AUTH_TIMEOUT)
+            auth_msg = json.loads(raw)
+        except asyncio.TimeoutError:
+            await websocket.close(code=4001, reason="Authentication timeout")
             return
-        
+        except (json.JSONDecodeError, WebSocketDisconnect):
+            await websocket.close(code=4001, reason="Invalid auth message")
+            return
+
+        token = auth_msg.get("token") if auth_msg.get("type") == "auth" else None
+        if not token:
+            await websocket.close(code=4001, reason="Expected {type:auth, token:...}")
+            return
+
+        connection = await websocket_manager.connect(websocket, token, db, already_accepted=True)
+
+        if not connection:
+            return
+
         # Verify workspace_id matches token
         if connection.workspace_id != workspace_id:
             await websocket.close(code=4003, reason="Workspace ID mismatch")

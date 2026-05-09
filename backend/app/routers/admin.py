@@ -407,6 +407,58 @@ async def get_workspace_token_detail(
     return detail
 
 
+@router.get("/dlq")
+async def list_dlq_entries(
+    limit: int = Query(50, ge=1, le=200),
+    current_user: User = Depends(require_super_admin),
+):
+    """List the most recent entries in the message Dead Letter Queue (dlq:messages).
+
+    Each entry is a JSON object with message_id, conversation_id, workspace_id,
+    error, and failed_at.  Returns at most `limit` entries (newest first).
+    """
+    import json
+    import redis.asyncio as aioredis
+    from app.config import settings
+
+    r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    try:
+        raw_entries = await r.lrange("dlq:messages", 0, limit - 1)
+        length = await r.llen("dlq:messages")
+    finally:
+        await r.aclose()
+
+    entries = []
+    for raw in raw_entries:
+        try:
+            entries.append(json.loads(raw))
+        except Exception:
+            entries.append({"raw": raw})
+
+    return {"total": length, "returned": len(entries), "entries": entries}
+
+
+@router.delete("/dlq")
+async def clear_dlq(
+    current_user: User = Depends(require_super_admin),
+):
+    """Clear all entries from the message Dead Letter Queue.
+
+    Use after investigating and resolving the root cause of failures.
+    """
+    import redis.asyncio as aioredis
+    from app.config import settings
+
+    r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    try:
+        deleted = await r.llen("dlq:messages")
+        await r.delete("dlq:messages")
+    finally:
+        await r.aclose()
+
+    return {"cleared": deleted}
+
+
 @router.get("/analytics", response_model=AnalyticsDashboardResponse)
 async def get_analytics_dashboard(
     current_user: User = Depends(require_super_admin),

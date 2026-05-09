@@ -50,11 +50,19 @@ class Message(Base):
     conversation = relationship("Conversation", back_populates="messages")
     ai_feedback = relationship("AIFeedback", back_populates="message", uselist=False)
 
-    # Indexes for performance
     __table_args__ = (
         Index("ix_messages_conversation_created", "conversation_id", "created_at"),
-        # Unique constraint for external message deduplication (only when not null)
-        # This will be created as a partial unique index in migration
+        # Partial unique index — prevents duplicate inbound messages from carrier retries.
+        # Scoped to conversation_id because Telegram IDs are per-chat integers and
+        # would collide across workspaces under a global unique index.
+        # Created via migration 028; declared here for documentation.
+        Index(
+            "ix_messages_external_id_unique",
+            "conversation_id",
+            "external_message_id",
+            unique=True,
+            postgresql_where="external_message_id IS NOT NULL",
+        ),
     )
 
     def __repr__(self) -> str:

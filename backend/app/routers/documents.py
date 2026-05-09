@@ -3,7 +3,7 @@ Document Management Router
 Handles document upload, processing, and management with authentication and tier limits
 """
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, Field
 
@@ -55,7 +55,7 @@ class DocumentStatsResponse(BaseModel):
 
 # ─── Document Management Endpoints ────────────────────────────────────────────
 
-@router.post("/upload", response_model=DocumentResponse)
+@router.post("/upload", response_model=DocumentResponse, status_code=201)
 async def upload_document(
     file: UploadFile = File(..., description="Document file (PDF or TXT, max 10MB)"),
     name: Optional[str] = Form(None, description="Custom document name"),
@@ -223,7 +223,7 @@ async def get_document(
         )
 
 
-@router.delete("/{document_id}")
+@router.delete("/{document_id}", status_code=204)
 async def delete_document(
     document_id: str,
     current_user: User = Depends(get_current_user),
@@ -247,7 +247,7 @@ async def delete_document(
         processor = DocumentProcessor(db)
         await processor.delete_document(document.id)
 
-        return {"message": "Document deleted successfully"}
+        return Response(status_code=204)
 
     except HTTPException:
         raise

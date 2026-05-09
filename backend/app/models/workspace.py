@@ -4,7 +4,7 @@ Multi-tenant workspace management
 """
 from uuid import UUID, uuid4
 from datetime import datetime
-from sqlalchemy import Column, String, Boolean, DateTime, Text, func, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, Text, func, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID, JSONB
 from sqlalchemy.orm import relationship
 
@@ -41,6 +41,17 @@ class Workspace(Base):
     razorpay_customer_id = Column(String, nullable=True)
     razorpay_subscription_id = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        # Partial index — only indexes soft-deleted rows, used by hard-delete reaper.
+        Index("ix_workspaces_deleted_at", "deleted_at",
+              postgresql_where="deleted_at IS NOT NULL"),
+    )
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted_at is not None
 
     # Relationships
     owner = relationship("User", back_populates="owned_workspaces")

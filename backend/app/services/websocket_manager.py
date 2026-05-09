@@ -191,7 +191,8 @@ class WebSocketManager:
         self,
         websocket: WebSocket,
         token: str,
-        db: AsyncSession
+        db: AsyncSession,
+        already_accepted: bool = False,
     ) -> Optional[WebSocketConnection]:
         """
         Establish WebSocket connection with authentication
@@ -211,8 +212,9 @@ class WebSocketManager:
                 await websocket.close(code=4001, reason="Authentication failed")
                 return None
             
-            # Accept WebSocket connection
-            await websocket.accept()
+            # Accept WebSocket connection (skip if router already called accept())
+            if not already_accepted:
+                await websocket.accept()
             
             # Create connection object
             connection_id = self.generate_connection_id(
@@ -650,6 +652,7 @@ class CustomerWebSocketManager:
         widget_id: str,
         session_token: str,
         db: AsyncSession,
+        already_accepted: bool = False,
     ) -> Optional[CustomerWebSocketConnection]:
         """
         Authenticate, accept, and register a customer WS connection.
@@ -662,7 +665,8 @@ class CustomerWebSocketManager:
                 await websocket.close(code=4001, reason="Authentication failed")
                 return None
 
-            await websocket.accept()
+            if not already_accepted:
+                await websocket.accept()
 
             from uuid import uuid4
             connection_id = str(uuid4())

@@ -349,7 +349,6 @@ async def send_webchat_message(
         # 3. Check rate limits
         try:
             await check_webchat_rate_limit(
-                db=db,
                 session_token=session_token,
                 workspace_id=str(channel.workspace_id)
             )
@@ -416,6 +415,11 @@ async def send_webchat_message(
 
             # Hand off the AI pipeline to the background worker.
             # The reply will arrive via WebSocket (notify_customer_new_message).
+            workspace_tier_result = await db.execute(
+                select(Workspace.tier).where(Workspace.id == channel.workspace_id)
+            )
+            workspace_tier = workspace_tier_result.scalar_one_or_none() or "free"
+
             from app.tasks.message_tasks import enqueue_message_job
             await enqueue_message_job(
                 message_id=user_message_id,
@@ -423,6 +427,7 @@ async def send_webchat_message(
                 workspace_id=str(channel.workspace_id),
                 session_token=session_token,
                 channel_id=str(channel.id),
+                tier=workspace_tier,
             )
             response_content = None
             
@@ -509,7 +514,6 @@ async def upload_webchat_file(
     # 3. Rate limit (shared bucket with /send)
     try:
         await check_webchat_rate_limit(
-            db=db,
             session_token=session_token,
             workspace_id=str(channel.workspace_id)
         )
@@ -614,22 +618,18 @@ async def submit_csat_rating(
     await db.commit()
 
     # Fire outbound webhook (fire-and-forget)
-    try:
-        import asyncio
-        from app.services.outbound_webhook_service import trigger_event
-        asyncio.create_task(trigger_event(
-            db=db,
-            workspace_id=workspace_id,
-            event_type="csat.submitted",
-            payload={
-                "workspace_id": workspace_id,
-                "conversation_id": conversation_id,
-                "rating": request.rating,
-                "comment": request.comment,
-            }
-        ))
-    except Exception:
-        pass
+    from app.services.outbound_webhook_service import trigger_event
+    from app.utils.tasks import safe_create_task
+    safe_create_task(trigger_event(
+        workspace_id=workspace_id,
+        event_type="csat.submitted",
+        payload={
+            "workspace_id": workspace_id,
+            "conversation_id": conversation_id,
+            "rating": request.rating,
+            "comment": request.comment,
+        },
+    ), name="outbound_webhook.csat.submitted")
 
     return CSATSubmitResponse(success=True, message="Thank you for your feedback!")
 

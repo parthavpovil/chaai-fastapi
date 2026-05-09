@@ -99,15 +99,18 @@ async def get_current_workspace(
     Dependency to get current user's workspace
     Used for workspace owner endpoints
     """
-    # Load workspace owned by current user
+    # Load workspace owned by current user (exclude soft-deleted)
     result = await db.execute(
-        select(Workspace).where(Workspace.owner_id == current_user.id)
+        select(Workspace).where(
+            Workspace.owner_id == current_user.id,
+            Workspace.deleted_at.is_(None),
+        )
     )
     workspace = result.scalar_one_or_none()
-    
+
     if not workspace:
         raise PermissionError("No workspace found for user")
-    
+
     return workspace
 
 
@@ -158,12 +161,17 @@ async def get_workspace_from_token(
     if not workspace_id:
         raise AuthenticationError("No workspace in token")
 
-    # Load workspace from database
-    result = await db.execute(select(Workspace).where(Workspace.id == workspace_id))
+    # Load workspace from database (exclude soft-deleted)
+    result = await db.execute(
+        select(Workspace).where(
+            Workspace.id == workspace_id,
+            Workspace.deleted_at.is_(None),
+        )
+    )
     workspace = result.scalar_one_or_none()
 
     if not workspace:
-        raise AuthenticationError("Workspace not found")
+        raise AuthenticationError("Workspace not found or has been deleted")
 
     return workspace
 

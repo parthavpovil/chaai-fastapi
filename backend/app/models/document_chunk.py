@@ -4,7 +4,7 @@ Vector embeddings for RAG (Retrieval Augmented Generation)
 """
 from uuid import UUID, uuid4
 from datetime import datetime
-from sqlalchemy import Column, Integer, Text, DateTime, func, ForeignKey, Index
+from sqlalchemy import Column, Integer, Text, DateTime, func, ForeignKey, Index, Computed
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID, JSONB, TSVECTOR
 from sqlalchemy.orm import relationship
 from pgvector.sqlalchemy import Vector
@@ -26,7 +26,7 @@ class DocumentChunk(Base):
     start_char = Column(Integer, nullable=True)
     end_char = Column(Integer, nullable=True)
     chunk_metadata = Column("metadata", JSONB, nullable=True)
-    content_tsv = Column(TSVECTOR, nullable=True)  # populated via bulk UPDATE in embedding_service
+    content_tsv = Column(TSVECTOR, Computed("to_tsvector('english', content)", persisted=True))
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships

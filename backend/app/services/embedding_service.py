@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
-from sqlalchemy import select, delete, text
+from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 
 from app.models.document import Document
@@ -148,16 +148,8 @@ class EmbeddingService:
         if not created_chunks:
             raise EmbeddingError("Failed to process any chunks")
 
-        # Flush to assign IDs, then bulk-populate content_tsv in the same transaction
-        await self.db.flush()
-        await self.db.execute(
-            text(
-                "UPDATE document_chunks "
-                "SET content_tsv = to_tsvector('english', content) "
-                "WHERE document_id = :doc_id AND content_tsv IS NULL"
-            ),
-            {"doc_id": str(document_id)},
-        )
+        # content_tsv is GENERATED ALWAYS AS (to_tsvector('english', content)) STORED —
+        # Postgres fills it automatically on INSERT; no manual UPDATE needed.
         await self.db.commit()
 
         # Refresh all chunks

@@ -142,6 +142,8 @@ async def handle_subscription_activated(event_data: dict, db: AsyncSession) -> N
     if tier:
         workspace.tier = tier
         await db.commit()
+        from app.services.workspace_cache import invalidate_workspace_cache
+        await invalidate_workspace_cache(str(workspace.id))
         logger.info(f"Workspace {workspace.id} activated on tier {tier}")
     else:
         logger.warning(f"Unknown plan_id {plan_id} in subscription.activated")
@@ -160,4 +162,6 @@ async def handle_subscription_cancelled(event_data: dict, db: AsyncSession) -> N
         workspace.tier = "free"
         workspace.razorpay_subscription_id = None
         await db.commit()
+        from app.services.workspace_cache import invalidate_workspace_cache
+        await invalidate_workspace_cache(str(workspace.id))
         logger.info(f"Workspace {workspace.id} downgraded to free")

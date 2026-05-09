@@ -5,7 +5,7 @@ User registration, login, and authentication endpoints
 from datetime import datetime, timezone
 from typing import Optional
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -24,8 +24,10 @@ from app.schemas.auth import (
     UserResponse, WorkspaceResponse
 )
 from app.services.auth_service import auth_service
+from app.services.refresh_token_service import create_refresh_token, use_refresh_token, revoke_refresh_token
 from app.middleware.auth_middleware import get_current_user, get_current_workspace, security
 from app.utils.slug import generate_unique_slug
+from app.services.auth_rate_limit import check_auth_rate_limit
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
 
@@ -33,14 +35,16 @@ router = APIRouter(prefix="/api/auth", tags=["authentication"])
 @router.post("/register", response_model=AuthResponse)
 async def register_user(
     request: UserRegistrationRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
     Register new user and create workspace
-    
+
     Creates a new user account, generates a unique workspace slug,
     creates the workspace, and returns JWT token.
     """
+    await check_auth_rate_limit(http_request, request.email, "register")
     try:
         # Check if email is already registered
         result = await db.execute(select(User).where(User.email == request.email))
@@ -88,16 +92,19 @@ async def register_user(
         
         await db.commit()
         
-        # Generate JWT token
-        access_token = auth_service.create_access_token(
-            user_id=user.id,
-            email=user.email,
-            role="owner",
-            workspace_id=workspace.id
+        # Issue access + refresh tokens
+        rt_id = await create_refresh_token(
+            user_id=str(user.id), email=user.email, role="owner",
+            workspace_id=str(workspace.id),
         )
-        
+        access_token = auth_service.create_access_token(
+            user_id=user.id, email=user.email, role="owner",
+            workspace_id=workspace.id, refresh_token_id=rt_id,
+        )
+
         return AuthResponse(
             access_token=access_token,
+            refresh_token=rt_id,
             user=UserResponse.model_validate(user),
             workspace=WorkspaceResponse.model_validate(workspace)
         )
@@ -119,13 +126,15 @@ async def register_user(
 @router.post("/login", response_model=AuthResponse)
 async def login_user(
     request: UserLoginRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
     User login with email and password
-    
+
     Validates credentials and returns JWT token for workspace owners.
     """
+    await check_auth_rate_limit(http_request, request.email, "login")
     # Find user by email
     result = await db.execute(select(User).where(User.email == request.email))
     user = result.scalar_one_or_none()
@@ -172,16 +181,20 @@ async def login_user(
     result = await db.execute(select(Workspace).where(Workspace.owner_id == user.id))
     workspace = result.scalar_one_or_none()
     
-    # Generate JWT token
-    access_token = auth_service.create_access_token(
-        user_id=user.id,
-        email=user.email,
-        role="owner",
-        workspace_id=workspace.id if workspace else None
+    # Issue access + refresh tokens
+    rt_id = await create_refresh_token(
+        user_id=str(user.id), email=user.email, role="owner",
+        workspace_id=str(workspace.id) if workspace else None,
     )
-    
+    access_token = auth_service.create_access_token(
+        user_id=user.id, email=user.email, role="owner",
+        workspace_id=workspace.id if workspace else None,
+        refresh_token_id=rt_id,
+    )
+
     return AuthResponse(
         access_token=access_token,
+        refresh_token=rt_id,
         user=UserResponse.model_validate(user),
         workspace=WorkspaceResponse.model_validate(workspace) if workspace else None
     )
@@ -190,13 +203,15 @@ async def login_user(
 @router.post("/agent-login", response_model=AuthResponse)
 async def login_agent(
     request: AgentLoginRequest,
+    http_request: Request,
     db: AsyncSession = Depends(get_db)
 ):
     """
     Agent login with email and password
-    
+
     Validates credentials and returns JWT token for agents.
     """
+    await check_auth_rate_limit(http_request, request.email, "agent-login")
     # Find user by email
     result = await db.execute(select(User).where(User.email == request.email))
     user = result.scalar_one_or_none()
@@ -248,16 +263,19 @@ async def login_agent(
     user.last_login = datetime.now(timezone.utc)
     await db.commit()
     
-    # Generate JWT token with agent role and workspace
-    access_token = auth_service.create_access_token(
-        user_id=user.id,
-        email=user.email,
-        role="agent",
-        workspace_id=agent.workspace_id
+    # Issue access + refresh tokens
+    rt_id = await create_refresh_token(
+        user_id=str(user.id), email=user.email, role="agent",
+        workspace_id=str(agent.workspace_id) if agent.workspace_id else None,
     )
-    
+    access_token = auth_service.create_access_token(
+        user_id=user.id, email=user.email, role="agent",
+        workspace_id=agent.workspace_id, refresh_token_id=rt_id,
+    )
+
     return AuthResponse(
         access_token=access_token,
+        refresh_token=rt_id,
         user=UserResponse.model_validate(user),
         workspace=None  # Agents don't get workspace details in response
     )
@@ -366,11 +384,12 @@ async def get_current_user_info(
 
 
 class TokenRefreshRequest(BaseModel):
-    token: str
+    refresh_token: str
 
 
 class TokenRefreshResponse(BaseModel):
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
 
 
@@ -379,48 +398,52 @@ async def logout(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     current_user: User = Depends(get_current_user),
 ):
-    """
-    Logout the current user by revoking their JWT token.
-
-    Adds the token's JTI to a Redis blocklist until the token's natural
-    expiry time, so it is rejected on all subsequent requests.
-    """
+    """Logout: revoke the access token JTI and the linked refresh token."""
     token = credentials.credentials
     payload = auth_service.decode_access_token(token)
 
     if payload:
         jti = payload.get("jti")
         exp = payload.get("exp")
+        rt_id = payload.get("rt")
+
+        from app.services.token_blocklist import block_token
         if jti and exp:
-            from app.services.token_blocklist import block_token
             await block_token(jti, exp)
+        if rt_id:
+            await revoke_refresh_token(rt_id)
 
     return MessageResponse(message="Logged out successfully")
 
 
 @router.post("/refresh", response_model=TokenRefreshResponse)
 async def refresh_token(request: TokenRefreshRequest):
-    """
-    Silently refresh a JWT token before it expires.
+    """Exchange a valid refresh token for a new access token + rotated refresh token.
 
-    Accepts a valid (non-expired) token and returns a new token with a fresh
-    expiry. Frontend should call this proactively (e.g. 5 minutes before exp)
-    to avoid mid-session logouts.
+    The old refresh token is deleted atomically on use (rotation). A replayed
+    or stolen token returns 401.
     """
-    payload = auth_service.decode_access_token(request.token)
-    if not payload:
+    claims = await use_refresh_token(request.refresh_token)
+    if not claims:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid or expired token"
+            detail="Invalid or expired refresh token",
         )
 
-    workspace_id_str = payload.get("workspace_id")
+    workspace_id_str = claims.get("workspace_id")
     workspace_id = UUID(workspace_id_str) if workspace_id_str else None
 
-    new_token = auth_service.create_access_token(
-        user_id=UUID(payload["sub"]),
-        email=payload["email"],
-        role=payload["role"],
-        workspace_id=workspace_id,
+    new_rt_id = await create_refresh_token(
+        user_id=claims["user_id"],
+        email=claims["email"],
+        role=claims["role"],
+        workspace_id=workspace_id_str,
     )
-    return TokenRefreshResponse(access_token=new_token)
+    new_access_token = auth_service.create_access_token(
+        user_id=UUID(claims["user_id"]),
+        email=claims["email"],
+        role=claims["role"],
+        workspace_id=workspace_id,
+        refresh_token_id=new_rt_id,
+    )
+    return TokenRefreshResponse(access_token=new_access_token, refresh_token=new_rt_id)

@@ -5,13 +5,16 @@ Revises: 022_add_routing_settings
 Create Date: 2026-04-02
 
 Changes:
-- Truncate document_chunks and documents (existing data not needed)
+- Remove documents that have no embedded chunks (incompatible with new indexes)
 - Add content_tsv tsvector column for BM25 / full-text search
 - Create GIN index on content_tsv
 - Create HNSW index on embedding (vector_cosine_ops)
 
-All operations complete in milliseconds because the table is empty after truncation.
-New documents must be re-uploaded after deployment.
+Note: the original upgrade() used TRUNCATE TABLE which would destroy all data
+if this migration were ever re-applied (recovery, downgrade+upgrade, branch
+rebase).  Replaced with a conditional DELETE that only removes documents
+without embeddings — safe to re-run on a server that already has live data.
+content_tsv is superseded by migration 030 (GENERATED ALWAYS AS column).
 """
 
 from alembic import op
@@ -23,10 +26,23 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Clear existing data so index builds are instant (empty table = no work).
-    # CASCADE covers document_chunks via the FK on document_id.
-    # On a fresh server these tables are already empty — TRUNCATE is a no-op.
-    op.execute("TRUNCATE TABLE documents CASCADE")
+    # Guard: only clear data if the table still has rows from before the HNSW
+    # column was added (i.e. chunks without embeddings that are incompatible
+    # with the new index).  On any server where this migration has already run,
+    # the tables are empty and the DELETE is instant.  On a recovery or branch
+    # scenario the delete is selective rather than a blind TRUNCATE, so a
+    # mistaken re-run cannot destroy live data silently.
+    #
+    # TRUNCATE was used originally because it is faster on a truly empty table;
+    # DELETE ... WHERE TRUE is equivalent but is not a DDL statement and will
+    # not auto-commit, keeping it inside Alembic's transaction.
+    op.execute(
+        "DELETE FROM documents "
+        "WHERE id NOT IN ("
+        "  SELECT DISTINCT document_id FROM document_chunks "
+        "  WHERE embedding IS NOT NULL"
+        ")"
+    )
 
     # Add content_tsv column
     op.execute(

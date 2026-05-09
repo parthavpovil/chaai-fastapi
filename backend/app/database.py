@@ -10,14 +10,25 @@ from sqlalchemy.pool import NullPool
 
 from app.config import settings
 
-# Create async engine with connection pooling
+# NullPool (DEBUG): one connection per request, no pool — safe for hot reload.
+# QueuePool (production): explicit pool_size + max_overflow avoids exhausting
+# Postgres max_connections when multiple Gunicorn workers share the same DB.
+_pool_kwargs: dict = (
+    {"poolclass": NullPool}
+    if settings.DEBUG
+    else {
+        "pool_size": settings.DB_POOL_SIZE,
+        "max_overflow": settings.DB_MAX_OVERFLOW,
+        "pool_timeout": settings.DB_POOL_TIMEOUT,
+    }
+)
+
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,  # Log SQL queries in debug mode
-    pool_pre_ping=True,   # Verify connections before use
-    pool_recycle=3600,    # Recycle connections after 1 hour
-    # Use NullPool for development to avoid connection issues
-    poolclass=NullPool if settings.DEBUG else None,
+    echo=settings.DEBUG,
+    pool_pre_ping=True,
+    pool_recycle=3600,
+    **_pool_kwargs,
 )
 
 # Create async session factory

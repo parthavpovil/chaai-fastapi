@@ -4,7 +4,7 @@ Customer conversation threading and status management
 """
 from uuid import UUID, uuid4
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, func, ForeignKey
+from sqlalchemy import Column, Index, String, DateTime, func, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID, JSONB
 from sqlalchemy.orm import relationship
 
@@ -14,6 +14,13 @@ from app.database import Base
 class Conversation(Base):
     """Conversation model for message threading and status tracking"""
     __tablename__ = "conversations"
+    __table_args__ = (
+        # Covers the primary list query: filter by workspace, sort by recency.
+        Index("ix_conversations_workspace_updated", "workspace_id", "updated_at"),
+        # Covers equality-filter queries (e.g. WHERE status = 'escalated').
+        # Created in migration 0001; declared here for documentation.
+        Index("ix_conversations_workspace_status", "workspace_id", "status"),
+    )
 
     id = Column(PostgresUUID(as_uuid=True), primary_key=True, default=uuid4)
     workspace_id = Column(PostgresUUID(as_uuid=True), ForeignKey("workspaces.id"), nullable=False)

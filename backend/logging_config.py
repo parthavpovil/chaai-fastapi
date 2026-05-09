@@ -24,7 +24,16 @@ class JSONFormatter(logging.Formatter):
             "function": record.funcName,
             "line": record.lineno
         }
-        
+
+        # Attach request correlation ID when available
+        try:
+            from app.utils.request_context import get_request_id
+            rid = get_request_id()
+            if rid:
+                log_entry["request_id"] = rid
+        except Exception:
+            pass
+
         # Add exception info if present
         if record.exc_info:
             log_entry["exception"] = self.formatException(record.exc_info)

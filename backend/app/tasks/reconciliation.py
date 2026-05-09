@@ -27,10 +27,12 @@ _ORPHAN_QUERY = text("""
         m.conversation_id,
         c.workspace_id,
         ct.external_id  AS session_token,
-        ct.channel_id
+        ct.channel_id,
+        w.tier          AS workspace_tier
     FROM messages m
     JOIN conversations c  ON c.id  = m.conversation_id
     JOIN contacts     ct ON ct.id = c.contact_id
+    JOIN workspaces   w  ON w.id  = c.workspace_id
     WHERE m.role = 'customer'
       AND m.created_at < :cutoff
       AND c.channel_type = 'webchat'
@@ -99,6 +101,7 @@ async def _reconcile() -> None:
                     workspace_id=str(row.workspace_id),
                     session_token=row.session_token or "",
                     channel_id=str(row.channel_id),
+                    tier=row.workspace_tier or "free",
                 )
             except Exception as e:
                 logger.warning(

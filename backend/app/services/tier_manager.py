@@ -63,104 +63,120 @@ class TierManager:
         }
     
     async def _get_current_usage(self, workspace_id: str) -> Dict[str, int]:
-        """Get current usage counts for a workspace"""
-        
-        # Count channels
-        channels_result = await self.db.execute(
+        """Get current usage counts in two round-trips (3 COUNTs combined, 1 lookup)."""
+        channels_sub = (
             select(func.count(Channel.id))
             .where(Channel.workspace_id == workspace_id)
+            .scalar_subquery()
         )
-        channels_count = channels_result.scalar() or 0
-        
-        # Count agents
-        agents_result = await self.db.execute(
+        agents_sub = (
             select(func.count(Agent.id))
-            .where(Agent.workspace_id == workspace_id)
-            .where(Agent.is_active == True)
+            .where(Agent.workspace_id == workspace_id, Agent.is_active == True)
+            .scalar_subquery()
         )
-        agents_count = agents_result.scalar() or 0
-        
-        # Count documents
-        documents_result = await self.db.execute(
+        docs_sub = (
             select(func.count(Document.id))
             .where(Document.workspace_id == workspace_id)
+            .scalar_subquery()
         )
-        documents_count = documents_result.scalar() or 0
-        
-        # Get monthly message usage
+        row = (await self.db.execute(select(channels_sub, agents_sub, docs_sub))).one()
+
         current_month = datetime.now(timezone.utc).strftime("%Y-%m")
-        usage_result = await self.db.execute(
+        monthly_messages = (await self.db.execute(
             select(UsageCounter.messages_sent)
-            .where(UsageCounter.workspace_id == workspace_id)
-            .where(UsageCounter.month == current_month)
-        )
-        monthly_messages = usage_result.scalar() or 0
-        
+            .where(
+                UsageCounter.workspace_id == workspace_id,
+                UsageCounter.month == current_month,
+            )
+        )).scalar() or 0
+
         return {
-            "channels": channels_count,
-            "agents": agents_count,
-            "documents": documents_count,
-            "monthly_messages": monthly_messages
+            "channels": row[0] or 0,
+            "agents": row[1] or 0,
+            "documents": row[2] or 0,
+            "monthly_messages": monthly_messages,
         }
+
+    async def _check_create_limit(
+        self,
+        workspace_id: str,
+        count_query,
+        limit_key: str,
+        resource_label: str,
+    ) -> None:
+        """
+        Atomically check a resource-creation limit.
+
+        SELECT workspace FOR UPDATE serialises concurrent creates for the same
+        workspace: the lock is held until the caller's outer transaction commits
+        (i.e. until the INSERT succeeds), so a second concurrent request will
+        block here until the first one commits, at which point the re-count
+        reflects the newly inserted row.
+        """
+        ws_row = (await self.db.execute(
+            select(Workspace).where(Workspace.id == workspace_id).with_for_update()
+        )).scalar_one_or_none()
+        if not ws_row:
+            raise ValueError(f"Workspace {workspace_id} not found")
+
+        tier = ws_row.tier
+        limits = TIER_LIMITS.get(tier, TIER_LIMITS["free"])
+        limit = limits[limit_key]
+
+        current = (await self.db.execute(count_query)).scalar() or 0
+        if current >= limit:
+            raise TierLimitError(
+                f"{resource_label} limit reached for {tier} tier ({limit} maximum)"
+            )
     
     async def check_channel_limit(self, workspace_id: str) -> bool:
         """
-        Check if workspace can create another channel
-        
-        Returns:
-            True if within limit, False if at limit
-        
+        Check if workspace can create another channel.
+        Uses SELECT FOR UPDATE to prevent TOCTOU races on concurrent creates.
+
         Raises:
             TierLimitError: If limit would be exceeded
         """
-        tier_info = await self.get_workspace_tier_info(workspace_id)
-        
-        if tier_info["usage"]["channels"] >= tier_info["limits"]["channels"]:
-            raise TierLimitError(
-                f"Channel limit reached for {tier_info['tier']} tier "
-                f"({tier_info['limits']['channels']} channels maximum)"
-            )
-        
+        await self._check_create_limit(
+            workspace_id,
+            select(func.count(Channel.id)).where(Channel.workspace_id == workspace_id),
+            "channels",
+            "Channel",
+        )
         return True
-    
+
     async def check_agent_limit(self, workspace_id: str) -> bool:
         """
-        Check if workspace can add another agent
-        
-        Returns:
-            True if within limit, False if at limit
-        
+        Check if workspace can activate another agent.
+        Uses SELECT FOR UPDATE to prevent TOCTOU races on concurrent activations.
+
         Raises:
             TierLimitError: If limit would be exceeded
         """
-        tier_info = await self.get_workspace_tier_info(workspace_id)
-        
-        if tier_info["usage"]["agents"] >= tier_info["limits"]["agents"]:
-            raise TierLimitError(
-                f"Agent limit reached for {tier_info['tier']} tier "
-                f"({tier_info['limits']['agents']} agents maximum)"
-            )
-        
+        await self._check_create_limit(
+            workspace_id,
+            select(func.count(Agent.id)).where(
+                Agent.workspace_id == workspace_id, Agent.is_active == True
+            ),
+            "agents",
+            "Agent",
+        )
         return True
-    
+
     async def check_document_limit(self, workspace_id: str) -> bool:
         """
-        Check if workspace can upload another document
-        
-        Returns:
-            True if within limit, False if at limit
-        
+        Check if workspace can upload another document.
+        Uses SELECT FOR UPDATE to prevent TOCTOU races on concurrent uploads.
+
         Raises:
             TierLimitError: If limit would be exceeded
         """
-        tier_info = await self.get_workspace_tier_info(workspace_id)
-        
-        if tier_info["usage"]["documents"] >= tier_info["limits"]["documents_max"]:
-            raise TierLimitError(
-                f"Document limit reached for {tier_info['tier']} tier "
-                f"({tier_info['limits']['documents_max']} documents maximum)"
-            )
-        
+        await self._check_create_limit(
+            workspace_id,
+            select(func.count(Document.id)).where(Document.workspace_id == workspace_id),
+            "documents_max",
+            "Document",
+        )
         return True
     
     async def check_monthly_message_limit(self, workspace_id: str, additional_messages: int = 1) -> bool:

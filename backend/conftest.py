@@ -5,26 +5,10 @@ import pytest
 import asyncio
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock
-from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from app.database import Base
 from app.config import settings
-
-# ---------------------------------------------------------------------------
-# SQLite compatibility patches
-# SQLAlchemy raises CompileError for PostgreSQL-specific types (JSONB, VECTOR)
-# when the target dialect is SQLite.  Monkey-patch the SQLite type compiler so
-# that these types fall back to TEXT, keeping in-memory test sessions working.
-# ---------------------------------------------------------------------------
-from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler  # noqa: E402
-
-if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
-    SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "TEXT"
-
-if not hasattr(SQLiteTypeCompiler, "visit_VECTOR"):
-    SQLiteTypeCompiler.visit_VECTOR = lambda self, type_, **kw: "TEXT"
 
 
 @pytest.fixture(scope="session")
@@ -35,85 +19,51 @@ def event_loop():
     loop.close()
 
 
-@pytest.fixture
-async def db_session() -> AsyncGenerator[AsyncSession, None]:
+@pytest.fixture(scope="session")
+async def db_engine():
     """
-    Create a test database session using SQLite in-memory database
+    Session-scoped engine backed by the DATABASE_URL configured in the environment.
+
+    In CI this is postgresql+asyncpg://... (pgvector/pgvector:pg16 service container).
+    Locally developers can set DATABASE_URL to a local Postgres or keep a local
+    test database.  The SQLite in-memory shortcut has been removed because it
+    masks Postgres-specific ORM behaviour (JSONB operators, tsvector, pgvector).
     """
-    # Use SQLite in-memory database for testing
-    engine = create_async_engine(
-        "sqlite+aiosqlite:///:memory:",
-        poolclass=StaticPool,
-        connect_args={"check_same_thread": False},
-        echo=False
-    )
-
-    # Enable foreign key enforcement for SQLite (off by default)
-    @event.listens_for(engine.sync_engine, "connect")
-    def set_sqlite_pragma(dbapi_connection, connection_record):
-        cursor = dbapi_connection.cursor()
-        cursor.execute("PRAGMA foreign_keys=ON")
-        cursor.close()
-
-    # Create all tables
+    engine = create_async_engine(settings.DATABASE_URL, echo=False)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    
-    # Create session factory
-    async_session = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    
-    # Create session
-    async with async_session() as session:
-        yield session
-    
-    # Clean up
+    yield engine
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
     await engine.dispose()
 
 
 @pytest.fixture
+async def db_session(db_engine) -> AsyncGenerator[AsyncSession, None]:
+    """Per-test async session that rolls back after each test."""
+    async_session = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with async_session() as session:
+        yield session
+        await session.rollback()
+
+
+@pytest.fixture
 def mock_db_session():
-    """Mock database session for unit tests that don't need real database"""
+    """Mock database session for unit tests that don't need a real database."""
     return AsyncMock(spec=AsyncSession)
 
 
 @pytest.fixture
 def mock_settings():
-    """Mock settings for testing"""
+    """Minimal settings dict for tests that inspect config values."""
     return {
-        "DATABASE_URL": "sqlite+aiosqlite:///:memory:",
+        "DATABASE_URL": settings.DATABASE_URL,
         "SECRET_KEY": "test-secret-key",
         "ALGORITHM": "HS256",
         "ACCESS_TOKEN_EXPIRE_MINUTES": 30,
         "STORAGE_PATH": "/tmp/test_storage",
         "DEBUG": True,
-        "SUPER_ADMIN_EMAIL": "admin@test.com"
+        "SUPER_ADMIN_EMAIL": "admin@test.com",
     }
-
-
-@pytest.fixture
-async def postgres_db_session() -> AsyncGenerator[AsyncSession, None]:
-    """
-    Create a test database session using the actual PostgreSQL database
-    This fixture is used for tests that require PostgreSQL-specific features like pgvector
-    """
-    # Use the actual PostgreSQL database from settings
-    engine = create_async_engine(
-        settings.DATABASE_URL,
-        echo=False
-    )
-    
-    # Create session factory
-    async_session = async_sessionmaker(
-        engine, class_=AsyncSession, expire_on_commit=False
-    )
-    
-    # Create session
-    async with async_session() as session:
-        yield session
-        # Rollback any changes made during the test
-        await session.rollback()
-    
-    # Clean up
-    await engine.dispose()

@@ -3,7 +3,7 @@ Channel Management Router
 Handles channel creation, listing, and management with tier limit checking
 """
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -454,7 +454,7 @@ async def update_channel(
         )
 
 
-@router.delete("/{channel_id}")
+@router.delete("/{channel_id}", status_code=204)
 async def delete_channel(
     channel_id: str,
     current_user: User = Depends(get_current_user),
@@ -493,7 +493,7 @@ async def delete_channel(
         await db.delete(channel)
         await db.commit()
         
-        return {"message": "Channel deleted successfully"}
+        return Response(status_code=204)
         
     except HTTPException:
         raise

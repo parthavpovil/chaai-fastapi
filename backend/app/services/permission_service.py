@@ -216,16 +216,22 @@ async def get_effective_permissions(
     db: AsyncSession,
 ) -> dict[str, bool]:
     """
-    Compute the effective flat permission map for a workspace+role.
+    Return the effective flat permission map for a workspace+role.
 
-    Args:
-        workspace: Resolved Workspace ORM object.
-        role: "owner" or "agent".
-        db: Async DB session.
+    Result is cached in Redis for 60 s (permissions change at most once per
+    hour on tier upgrades or explicit overrides).  Cache is invalidated by
+    workspace_cache.invalidate_workspace_cache() when tier or overrides change.
 
     Returns:
         Flat dict: {"dashboard.home": True, "inbox.claim": False, ...}
     """
+    from app.services.workspace_cache import get_cached_permissions, set_cached_permissions
+
+    workspace_id_str = str(workspace.id)
+    cached = await get_cached_permissions(workspace_id_str, role)
+    if cached is not None:
+        return cached
+
     tier_id = workspace.tier or "free"
     tier_flags = await _load_tier_flags(tier_id, db)
     overrides = await _load_overrides(workspace.id, db)
@@ -245,6 +251,7 @@ async def get_effective_permissions(
         else:
             effective[key] = base
 
+    await set_cached_permissions(workspace_id_str, role, effective)
     return effective
 
 
@@ -312,4 +319,8 @@ async def upsert_overrides(
 
     await db.commit()
     await db.refresh(row)
+
+    from app.services.workspace_cache import invalidate_workspace_cache
+    await invalidate_workspace_cache(str(workspace_id))
+
     return row

@@ -10,6 +10,8 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+_AUTH_TIMEOUT = 10.0  # seconds
+
 logger = logging.getLogger(__name__)
 
 from app.database import get_db
@@ -23,27 +25,49 @@ async def webchat_websocket_endpoint(
     websocket: WebSocket,
     workspace_id: str,
     widget_id: str = Query(..., description="Widget ID for the webchat channel"),
-    session_token: str = Query(..., description="Customer session token"),
     db: AsyncSession = Depends(get_db),
 ):
     """
     Customer-facing WebSocket endpoint.
 
-    The widget connects here on panel open to receive pushed events:
-      - new_message      (AI reply or human-agent reply)
-      - conversation_status_changed  (escalated / agent / resolved)
-      - csat_prompt      (after conversation resolved)
+    The widget connects here on panel open. Auth via first message:
+      {"type": "auth", "session_token": "<token>"}
+    session_token is NOT in the URL — proxies log URLs, and session tokens
+    must not appear in access logs.
 
-    The widget still sends messages via POST /api/webchat/send (HTTP).
-    Only incoming message type accepted: {"type": "ping"}.
+    widget_id stays in the query string — it is a public identifier embedded
+    in the widget JS and contains no secret.
+
+    Pushed event types:
+      - new_message, conversation_status_changed, csat_prompt
+
+    The widget sends messages via POST /api/webchat/send (HTTP).
+    Only {"type": "ping"} is accepted after auth.
     """
     connection = None
     try:
+        await websocket.accept()
+
+        try:
+            raw = await asyncio.wait_for(websocket.receive_text(), timeout=_AUTH_TIMEOUT)
+            auth_msg = json.loads(raw)
+        except asyncio.TimeoutError:
+            await websocket.close(code=4001, reason="Authentication timeout")
+            return
+        except (json.JSONDecodeError, WebSocketDisconnect):
+            await websocket.close(code=4001, reason="Invalid auth message")
+            return
+
+        session_token = auth_msg.get("session_token") if auth_msg.get("type") == "auth" else None
+        if not session_token:
+            await websocket.close(code=4001, reason="Expected {type:auth, session_token:...}")
+            return
+
         connection = await customer_websocket_manager.connect(
-            websocket, widget_id, session_token, db
+            websocket, widget_id, session_token, db, already_accepted=True
         )
         if not connection:
-            return  # already closed with error code inside connect()
+            return
 
         # Message loop — receive-only; only ping is accepted from the customer
         while True:

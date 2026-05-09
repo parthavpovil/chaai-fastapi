@@ -261,22 +261,18 @@ class MessageProcessor:
         await self.db.refresh(conversation)
 
         # Fire outbound webhook for new conversation (fire-and-forget)
-        try:
-            import asyncio
-            from app.services.outbound_webhook_service import trigger_event
-            asyncio.create_task(trigger_event(
-                db=self.db,
-                workspace_id=str(workspace_id),
-                event_type="conversation.created",
-                payload={
-                    "workspace_id": str(workspace_id),
-                    "conversation_id": str(conversation.id),
-                    "contact_id": str(contact_id),
-                    "channel_id": str(channel_id),
-                }
-            ))
-        except Exception:
-            logger.warning("Failed to schedule outbound webhook for conversation.created", exc_info=True)
+        from app.services.outbound_webhook_service import trigger_event
+        from app.utils.tasks import safe_create_task
+        safe_create_task(trigger_event(
+            workspace_id=str(workspace_id),
+            event_type="conversation.created",
+            payload={
+                "workspace_id": str(workspace_id),
+                "conversation_id": str(conversation.id),
+                "contact_id": str(contact_id),
+                "channel_id": str(channel_id),
+            },
+        ), name="outbound_webhook.conversation.created")
 
         return conversation
 
@@ -667,23 +663,19 @@ async def process_incoming_message(
     )
 
     # Fire outbound webhook event (fire-and-forget)
-    try:
-        import asyncio
-        from app.services.outbound_webhook_service import trigger_event
-        asyncio.create_task(trigger_event(
-            db=db,
-            workspace_id=workspace_id,
-            event_type="message.received",
-            payload={
-                "workspace_id": workspace_id,
-                "conversation_id": str(result["conversation"].id),
-                "message_id": str(result["message"].id),
-                "content": content,
-                "channel_id": channel_id,
-            }
-        ))
-    except Exception:
-        pass
+    from app.services.outbound_webhook_service import trigger_event
+    from app.utils.tasks import safe_create_task
+    safe_create_task(trigger_event(
+        workspace_id=workspace_id,
+        event_type="message.received",
+        payload={
+            "workspace_id": workspace_id,
+            "conversation_id": str(result["conversation"].id),
+            "message_id": str(result["message"].id),
+            "content": content,
+            "channel_id": channel_id,
+        },
+    ), name="outbound_webhook.message.received")
 
     return result
 

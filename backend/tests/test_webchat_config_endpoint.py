@@ -105,8 +105,8 @@ class TestWebChatConfigEndpoint:
         response = client.get("/api/webchat/config/test-business")
         
         assert response.status_code == 500
-        assert "Failed to load WebChat configuration" in response.json()["detail"]
-    
+        assert response.json()["detail"] == "Internal server error"
+
     @patch('app.routers.webchat.get_webchat_channel_by_workspace_slug')
     @patch('app.routers.webchat.decrypt_credential')
     def test_get_config_missing_required_fields(
@@ -146,7 +146,7 @@ class TestWebChatConfigEndpoint:
         response = client.get("/api/webchat/config/test-business")
         
         assert response.status_code == 500
-        assert "Failed to load WebChat configuration" in response.json()["detail"]
+        assert response.json()["detail"] == "Internal server error"
 
 
 class TestWebChatConfigHelperFunction:

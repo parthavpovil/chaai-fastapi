@@ -99,7 +99,6 @@ jobs:
             -o StrictHostKeyChecking=no \
             backend/docker-compose.prod.yml \
             backend/chatsaas-backend.service \
-            backend/init-db.sql \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
 
       - name: Create deployment script
@@ -133,9 +132,6 @@ jobs:
           
           # Move deployment files
           sudo cp /tmp/docker-compose.prod.yml ${DEPLOY_PATH}/
-          # Remove stale directory if Docker previously created it in place of the file
-          [ -d "${DEPLOY_PATH}/init-db.sql" ] && sudo rm -rf "${DEPLOY_PATH}/init-db.sql"
-          sudo cp /tmp/init-db.sql ${DEPLOY_PATH}/
           sudo cp /tmp/chatsaas-backend.service /etc/systemd/system/
           
           # Create .env file from secrets
@@ -274,7 +270,6 @@ jobs:
           # Clean up
           rm -f /tmp/docker-image.tar.gz
           rm -f /tmp/docker-compose.prod.yml
-          rm -f /tmp/init-db.sql
           rm -f /tmp/chatsaas-backend.service
           
           echo "=========================================="

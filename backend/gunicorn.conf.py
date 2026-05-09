@@ -64,6 +64,10 @@ def pre_fork(server, worker):
 def post_fork(server, worker):
     """Called just after a worker has been forked."""
     server.log.info("Worker spawned (pid: %s)", worker.pid)
+    # asyncpg / SQLAlchemy async pools are not fork-safe.
+    # Dispose the inherited pool so each worker reconnects with its own event loop.
+    from app.database import engine
+    engine.sync_engine.pool.dispose()
 
 def worker_abort(worker):
     """Called when a worker receives the SIGABRT signal."""

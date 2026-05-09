@@ -9,7 +9,6 @@ services:
       POSTGRES_PASSWORD: postgres
     volumes:
       - dev_postgres_data:/var/lib/postgresql/data
-      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
     ports:
       - "5434:5432"
     restart: unless-stopped

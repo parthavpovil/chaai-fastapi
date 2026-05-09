@@ -61,6 +61,7 @@ class WorkspaceResponse(BaseModel):
 class AuthResponse(BaseModel):
     """Authentication response schema"""
     access_token: str
+    refresh_token: str
     token_type: str = "bearer"
     user: UserResponse
     workspace: Optional[WorkspaceResponse] = None
