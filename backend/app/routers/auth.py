@@ -13,6 +13,7 @@ from sqlalchemy.exc import IntegrityError
 
 from pydantic import BaseModel
 
+from app.config import settings
 from app.database import get_db
 from app.models.user import User
 from app.models.workspace import Workspace
@@ -180,14 +181,16 @@ async def login_user(
     # Load user's workspace
     result = await db.execute(select(Workspace).where(Workspace.owner_id == user.id))
     workspace = result.scalar_one_or_none()
-    
+
+    role = "superadmin" if user.email.lower() == settings.SUPER_ADMIN_EMAIL.lower() else "owner"
+
     # Issue access + refresh tokens
     rt_id = await create_refresh_token(
-        user_id=str(user.id), email=user.email, role="owner",
+        user_id=str(user.id), email=user.email, role=role,
         workspace_id=str(workspace.id) if workspace else None,
     )
     access_token = auth_service.create_access_token(
-        user_id=user.id, email=user.email, role="owner",
+        user_id=user.id, email=user.email, role=role,
         workspace_id=workspace.id if workspace else None,
         refresh_token_id=rt_id,
     )

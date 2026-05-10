@@ -57,7 +57,7 @@ class AuthService:
         Args:
             user_id: User UUID
             email: User email address
-            role: User role (owner | agent)
+            role: User role (owner | agent | superadmin)
             workspace_id: Workspace UUID (null for agents until accepted)
             expires_delta: Custom expiration time
             
