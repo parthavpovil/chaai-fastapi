@@ -5,6 +5,7 @@ import asyncio
 import functools
 import time
 from contextlib import asynccontextmanager
+from urllib.parse import urlparse
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -144,6 +145,25 @@ Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
 _WEBCHAT_PREFIXES = ("/api/webchat/", "/ws/webchat/", "/static/")
 
+
+def _origin_matches_allowed_origin(origin: str, allowed_origin: str) -> bool:
+    if origin == allowed_origin:
+        return True
+
+    origin_parts = urlparse(origin)
+    allowed_parts = urlparse(allowed_origin)
+
+    if origin_parts.scheme != allowed_parts.scheme:
+        return False
+
+    allowed_host = allowed_parts.hostname or ""
+    origin_host = origin_parts.hostname or ""
+
+    if not allowed_host or not origin_host:
+        return False
+
+    return origin_host == allowed_host or origin_host.endswith(f".{allowed_host}")
+
 class SplitCORSMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -159,7 +179,10 @@ class SplitCORSMiddleware(BaseHTTPMiddleware):
             response.headers["Access-Control-Allow-Origin"] = "*"
             response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
             response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        elif origin in settings.ALLOWED_ORIGINS:
+        elif any(
+            _origin_matches_allowed_origin(origin, allowed_origin)
+            for allowed_origin in settings.ALLOWED_ORIGINS
+        ):
             response.headers["Access-Control-Allow-Origin"] = origin
             response.headers["Access-Control-Allow-Credentials"] = "true"
             response.headers["Access-Control-Allow-Methods"] = "*"
