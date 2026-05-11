@@ -22,7 +22,9 @@ class Settings(BaseSettings):
             "http://localhost:3000",
             "http://localhost:5173",
             "http://localhost:8080",
-            "https://chatsaas.vercel.app",
+            "https://chaai.online",
+            "https://admin.chaai.online",
+            
         ],
         description="CORS allowed origins"
     )
