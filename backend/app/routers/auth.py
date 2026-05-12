@@ -2,8 +2,11 @@
 Authentication Routes
 User registration, login, and authentication endpoints
 """
-from datetime import datetime, timezone
-from typing import Optional
+from datetime import datetime, timezone, timedelta
+from typing import Optional, Union
+import secrets
+import string
+import logging
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
@@ -22,18 +25,34 @@ from app.models.platform_setting import PlatformSetting
 from app.schemas.auth import (
     UserRegistrationRequest, UserLoginRequest, AgentLoginRequest,
     AgentInviteAcceptRequest, AuthResponse, AuthMeResponse, MessageResponse,
-    UserResponse, WorkspaceResponse
+    UserResponse, WorkspaceResponse, RegistrationPendingResponse,
+    VerifyEmailRequest, ResendEmailVerificationRequest,
+    ForgotPasswordRequest, VerifyPasswordResetRequest, ResetPasswordRequest
 )
 from app.services.auth_service import auth_service
-from app.services.refresh_token_service import create_refresh_token, use_refresh_token, revoke_refresh_token
+from app.services.refresh_token_service import (
+    create_refresh_token, use_refresh_token, revoke_refresh_token,
+    revoke_refresh_tokens_for_user
+)
 from app.middleware.auth_middleware import get_current_user, get_current_workspace, security
 from app.utils.slug import generate_unique_slug
 from app.services.auth_rate_limit import check_auth_rate_limit
+from app.services.email_service import EmailService
+from app.services.disposable_email_service import is_disposable_email
 
 router = APIRouter(prefix="/api/auth", tags=["authentication"])
+logger = logging.getLogger(__name__)
 
 
-@router.post("/register", response_model=AuthResponse)
+def _is_super_admin(email: str) -> bool:
+    return bool(settings.SUPER_ADMIN_EMAIL) and email.lower() == settings.SUPER_ADMIN_EMAIL.lower()
+
+
+def _generate_pin(length: int) -> str:
+    return "".join(secrets.choice(string.digits) for _ in range(length))
+
+
+@router.post("/register", response_model=Union[AuthResponse, RegistrationPendingResponse])
 async def register_user(
     request: UserRegistrationRequest,
     http_request: Request,
@@ -47,6 +66,12 @@ async def register_user(
     """
     await check_auth_rate_limit(http_request, request.email, "register")
     try:
+        if is_disposable_email(request.email):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Disposable email addresses are not allowed"
+            )
+
         # Check if email is already registered
         result = await db.execute(select(User).where(User.email == request.email))
         existing_user = result.scalar_one_or_none()
@@ -59,13 +84,32 @@ async def register_user(
         
         # Hash password
         hashed_password = auth_service.hash_password(request.password)
+
+        now = datetime.now(timezone.utc)
+        is_super_admin = _is_super_admin(request.email)
+        verification_pin = None
+        verification_expires_at = None
         
         # Create user
         user = User(
             email=request.email,
             hashed_password=hashed_password,
-            is_active=True
+            is_active=True,
+            email_verified=is_super_admin
         )
+
+        if not is_super_admin:
+            verification_pin = _generate_pin(settings.EMAIL_VERIFICATION_PIN_LENGTH)
+            verification_expires_at = now + timedelta(
+                minutes=settings.EMAIL_VERIFICATION_PIN_TTL_MINUTES
+            )
+            user.email_verification_pin_hash = auth_service.hash_pin(verification_pin)
+            user.email_verification_expires_at = verification_expires_at
+            user.email_verification_last_sent_at = now
+            user.email_verification_sent_day = now.date()
+            user.email_verification_sent_count = 1
+            user.email_verification_attempts = 0
+
         db.add(user)
         await db.flush()  # Get user ID
         
@@ -91,9 +135,24 @@ async def register_user(
             for setting in default_settings:
                 db.add(setting)
         
+        if not is_super_admin:
+            email_service = EmailService()
+            await email_service.send_email_verification_email(
+                to=user.email,
+                pin=verification_pin,
+                expires_in_minutes=settings.EMAIL_VERIFICATION_PIN_TTL_MINUTES,
+            )
+
         await db.commit()
-        
-        # Issue access + refresh tokens
+
+        if not is_super_admin:
+            return RegistrationPendingResponse(
+                message="Verification required. Check your email for the PIN.",
+                email=user.email,
+                verification_expires_at=verification_expires_at.isoformat()
+            )
+
+        # Issue access + refresh tokens for super admin
         rt_id = await create_refresh_token(
             user_id=str(user.id), email=user.email, role="owner",
             workspace_id=str(workspace.id),
@@ -122,6 +181,303 @@ async def register_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         )
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/verify-email", response_model=MessageResponse)
+async def verify_email(
+    request: VerifyEmailRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Verify email address with a PIN."""
+    await check_auth_rate_limit(http_request, request.email, "verify-email")
+
+    result = await db.execute(select(User).where(User.email == request.email))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification request"
+        )
+
+    if user.email_verified:
+        return MessageResponse(message="Email already verified")
+
+    if not user.email_verification_pin_hash or not user.email_verification_expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification PIN not found"
+        )
+
+    if user.email_verification_expires_at < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification PIN expired"
+        )
+
+    if user.email_verification_attempts >= settings.EMAIL_VERIFICATION_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many invalid attempts"
+        )
+
+    if not auth_service.verify_pin(request.pin, user.email_verification_pin_hash):
+        user.email_verification_attempts += 1
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification PIN"
+        )
+
+    user.email_verified = True
+    user.email_verification_pin_hash = None
+    user.email_verification_expires_at = None
+    user.email_verification_attempts = 0
+    await db.commit()
+
+    return MessageResponse(message="Email verified successfully")
+
+
+@router.post("/resend-verification", response_model=MessageResponse)
+async def resend_verification_email(
+    request: ResendEmailVerificationRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Resend email verification PIN."""
+    await check_auth_rate_limit(http_request, request.email, "resend-verification")
+
+    result = await db.execute(select(User).where(User.email == request.email))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid verification request"
+        )
+
+    if user.email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already verified"
+        )
+
+    now = datetime.now(timezone.utc)
+    if user.email_verification_sent_day != now.date():
+        user.email_verification_sent_day = now.date()
+        user.email_verification_sent_count = 0
+
+    if user.email_verification_sent_count >= settings.EMAIL_VERIFICATION_MAX_DAILY_SENDS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Daily resend limit reached"
+        )
+
+    if user.email_verification_last_sent_at:
+        elapsed = (now - user.email_verification_last_sent_at).total_seconds()
+        if elapsed < settings.EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Please wait before requesting another PIN"
+            )
+
+    try:
+        pin = _generate_pin(settings.EMAIL_VERIFICATION_PIN_LENGTH)
+        user.email_verification_pin_hash = auth_service.hash_pin(pin)
+        user.email_verification_expires_at = now + timedelta(
+            minutes=settings.EMAIL_VERIFICATION_PIN_TTL_MINUTES
+        )
+        user.email_verification_last_sent_at = now
+        user.email_verification_sent_day = now.date()
+        user.email_verification_sent_count += 1
+        user.email_verification_attempts = 0
+
+        email_service = EmailService()
+        await email_service.send_email_verification_email(
+            to=user.email,
+            pin=pin,
+            expires_in_minutes=settings.EMAIL_VERIFICATION_PIN_TTL_MINUTES,
+        )
+
+        await db.commit()
+        return MessageResponse(message="Verification PIN resent")
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/forgot-password", response_model=MessageResponse)
+async def forgot_password(
+    request: ForgotPasswordRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Send password reset PIN to the user's email."""
+    await check_auth_rate_limit(http_request, request.email, "forgot-password")
+
+    generic_message = "If the account exists, a reset PIN has been sent."
+
+    result = await db.execute(select(User).where(User.email == request.email))
+    user = result.scalar_one_or_none()
+    if not user or not user.is_active:
+        return MessageResponse(message=generic_message)
+
+    now = datetime.now(timezone.utc)
+    if user.password_reset_sent_day != now.date():
+        user.password_reset_sent_day = now.date()
+        user.password_reset_sent_count = 0
+
+    if user.password_reset_sent_count >= settings.PASSWORD_RESET_MAX_DAILY_SENDS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Daily reset PIN limit reached"
+        )
+
+    if user.password_reset_last_sent_at:
+        elapsed = (now - user.password_reset_last_sent_at).total_seconds()
+        if elapsed < settings.PASSWORD_RESET_RESEND_COOLDOWN_SECONDS:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Please wait before requesting another PIN"
+            )
+
+    try:
+        pin = _generate_pin(settings.PASSWORD_RESET_PIN_LENGTH)
+        user.password_reset_pin_hash = auth_service.hash_pin(pin)
+        user.password_reset_expires_at = now + timedelta(
+            minutes=settings.PASSWORD_RESET_PIN_TTL_MINUTES
+        )
+        user.password_reset_last_sent_at = now
+        user.password_reset_sent_day = now.date()
+        user.password_reset_sent_count += 1
+        user.password_reset_attempts = 0
+
+        email_service = EmailService()
+        await email_service.send_password_reset_pin_email(
+            to=user.email,
+            pin=pin,
+            expires_in_minutes=settings.PASSWORD_RESET_PIN_TTL_MINUTES,
+        )
+
+        await db.commit()
+        return MessageResponse(message=generic_message)
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+
+@router.post("/verify-password-reset", response_model=MessageResponse)
+async def verify_password_reset(
+    request: VerifyPasswordResetRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Verify a password reset PIN."""
+    await check_auth_rate_limit(http_request, request.email, "verify-password-reset")
+
+    result = await db.execute(select(User).where(User.email == request.email))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reset request"
+        )
+
+    if not user.password_reset_pin_hash or not user.password_reset_expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset PIN not found"
+        )
+
+    if user.password_reset_expires_at < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset PIN expired"
+        )
+
+    if user.password_reset_attempts >= settings.PASSWORD_RESET_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many invalid attempts"
+        )
+
+    if not auth_service.verify_pin(request.pin, user.password_reset_pin_hash):
+        user.password_reset_attempts += 1
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reset PIN"
+        )
+
+    return MessageResponse(message="Reset PIN verified")
+
+
+@router.post("/reset-password", response_model=MessageResponse)
+async def reset_password(
+    request: ResetPasswordRequest,
+    http_request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Reset password using a valid PIN."""
+    await check_auth_rate_limit(http_request, request.email, "reset-password")
+
+    result = await db.execute(select(User).where(User.email == request.email))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reset request"
+        )
+
+    if not user.password_reset_pin_hash or not user.password_reset_expires_at:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset PIN not found"
+        )
+
+    if user.password_reset_expires_at < datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Reset PIN expired"
+        )
+
+    if user.password_reset_attempts >= settings.PASSWORD_RESET_MAX_ATTEMPTS:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many invalid attempts"
+        )
+
+    if not auth_service.verify_pin(request.pin, user.password_reset_pin_hash):
+        user.password_reset_attempts += 1
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid reset PIN"
+        )
+
+    user.hashed_password = auth_service.hash_password(request.new_password)
+    user.password_reset_pin_hash = None
+    user.password_reset_expires_at = None
+    user.password_reset_attempts = 0
+    await db.commit()
+
+    try:
+        await revoke_refresh_tokens_for_user(str(user.id))
+    except Exception:
+        logger.warning("Failed to revoke refresh tokens after password reset", exc_info=True)
+
+    return MessageResponse(message="Password updated. Please log in again.")
 
 
 @router.post("/login", response_model=AuthResponse)
@@ -159,6 +515,15 @@ async def login_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Account is inactive"
         )
+
+    if not user.email_verified and not _is_super_admin(user.email):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": "Email not verified",
+                "code": "email_not_verified"
+            }
+        )
     
     # Block agent accounts from using the owner login endpoint
     agent_result = await db.execute(
@@ -182,7 +547,7 @@ async def login_user(
     result = await db.execute(select(Workspace).where(Workspace.owner_id == user.id))
     workspace = result.scalar_one_or_none()
 
-    role = "superadmin" if user.email.lower() == settings.SUPER_ADMIN_EMAIL.lower() else "owner"
+    role = "superadmin" if _is_super_admin(user.email) else "owner"
 
     # Issue access + refresh tokens
     rt_id = await create_refresh_token(
@@ -328,7 +693,8 @@ async def accept_agent_invitation(
         user = User(
             email=agent.email,
             hashed_password=hashed_password,
-            is_active=True
+            is_active=True,
+            email_verified=True
         )
         db.add(user)
         await db.flush()  # Get user ID
