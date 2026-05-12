@@ -129,6 +129,72 @@ class EmailService:
             html=html,
             tags=[{"name": "category", "value": "password_reset"}],
         )
+
+    async def send_email_verification_email(
+        self,
+        to: str,
+        pin: str,
+        expires_in_minutes: int,
+    ) -> Dict[str, Any]:
+        """Send email verification PIN"""
+        html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #2563eb;">Verify your email</h2>
+                <p>Use the verification PIN below to finish creating your account:</p>
+                <div style="margin: 24px 0; font-size: 24px; letter-spacing: 4px; font-weight: bold;">
+                    {pin}
+                </div>
+                <p>This PIN expires in {expires_in_minutes} minutes.</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                <p style="color: #999; font-size: 12px;">
+                    ChatSaaS - AI-Powered Customer Support Platform
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+
+        return await self.send_email(
+            to=to,
+            subject="Your verification PIN",
+            html=html,
+            tags=[{"name": "category", "value": "email_verification"}],
+        )
+
+    async def send_password_reset_pin_email(
+        self,
+        to: str,
+        pin: str,
+        expires_in_minutes: int,
+    ) -> Dict[str, Any]:
+        """Send password reset PIN email"""
+        html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #2563eb;">Reset your password</h2>
+                <p>Use the PIN below to reset your password:</p>
+                <div style="margin: 24px 0; font-size: 24px; letter-spacing: 4px; font-weight: bold;">
+                    {pin}
+                </div>
+                <p>This PIN expires in {expires_in_minutes} minutes.</p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                <p style="color: #999; font-size: 12px;">
+                    ChatSaaS - AI-Powered Customer Support Platform
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+
+        return await self.send_email(
+            to=to,
+            subject="Your password reset PIN",
+            html=html,
+            tags=[{"name": "category", "value": "password_reset"}],
+        )
     
     async def send_welcome_email(
         self,

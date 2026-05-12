@@ -41,6 +41,21 @@ class AuthService:
             password_bytes = password_bytes[:72]
         hashed_bytes = hashed_password.encode('utf-8')
         return bcrypt.checkpw(password_bytes, hashed_bytes)
+
+    @staticmethod
+    def hash_pin(pin: str) -> str:
+        """Hash a short numeric PIN for email verification."""
+        pin_bytes = pin.encode("utf-8")
+        salt = bcrypt.gensalt(rounds=10)
+        hashed = bcrypt.hashpw(pin_bytes, salt)
+        return hashed.decode("utf-8")
+
+    @staticmethod
+    def verify_pin(pin: str, hashed_pin: str) -> bool:
+        """Verify a PIN against its hash."""
+        pin_bytes = pin.encode("utf-8")
+        hashed_bytes = hashed_pin.encode("utf-8")
+        return bcrypt.checkpw(pin_bytes, hashed_bytes)
     
     @staticmethod
     def create_access_token(

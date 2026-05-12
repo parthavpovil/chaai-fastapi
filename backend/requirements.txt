@@ -34,6 +34,7 @@ pypdf2==3.0.1
 
 # Email service
 resend==2.1.0
+disposable-email-domains==0.0.182
 
 # Configuration and environment
 python-dotenv==1.0.1

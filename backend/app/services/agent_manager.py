@@ -15,6 +15,7 @@ from app.models.agent import Agent
 from app.models.user import User
 from app.services.tier_manager import TierManager, TierLimitError
 from app.services.webhook_security import generate_invitation_token
+from app.services.disposable_email_service import is_disposable_email
 
 
 class AgentManagementError(Exception):
@@ -58,6 +59,9 @@ class AgentManager:
         try:
             # Check tier limits (only pro tier can have agents)
             await self.tier_manager.check_agent_limit(workspace_id)
+
+            if is_disposable_email(email):
+                raise AgentManagementError("Disposable email addresses are not allowed")
             
             # Check if agent with this email already exists in workspace
             existing_agent = await self.get_agent_by_email(workspace_id, email)

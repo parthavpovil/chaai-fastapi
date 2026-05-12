@@ -42,6 +42,7 @@ class UserResponse(BaseModel):
     """User response schema"""
     id: UUID
     email: str
+    email_verified: bool
     
     class Config:
         from_attributes = True
@@ -65,6 +66,42 @@ class AuthResponse(BaseModel):
     token_type: str = "bearer"
     user: UserResponse
     workspace: Optional[WorkspaceResponse] = None
+
+
+class RegistrationPendingResponse(BaseModel):
+    """Registration pending verification response"""
+    message: str
+    email: str
+    verification_expires_at: str
+
+
+class VerifyEmailRequest(BaseModel):
+    """Email verification request schema"""
+    email: EmailStr = Field(..., description="User email address")
+    pin: str = Field(..., min_length=4, max_length=12, description="Verification PIN")
+
+
+class ResendEmailVerificationRequest(BaseModel):
+    """Resend verification email request schema"""
+    email: EmailStr = Field(..., description="User email address")
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Forgot password request schema"""
+    email: EmailStr = Field(..., description="User email address")
+
+
+class VerifyPasswordResetRequest(BaseModel):
+    """Verify password reset PIN request schema"""
+    email: EmailStr = Field(..., description="User email address")
+    pin: str = Field(..., min_length=4, max_length=12, description="Password reset PIN")
+
+
+class ResetPasswordRequest(BaseModel):
+    """Reset password request schema"""
+    email: EmailStr = Field(..., description="User email address")
+    pin: str = Field(..., min_length=4, max_length=12, description="Password reset PIN")
+    new_password: str = Field(..., min_length=8, description="New password (minimum 8 characters)")
 
 
 class AuthMeResponse(BaseModel):

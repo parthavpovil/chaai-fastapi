@@ -89,6 +89,38 @@ class Settings(BaseSettings):
         description="Sender email for transactional emails — MUST be set via RESEND_FROM_EMAIL env var in production"
     )
     RESEND_WEBHOOK_SECRET: str = Field(default="", description="Resend webhook signing secret")
+
+    # Email Verification
+    EMAIL_VERIFICATION_PIN_LENGTH: int = Field(default=6, description="Email verification PIN length")
+    EMAIL_VERIFICATION_PIN_TTL_MINUTES: int = Field(default=10, description="Email verification PIN TTL in minutes")
+    EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS: int = Field(
+        default=300,
+        description="Minimum seconds between verification email sends"
+    )
+    EMAIL_VERIFICATION_MAX_DAILY_SENDS: int = Field(
+        default=2,
+        description="Maximum verification email sends per day"
+    )
+    EMAIL_VERIFICATION_MAX_ATTEMPTS: int = Field(
+        default=5,
+        description="Maximum invalid PIN attempts before blocking verification"
+    )
+
+    # Password Reset
+    PASSWORD_RESET_PIN_LENGTH: int = Field(default=6, description="Password reset PIN length")
+    PASSWORD_RESET_PIN_TTL_MINUTES: int = Field(default=10, description="Password reset PIN TTL in minutes")
+    PASSWORD_RESET_RESEND_COOLDOWN_SECONDS: int = Field(
+        default=300,
+        description="Minimum seconds between password reset PIN sends"
+    )
+    PASSWORD_RESET_MAX_DAILY_SENDS: int = Field(
+        default=2,
+        description="Maximum password reset PIN sends per day"
+    )
+    PASSWORD_RESET_MAX_ATTEMPTS: int = Field(
+        default=5,
+        description="Maximum invalid reset PIN attempts before blocking"
+    )
     
     # File Storage
     STORAGE_PATH: str = Field(
