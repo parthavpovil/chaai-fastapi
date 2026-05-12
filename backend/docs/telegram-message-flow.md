@@ -200,7 +200,7 @@ Extraction:
            external_contact_id  = str(from_user["id"])         → "987654321"
            contact_name         = "John Doe"
            contact_data         = {
-               "username": "johndoe",
+               "username": "johndoe", 
                "language_code": "en",
                "chat_type": "private"
            }

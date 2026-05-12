@@ -26,7 +26,7 @@ that returns 429 after 10 failed attempts per email+IP within 5 minutes.
 2. Extract the `Retry-After` header value (seconds) from the response
 3. Show a user-facing message: **"Too many attempts. Please wait N seconds."**
 4. Optionally: disable the submit button and show a countdown timer using
-   `Retry-After`
+   `Retry-After `
 
 ### Request payload — no change
 ### Response shape on success — no change
