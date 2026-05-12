@@ -316,6 +316,56 @@ class ChannelValidator:
             "platform": "webchat"
         }
     
+    async def validate_unofficial_whatsapp(self, credentials: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Validate unofficial WhatsApp (Baileys gateway) credentials.
+
+        Args:
+            credentials: Must contain tenant_id. Gateway URL/key come from settings.
+
+        Returns:
+            Validation result
+
+        Raises:
+            ChannelValidationError: If tenant_id is missing, settings are unconfigured,
+                                    or the gateway is unreachable
+        """
+        if not credentials.get("tenant_id"):
+            raise ChannelValidationError("tenant_id is required for whatsapp_unofficial channel")
+
+        if not settings.WHATSAPP_GATEWAY_URL:
+            raise ChannelValidationError(
+                "WHATSAPP_GATEWAY_URL is not configured. Set it in the server environment."
+            )
+        if not settings.WHATSAPP_GATEWAY_API_KEY:
+            raise ChannelValidationError(
+                "WHATSAPP_GATEWAY_API_KEY is not configured. Set it in the server environment."
+            )
+        if not settings.WHATSAPP_WEBHOOK_SECRET:
+            raise ChannelValidationError(
+                "WHATSAPP_WEBHOOK_SECRET is not configured. Set it in the server environment."
+            )
+
+        gateway_url = settings.WHATSAPP_GATEWAY_URL.rstrip("/")
+
+        try:
+            async with aiohttp.ClientSession(timeout=self.session_timeout) as session:
+                async with session.get(f"{gateway_url}/health") as response:
+                    if response.status != 200:
+                        raise ChannelValidationError(
+                            f"WhatsApp gateway health check failed (status {response.status}). "
+                            "Ensure the gateway is running."
+                        )
+        except aiohttp.ClientError as e:
+            raise ChannelValidationError(f"Cannot reach WhatsApp gateway at {gateway_url}: {str(e)}")
+
+        return {
+            "valid": True,
+            "tenant_id": credentials["tenant_id"],
+            "gateway_url": gateway_url,
+            "platform": "whatsapp_unofficial",
+        }
+
     async def validate_channel_credentials(
         self,
         channel_type: str,
@@ -350,7 +400,10 @@ class ChannelValidator:
         
         elif channel_type == "webchat":
             return self.validate_webchat_config(credentials)
-        
+
+        elif channel_type == "whatsapp_unofficial":
+            return await self.validate_unofficial_whatsapp(credentials)
+
         else:
             raise ChannelValidationError(f"Unsupported channel type: {channel_type}")
 

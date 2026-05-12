@@ -76,6 +76,11 @@ class Settings(BaseSettings):
     WHATSAPP_APP_SECRET: str = Field(default="", description="WhatsApp app secret")
     INSTAGRAM_APP_SECRET: str = Field(default="", description="Instagram app secret")
     META_VERIFY_TOKEN: str = Field(default="", description="Meta webhook verify token (shared for WhatsApp + Instagram)")
+
+    # Unofficial WhatsApp (Baileys gateway)
+    WHATSAPP_GATEWAY_URL: str = Field(default="", description="Baileys WhatsApp gateway base URL")
+    WHATSAPP_GATEWAY_API_KEY: str = Field(default="", description="Baileys gateway API key (X-Gateway-Token)")
+    WHATSAPP_WEBHOOK_SECRET: str = Field(default="", description="Shared secret for verifying gateway webhook callbacks")
     
     # Email Service (Resend)
     RESEND_API_KEY: str = Field(default="", description="Resend API key")

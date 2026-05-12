@@ -62,6 +62,13 @@ class InstagramConfigRequest(BaseModel):
     access_token: str = Field(..., min_length=1)
 
 
+class UnofficialWhatsAppConfigRequest(BaseModel):
+    """Request model for unofficial WhatsApp (Baileys gateway) configuration.
+    Gateway URL, API key, and webhook secret are read from server env vars.
+    """
+    tenant_id: str = Field(..., min_length=1, description="Unique session ID for this workspace on the gateway")
+
+
 class ChannelResponse(BaseModel):
     """Response model for channel information"""
     id: str

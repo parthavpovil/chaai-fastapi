@@ -369,6 +369,7 @@ async def _run_pipeline_with_own_session(
     telegram_context: dict = None,
     whatsapp_context: dict = None,
     instagram_context: dict = None,
+    unofficial_whatsapp_context: dict = None,
 ) -> None:
     """Open a fresh AsyncSession and run _run_message_pipeline.
 
@@ -387,6 +388,7 @@ async def _run_pipeline_with_own_session(
             telegram_context=telegram_context,
             whatsapp_context=whatsapp_context,
             instagram_context=instagram_context,
+            unofficial_whatsapp_context=unofficial_whatsapp_context,
         )
 
 
@@ -399,6 +401,7 @@ async def _run_message_pipeline(
     telegram_context: dict = None,
     whatsapp_context: dict = None,
     instagram_context: dict = None,
+    unofficial_whatsapp_context: dict = None,
 ) -> None:
     """Run the full message pipeline: process → flow check → escalate → RAG → persist response.
 
@@ -450,8 +453,8 @@ async def _run_message_pipeline(
     if msg_type != "text" or not text_content.strip():
         return
 
-    # Flow engine check — runs before RAG for WhatsApp
-    if channel_type == "whatsapp":
+    # Flow engine check — runs before RAG for WhatsApp (both official and unofficial)
+    if channel_type in ("whatsapp", "whatsapp_unofficial"):
         try:
             from app.services.flow_engine import handle_message_with_flow_check
             from app.models.channel import Channel
@@ -539,6 +542,17 @@ async def _run_message_pipeline(
             )
             if not sent:
                 logger.error("Failed to deliver direct-routing ack to Instagram for conversation_id=%s", conversation_id)
+        elif channel_type == "whatsapp_unofficial" and unofficial_whatsapp_context:
+            from app.services.whatsapp_unofficial_sender import send_whatsapp_unofficial_message
+            sent = await send_whatsapp_unofficial_message(
+                gateway_url=unofficial_whatsapp_context["gateway_url"],
+                api_key=unofficial_whatsapp_context["api_key"],
+                tenant_id=unofficial_whatsapp_context["tenant_id"],
+                recipient_phone=unofficial_whatsapp_context["recipient_phone"],
+                text=ack_text,
+            )
+            if not sent:
+                logger.error("Failed to deliver direct-routing ack to unofficial WhatsApp for conversation_id=%s", conversation_id)
         return
 
     # Branch 2: AI disabled, no human agents → receive message silently, no reply
@@ -616,6 +630,19 @@ async def _run_message_pipeline(
                 if not sent:
                     logger.error(
                         "Failed to deliver AI agent reply to Instagram for conversation_id=%s", conversation_id
+                    )
+            elif channel_type == "whatsapp_unofficial" and unofficial_whatsapp_context:
+                from app.services.whatsapp_unofficial_sender import send_whatsapp_unofficial_message
+                sent = await send_whatsapp_unofficial_message(
+                    gateway_url=unofficial_whatsapp_context["gateway_url"],
+                    api_key=unofficial_whatsapp_context["api_key"],
+                    tenant_id=unofficial_whatsapp_context["tenant_id"],
+                    recipient_phone=unofficial_whatsapp_context["recipient_phone"],
+                    text=agent_reply_text,
+                )
+                if not sent:
+                    logger.error(
+                        "Failed to deliver AI agent reply to unofficial WhatsApp for conversation_id=%s", conversation_id
                     )
             return
 
@@ -706,6 +733,19 @@ async def _run_message_pipeline(
             if not sent:
                 logger.error(
                     "Failed to deliver RAG reply to Instagram for conversation_id=%s", conversation_id
+                )
+        elif channel_type == "whatsapp_unofficial" and unofficial_whatsapp_context and rag_response_text:
+            from app.services.whatsapp_unofficial_sender import send_whatsapp_unofficial_message
+            sent = await send_whatsapp_unofficial_message(
+                gateway_url=unofficial_whatsapp_context["gateway_url"],
+                api_key=unofficial_whatsapp_context["api_key"],
+                tenant_id=unofficial_whatsapp_context["tenant_id"],
+                recipient_phone=unofficial_whatsapp_context["recipient_phone"],
+                text=rag_response_text,
+            )
+            if not sent:
+                logger.error(
+                    "Failed to deliver RAG reply to unofficial WhatsApp for conversation_id=%s", conversation_id
                 )
 
 
@@ -985,6 +1025,74 @@ async def instagram_webhook(
                 instagram_context=instagram_context,
             ),
             name=f"pipeline.instagram.{external_msg_id}",
+        )
+
+    return {"status": "ok"}
+
+
+# ── Unofficial WhatsApp (Baileys gateway) ─────────────────────────────────────
+
+@router.post("/whatsapp-unofficial/{tenant_id}")
+async def whatsapp_unofficial_webhook(
+    tenant_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """Receive incoming messages from the Baileys-based WhatsApp gateway."""
+    payload = await request.body()
+    headers = dict(request.headers)
+
+    from app.services.webhook_handlers import WebhookHandlers, WebhookProcessingError
+    try:
+        result = await WebhookHandlers(db).handle_whatsapp_unofficial_webhook(
+            payload, headers, tenant_id
+        )
+    except WebhookProcessingError as e:
+        if e.status_code == 200:
+            return {"status": "ok"}
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    except Exception as e:
+        logger.error("Unexpected unofficial WhatsApp webhook error: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal processing error")
+
+    if result.get("status") == "success":
+        external_msg_id = result["message_data"].get("external_message_id", "")
+        if not await _claim_inbound_message("whatsapp_unofficial", external_msg_id):
+            logger.info("Unofficial WhatsApp message %s already claimed — skipping", external_msg_id)
+            return {"status": "ok"}
+
+        unofficial_whatsapp_context = None
+        try:
+            from app.services.encryption import decrypt_credential
+            from app.models.channel import Channel
+            from sqlalchemy import select as _select
+            ch_result = await db.execute(
+                _select(Channel).where(Channel.id == result["channel_id"])
+            )
+            ch = ch_result.scalar_one_or_none()
+            if ch and ch.config:
+                stored_tenant_id = decrypt_credential(ch.config.get("tenant_id", ""))
+                recipient_phone = result["message_data"].get("external_contact_id")
+                if settings.WHATSAPP_GATEWAY_URL and settings.WHATSAPP_GATEWAY_API_KEY and stored_tenant_id and recipient_phone:
+                    unofficial_whatsapp_context = {
+                        "gateway_url": settings.WHATSAPP_GATEWAY_URL,
+                        "api_key": settings.WHATSAPP_GATEWAY_API_KEY,
+                        "tenant_id": stored_tenant_id,
+                        "recipient_phone": recipient_phone,
+                    }
+        except Exception as e:
+            logger.warning("Failed to build unofficial WhatsApp context: %s", e)
+
+        from app.utils.tasks import safe_create_task
+        safe_create_task(
+            _run_pipeline_with_own_session(
+                workspace_id=str(result["workspace_id"]),
+                channel_id=str(result["channel_id"]),
+                message_data=result["message_data"],
+                channel_type="whatsapp_unofficial",
+                unofficial_whatsapp_context=unofficial_whatsapp_context,
+            ),
+            name=f"pipeline.whatsapp_unofficial.{external_msg_id}",
         )
 
     return {"status": "ok"}

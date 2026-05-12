@@ -114,7 +114,12 @@ class WebhookHandlers:
                         decrypted_id = decrypt_credential(encrypted_id)
                         if decrypted_id == identifier:
                             return True
-            
+
+            elif channel.type == "whatsapp_unofficial":
+                encrypted_tenant_id = channel.config.get("tenant_id")
+                if encrypted_tenant_id:
+                    return decrypt_credential(encrypted_tenant_id) == identifier
+
             return False
             
         except Exception:
@@ -560,6 +565,117 @@ class WebhookHandlers:
         
         return None
     
+    async def handle_whatsapp_unofficial_webhook(
+        self,
+        payload: bytes,
+        headers: Dict[str, str],
+        tenant_id: str,
+    ) -> Dict[str, Any]:
+        """
+        Handle inbound webhook from Baileys gateway.
+
+        Args:
+            payload: Raw JSON body
+            headers: Request headers (must contain X-Webhook-Secret)
+            tenant_id: Tenant ID used to look up the channel
+
+        Returns:
+            Processed webhook data
+
+        Raises:
+            WebhookProcessingError: If processing fails
+        """
+        try:
+            try:
+                webhook_data = json.loads(payload.decode("utf-8"))
+            except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                raise WebhookProcessingError(f"Invalid JSON payload: {str(e)}")
+
+            channel = await self.get_channel_by_webhook_path("whatsapp_unofficial", tenant_id)
+            if not channel:
+                raise WebhookProcessingError("Channel not found or inactive", status_code=200)
+
+            # Verify X-Webhook-Secret against the global WHATSAPP_WEBHOOK_SECRET setting
+            import hmac as _hmac
+            provided_secret = headers.get("x-webhook-secret") or headers.get("X-Webhook-Secret", "")
+            if settings.WHATSAPP_WEBHOOK_SECRET:
+                if not _hmac.compare_digest(provided_secret, settings.WHATSAPP_WEBHOOK_SECRET):
+                    raise WebhookProcessingError("Invalid webhook secret")
+
+            event = webhook_data.get("event")
+
+            # Session lifecycle events — acknowledge and ignore
+            if event in ("qr", "connected", "disconnected"):
+                return {"status": "ignored", "reason": f"session event: {event}"}
+
+            if event != "message":
+                return {"status": "ignored", "reason": f"unknown event: {event}"}
+
+            message_data = self._extract_unofficial_whatsapp_message(webhook_data, tenant_id)
+            if not message_data:
+                return {"status": "ignored", "reason": "No processable message"}
+
+            return {
+                "status": "success",
+                "channel_id": channel.id,
+                "workspace_id": channel.workspace_id,
+                "message_data": message_data,
+                "platform": "whatsapp_unofficial",
+            }
+
+        except WebhookProcessingError:
+            raise
+        except Exception as e:
+            raise WebhookProcessingError(
+                f"Unofficial WhatsApp webhook processing failed: {str(e)}", status_code=500
+            )
+
+    def _extract_unofficial_whatsapp_message(
+        self,
+        webhook_data: Dict[str, Any],
+        tenant_id: str,
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Extract message data from Baileys gateway webhook payload.
+        """
+        data = webhook_data.get("data", {})
+        sender_jid = data.get("senderId", "")
+        phone = sender_jid.split("@")[0]  # strip @s.whatsapp.net or @g.us
+        if not phone:
+            return None
+
+        msg_type = data.get("type", "text")
+        timestamp_ms = data.get("timestamp") or 0
+
+        base = {
+            "external_contact_id": phone,
+            "external_message_id": data.get("messageId"),
+            "contact_name": f"WhatsApp User {phone[-4:]}",
+            "contact_data": {"phone_number": phone},
+            "message_metadata": {
+                "timestamp": timestamp_ms // 1000,  # ms → s
+                "tenant_id": tenant_id,
+                "platform": "whatsapp_unofficial",
+                "chat_id": data.get("chatId"),
+            },
+        }
+
+        if msg_type == "text":
+            content = data.get("text", "")
+            if not content.strip():
+                return None
+            return {**base, "content": content, "msg_type": "text"}
+
+        elif msg_type in ("image", "video", "audio", "document"):
+            return {
+                **base,
+                "content": data.get("caption", ""),
+                "msg_type": msg_type,
+                "media_mime_type": data.get("mimeType"),
+            }
+
+        return None
+
     def _is_meta_verification(self, webhook_data: Dict[str, Any]) -> bool:
         """
         Check if webhook is a Meta verification challenge
@@ -628,6 +744,8 @@ async def process_webhook(
         return await handlers.handle_whatsapp_webhook(payload, headers, identifier)
     elif channel_type == "instagram":
         return await handlers.handle_instagram_webhook(payload, headers, identifier)
+    elif channel_type == "whatsapp_unofficial":
+        return await handlers.handle_whatsapp_unofficial_webhook(payload, headers, identifier)
     else:
         raise WebhookProcessingError(f"Unsupported channel type: {channel_type}")
 

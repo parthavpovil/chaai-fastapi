@@ -864,6 +864,27 @@ async def send_agent_message(
                                 "Failed to deliver owner/agent message to Telegram for conversation_id=%s",
                                 conversation_id,
                             )
+                elif conv.channel_type == "whatsapp_unofficial":
+                    from app.services.whatsapp_unofficial_sender import send_whatsapp_unofficial_message
+                    from app.services.encryption import decrypt_credential
+                    from app.config import settings
+                    ch_row = await db.execute(select(Channel).where(Channel.id == contact.channel_id))
+                    ch = ch_row.scalar_one_or_none()
+                    if ch and ch.config and settings.WHATSAPP_GATEWAY_URL and settings.WHATSAPP_GATEWAY_API_KEY:
+                        tenant_id = decrypt_credential(ch.config.get("tenant_id", ""))
+                        sent = await send_whatsapp_unofficial_message(
+                            gateway_url=settings.WHATSAPP_GATEWAY_URL,
+                            api_key=settings.WHATSAPP_GATEWAY_API_KEY,
+                            tenant_id=tenant_id,
+                            recipient_phone=contact.external_id,
+                            text=request.content,
+                        )
+                        if not sent:
+                            import logging
+                            logging.getLogger(__name__).error(
+                                "Failed to deliver owner/agent message to unofficial WhatsApp for conversation_id=%s",
+                                conversation_id,
+                            )
         except Exception:
             pass  # never block the agent reply
 
