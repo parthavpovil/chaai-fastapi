@@ -122,7 +122,7 @@ class ErrorResponse(BaseModel):
     error_type: str = Field(
         ..., 
         description="Error classification: 'validation_error', 'business_logic_error', 'server_error', 'rate_limit'",
-        regex="^(validation_error|business_logic_error|server_error|rate_limit)$"
+        pattern="^(validation_error|business_logic_error|server_error|rate_limit)$"
     )
     timestamp: Optional[str] = Field(None, description="ISO 8601 timestamp when error occurred")
     request_id: Optional[str] = Field(None, description="Request tracking ID for debugging")
