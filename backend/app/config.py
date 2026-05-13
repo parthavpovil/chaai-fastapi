@@ -90,6 +90,17 @@ class Settings(BaseSettings):
     )
     RESEND_WEBHOOK_SECRET: str = Field(default="", description="Resend webhook signing secret")
 
+    # Brevo / Sendinblue webhook secret (optional)
+    BREVO_WEBHOOK_SECRET: str = Field(default="", description="Brevo webhook signing secret for webhook verification")
+
+    # SMTP (Brevo / other SMTP relays)
+    SMTP_SERVER: str = Field(default="", description="SMTP server hostname")
+    SMTP_PORT: int = Field(default=587, description="SMTP server port")
+    SMTP_USERNAME: str = Field(default="", description="SMTP username/login")
+    SMTP_PASSWORD: str = Field(default="", description="SMTP password")
+    SMTP_FROM_EMAIL: str = Field(default="", description="Sender email for SMTP delivery")
+    SMTP_USE_TLS: bool = Field(default=True, description="Use STARTTLS for SMTP (port 587)")
+
     # Email Verification
     EMAIL_VERIFICATION_PIN_LENGTH: int = Field(default=6, description="Email verification PIN length")
     EMAIL_VERIFICATION_PIN_TTL_MINUTES: int = Field(default=10, description="Email verification PIN TTL in minutes")

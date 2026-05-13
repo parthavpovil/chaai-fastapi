@@ -25,6 +25,7 @@ async def resend_webhook(
     svix_id: Optional[str] = Header(None),
     svix_timestamp: Optional[str] = Header(None),
     svix_signature: Optional[str] = Header(None),
+    x_mailin_signature: Optional[str] = Header(None),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -43,17 +44,23 @@ async def resend_webhook(
     body = await request.body()
 
     # Verify webhook signature if secret is configured
-    if settings.RESEND_WEBHOOK_SECRET:
-        if not svix_signature:
-            raise HTTPException(status_code=401, detail="Missing signature")
-
+    # Support Resend (Svix) or Brevo (Sendinblue) webhooks.
+    # If Svix-style header present and secret configured, verify using Svix flow.
+    if svix_signature and settings.RESEND_WEBHOOK_SECRET:
         if not verify_resend_signature(
             body=body,
             signature=svix_signature,
             timestamp=svix_timestamp,
             secret=settings.RESEND_WEBHOOK_SECRET,
         ):
-            raise HTTPException(status_code=401, detail="Invalid signature")
+            raise HTTPException(status_code=401, detail="Invalid Resend signature")
+    # If Brevo header present and BREVO secret configured, verify HMAC-SHA256
+    elif x_mailin_signature and settings.BREVO_WEBHOOK_SECRET:
+        if not verify_brevo_signature(body=body, signature=x_mailin_signature, secret=settings.BREVO_WEBHOOK_SECRET):
+            raise HTTPException(status_code=401, detail="Invalid Brevo signature")
+    elif settings.RESEND_WEBHOOK_SECRET or settings.BREVO_WEBHOOK_SECRET:
+        # If a secret is configured but no recognizable signature header present, reject.
+        raise HTTPException(status_code=401, detail="Missing signature header")
 
     # Parse event
     try:
@@ -61,8 +68,44 @@ async def resend_webhook(
     except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
-    event_type = event.get("type")
-    data = event.get("data", {})
+    # Normalize event and data for both providers.
+    # Resend sends: {"type": "email.sent", "data": {...}}
+    # Brevo may send an array of events or a single object like {"message-id": "...", "event": "delivered", ...}
+    event_type = None
+    data = {}
+
+    # Resend-style
+    if isinstance(event, dict) and event.get("type"):
+        event_type = event.get("type")
+        data = event.get("data", {})
+    else:
+        # Brevo-style: could be a list of events or single object.
+        events = event if isinstance(event, list) else [event]
+        # Process first event for compatibility (the caller can extend to batch)
+        first = events[0] if events else {}
+        # Map Brevo event names to internal event_type
+        brevo_event = first.get("event") or first.get("event_name")
+        if brevo_event:
+            mapping = {
+                "delivered": "email.delivered",
+                "delivered_retry": "email.delivery_delayed",
+                "opened": "email.opened",
+                "click": "email.clicked",
+                "clicks": "email.clicked",
+                "hard_bounce": "email.bounced",
+                "soft_bounce": "email.bounced",
+                "blocked": "email.bounced",
+                "spam": "email.complained",
+                "complained": "email.complained",
+                "processed": "email.sent",
+                "sent": "email.sent",
+            }
+            event_type = mapping.get(brevo_event, brevo_event)
+            data = first
+        else:
+            # Unknown format — try to use top-level fields
+            event_type = first.get("type")
+            data = first
 
     # Handle different event types
     if event_type == "email.sent":
@@ -120,6 +163,20 @@ def verify_resend_signature(
 
     except (KeyError, ValueError, UnicodeDecodeError) as e:
         logger.warning("Resend signature verification error: %s", e)
+        return False
+
+
+def verify_brevo_signature(body: bytes, signature: str, secret: str) -> bool:
+    """Verify Brevo (Sendinblue) webhook signature.
+
+    Brevo sends an `x-mailin-signature` header which is an HMAC-SHA256
+    hex digest of the raw request body using the webhook secret.
+    """
+    try:
+        computed = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        return hmac.compare_digest(computed, signature)
+    except Exception as e:
+        logger.warning("Brevo signature verification error: %s", e)
         return False
 
 

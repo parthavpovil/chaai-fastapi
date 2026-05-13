@@ -27,7 +27,8 @@ from app.schemas.auth import (
     AgentInviteAcceptRequest, AuthResponse, AuthMeResponse, MessageResponse,
     UserResponse, WorkspaceResponse, RegistrationPendingResponse,
     VerifyEmailRequest, ResendEmailVerificationRequest,
-    ForgotPasswordRequest, VerifyPasswordResetRequest, ResetPasswordRequest
+    ForgotPasswordRequest, VerifyPasswordResetRequest, ResetPasswordRequest,
+    ErrorResponse
 )
 from app.services.auth_service import auth_service
 from app.services.refresh_token_service import (
@@ -63,23 +64,63 @@ async def register_user(
 
     Creates a new user account, generates a unique workspace slug,
     creates the workspace, and returns JWT token.
+    
+    Error codes:
+    - DISPOSABLE_EMAIL: Frontend should show "Please use a valid business email"
+    - EMAIL_ALREADY_REGISTERED: Frontend should show "This email is already registered. Try logging in instead."
+    - INVALID_BUSINESS_NAME: Frontend validation error
+    - RATE_LIMIT_EXCEEDED: Frontend should show "Too many registration attempts. Please try again later."
+    - EMAIL_SERVICE_FAILED: Show "Failed to send verification email. Please try again."
+    - INTERNAL_ERROR: Show "An error occurred. Please try again or contact support."
     """
-    await check_auth_rate_limit(http_request, request.email, "register")
+    request_id = http_request.headers.get("X-Request-ID", "unknown")
+    
     try:
+        # Check rate limiting
+        await check_auth_rate_limit(http_request, request.email, "register")
+    except HTTPException as e:
+        logger.warning(
+            f"Registration rate limit exceeded for {request.email} - rid={request_id}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail={
+                "error_code": "RATE_LIMIT_EXCEEDED",
+                "message": "Too many registration attempts. Please try again later.",
+                "error_type": "rate_limit"
+            }
+        )
+    
+    try:
+        # Validation: Check for disposable email
         if is_disposable_email(request.email):
+            logger.warning(
+                f"Disposable email registration attempt for {request.email} - rid={request_id}"
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Disposable email addresses are not allowed"
+                detail={
+                    "error_code": "DISPOSABLE_EMAIL",
+                    "message": "Disposable email addresses are not allowed. Please use your company email.",
+                    "error_type": "validation_error"
+                }
             )
 
-        # Check if email is already registered
+        # Validation: Check if email is already registered
         result = await db.execute(select(User).where(User.email == request.email))
         existing_user = result.scalar_one_or_none()
         
         if existing_user:
+            logger.info(
+                f"Duplicate registration attempt for {request.email} - rid={request_id}"
+            )
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email already registered"
+                detail={
+                    "error_code": "EMAIL_ALREADY_REGISTERED",
+                    "message": "This email is already registered. Please log in or use a different email.",
+                    "error_type": "business_logic_error"
+                }
             )
         
         # Hash password
@@ -135,15 +176,34 @@ async def register_user(
             for setting in default_settings:
                 db.add(setting)
         
+        # Send verification email if not super admin
         if not is_super_admin:
-            email_service = EmailService()
-            await email_service.send_email_verification_email(
-                to=user.email,
-                pin=verification_pin,
-                expires_in_minutes=settings.EMAIL_VERIFICATION_PIN_TTL_MINUTES,
-            )
+            try:
+                email_service = EmailService()
+                await email_service.send_email_verification_email(
+                    to=user.email,
+                    pin=verification_pin,
+                    expires_in_minutes=settings.EMAIL_VERIFICATION_PIN_TTL_MINUTES,
+                )
+            except Exception as email_error:
+                await db.rollback()
+                logger.error(
+                    f"Email service failed during registration for {request.email} - rid={request_id}: {str(email_error)}"
+                )
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail={
+                        "error_code": "EMAIL_SERVICE_FAILED",
+                        "message": "Failed to send verification email. Please try again or contact support.",
+                        "error_type": "server_error",
+                        "request_id": request_id
+                    }
+                )
 
         await db.commit()
+        logger.info(
+            f"User registration successful for {request.email} - rid={request_id}"
+        )
 
         if not is_super_admin:
             return RegistrationPendingResponse(
@@ -169,23 +229,50 @@ async def register_user(
             workspace=WorkspaceResponse.model_validate(workspace)
         )
         
-    except IntegrityError:
+    except HTTPException:
+        # Re-raise HTTP exceptions (our own structured errors)
+        raise
+    except IntegrityError as db_error:
         await db.rollback()
+        logger.error(
+            f"Database integrity error during registration - rid={request_id}: {str(db_error)}"
+        )
+        # This shouldn't happen since we check for duplicates, but handle it gracefully
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already registered"
+            detail={
+                "error_code": "EMAIL_ALREADY_REGISTERED",
+                "message": "This email is already registered. Please log in or use a different email.",
+                "error_type": "business_logic_error"
+            }
         )
-    except ValueError as e:
+    except ValueError as validation_error:
         await db.rollback()
+        logger.warning(
+            f"Validation error during registration - rid={request_id}: {str(validation_error)}"
+        )
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "error_code": "INVALID_INPUT",
+                "message": f"Invalid input: {str(validation_error)}",
+                "error_type": "validation_error"
+            }
         )
     except Exception as e:
         await db.rollback()
+        logger.error(
+            f"Unexpected error during registration - rid={request_id}: {str(e)}",
+            exc_info=True
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail={
+                "error_code": "INTERNAL_ERROR",
+                "message": "An unexpected error occurred. Please try again or contact support.",
+                "error_type": "server_error",
+                "request_id": request_id
+            }
         )
 
 
@@ -195,51 +282,123 @@ async def verify_email(
     http_request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """Verify email address with a PIN."""
-    await check_auth_rate_limit(http_request, request.email, "verify-email")
-
-    result = await db.execute(select(User).where(User.email == request.email))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid verification request"
-        )
-
-    if user.email_verified:
-        return MessageResponse(message="Email already verified")
-
-    if not user.email_verification_pin_hash or not user.email_verification_expires_at:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Verification PIN not found"
-        )
-
-    if user.email_verification_expires_at < datetime.now(timezone.utc):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Verification PIN expired"
-        )
-
-    if user.email_verification_attempts >= settings.EMAIL_VERIFICATION_MAX_ATTEMPTS:
+    """
+    Verify email address with a PIN.
+    
+    Error codes:
+    - USER_NOT_FOUND: User doesn't have a pending verification
+    - EMAIL_ALREADY_VERIFIED: Email is already verified
+    - PIN_NOT_SENT: No PIN was sent to this email
+    - PIN_EXPIRED: The PIN has expired, user needs to request a new one
+    - PIN_INVALID: Invalid PIN entered
+    - TOO_MANY_ATTEMPTS: User exceeded max verification attempts
+    - RATE_LIMIT_EXCEEDED: Too many attempts, try again later
+    """
+    request_id = http_request.headers.get("X-Request-ID", "unknown")
+    
+    try:
+        await check_auth_rate_limit(http_request, request.email, "verify-email")
+    except HTTPException:
+        logger.warning(f"Rate limit exceeded for verify-email - {request.email} - rid={request_id}")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Too many invalid attempts"
+            detail={
+                "error_code": "RATE_LIMIT_EXCEEDED",
+                "message": "Too many verification attempts. Please try again later.",
+                "error_type": "rate_limit"
+            }
         )
 
-    if not auth_service.verify_pin(request.pin, user.email_verification_pin_hash):
-        user.email_verification_attempts += 1
+    try:
+        result = await db.execute(select(User).where(User.email == request.email))
+        user = result.scalar_one_or_none()
+        if not user:
+            logger.warning(f"Verification attempt for non-existent user {request.email} - rid={request_id}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "USER_NOT_FOUND",
+                    "message": "No pending verification found for this email. Please register first.",
+                    "error_type": "business_logic_error"
+                }
+            )
+
+        if user.email_verified:
+            logger.info(f"Verification attempt on already-verified email {request.email} - rid={request_id}")
+            return MessageResponse(message="Email already verified")
+
+        if not user.email_verification_pin_hash or not user.email_verification_expires_at:
+            logger.warning(f"PIN not sent for {request.email} - rid={request_id}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "PIN_NOT_SENT",
+                    "message": "No verification PIN found. Please request a new PIN.",
+                    "error_type": "business_logic_error"
+                }
+            )
+
+        if user.email_verification_expires_at < datetime.now(timezone.utc):
+            logger.info(f"PIN expired for {request.email} - rid={request_id}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "PIN_EXPIRED",
+                    "message": "Verification PIN has expired. Please request a new one.",
+                    "error_type": "business_logic_error"
+                }
+            )
+
+        if user.email_verification_attempts >= settings.EMAIL_VERIFICATION_MAX_ATTEMPTS:
+            logger.warning(f"Too many verification attempts for {request.email} - rid={request_id}")
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "error_code": "TOO_MANY_ATTEMPTS",
+                    "message": "Too many invalid attempts. Please request a new PIN.",
+                    "error_type": "rate_limit"
+                }
+            )
+
+        if not auth_service.verify_pin(request.pin, user.email_verification_pin_hash):
+            user.email_verification_attempts += 1
+            await db.commit()
+            remaining = settings.EMAIL_VERIFICATION_MAX_ATTEMPTS - user.email_verification_attempts
+            logger.info(f"Invalid PIN for {request.email} - attempt {user.email_verification_attempts} - rid={request_id}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "PIN_INVALID",
+                    "message": f"Invalid PIN. {remaining} attempts remaining.",
+                    "error_type": "validation_error"
+                }
+            )
+
+        user.email_verified = True
+        user.email_verification_pin_hash = None
+        user.email_verification_expires_at = None
+        user.email_verification_attempts = 0
         await db.commit()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid verification PIN"
+        
+        logger.info(f"Email verified successfully for {request.email} - rid={request_id}")
+        return MessageResponse(message="Email verified successfully")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(
+            f"Unexpected error during email verification - {request.email} - rid={request_id}: {str(e)}",
+            exc_info=True
         )
-
-    user.email_verified = True
-    user.email_verification_pin_hash = None
-    user.email_verification_expires_at = None
-    user.email_verification_attempts = 0
-    await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "error_code": "INTERNAL_ERROR",
+                "message": "An unexpected error occurred. Please try again or contact support.",
+                "error_type": "server_error",
+                "request_id": request_id
+            }
+        )
 
     return MessageResponse(message="Email verified successfully")
 
@@ -250,67 +409,137 @@ async def resend_verification_email(
     http_request: Request,
     db: AsyncSession = Depends(get_db)
 ):
-    """Resend email verification PIN."""
-    await check_auth_rate_limit(http_request, request.email, "resend-verification")
-
-    result = await db.execute(select(User).where(User.email == request.email))
-    user = result.scalar_one_or_none()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid verification request"
-        )
-
-    if user.email_verified:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Email already verified"
-        )
-
-    now = datetime.now(timezone.utc)
-    if user.email_verification_sent_day != now.date():
-        user.email_verification_sent_day = now.date()
-        user.email_verification_sent_count = 0
-
-    if user.email_verification_sent_count >= settings.EMAIL_VERIFICATION_MAX_DAILY_SENDS:
+    """
+    Resend email verification PIN.
+    
+    Error codes:
+    - USER_NOT_FOUND: No user registered with this email
+    - EMAIL_ALREADY_VERIFIED: Email is already verified
+    - DAILY_LIMIT_EXCEEDED: User has reached max daily resend limit (2/day)
+    - RESEND_COOLDOWN: User must wait before requesting another PIN (5 min cooldown)
+    - EMAIL_SERVICE_FAILED: Failed to send verification email
+    - RATE_LIMIT_EXCEEDED: Too many requests
+    """
+    request_id = http_request.headers.get("X-Request-ID", "unknown")
+    
+    try:
+        await check_auth_rate_limit(http_request, request.email, "resend-verification")
+    except HTTPException:
+        logger.warning(f"Rate limit exceeded for resend-verification - {request.email} - rid={request_id}")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="Daily resend limit reached"
+            detail={
+                "error_code": "RATE_LIMIT_EXCEEDED",
+                "message": "Too many resend requests. Please try again later.",
+                "error_type": "rate_limit"
+            }
         )
-
-    if user.email_verification_last_sent_at:
-        elapsed = (now - user.email_verification_last_sent_at).total_seconds()
-        if elapsed < settings.EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS:
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Please wait before requesting another PIN"
-            )
 
     try:
-        pin = _generate_pin(settings.EMAIL_VERIFICATION_PIN_LENGTH)
-        user.email_verification_pin_hash = auth_service.hash_pin(pin)
-        user.email_verification_expires_at = now + timedelta(
-            minutes=settings.EMAIL_VERIFICATION_PIN_TTL_MINUTES
-        )
-        user.email_verification_last_sent_at = now
-        user.email_verification_sent_day = now.date()
-        user.email_verification_sent_count += 1
-        user.email_verification_attempts = 0
+        result = await db.execute(select(User).where(User.email == request.email))
+        user = result.scalar_one_or_none()
+        if not user:
+            logger.warning(f"Resend PIN for non-existent user {request.email} - rid={request_id}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "USER_NOT_FOUND",
+                    "message": "No account found with this email. Please register first.",
+                    "error_type": "business_logic_error"
+                }
+            )
 
-        email_service = EmailService()
-        await email_service.send_email_verification_email(
-            to=user.email,
-            pin=pin,
-            expires_in_minutes=settings.EMAIL_VERIFICATION_PIN_TTL_MINUTES,
-        )
+        if user.email_verified:
+            logger.info(f"Resend PIN for already-verified email {request.email} - rid={request_id}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={
+                    "error_code": "EMAIL_ALREADY_VERIFIED",
+                    "message": "Your email is already verified. You can log in now.",
+                    "error_type": "business_logic_error"
+                }
+            )
 
-        await db.commit()
-        return MessageResponse(message="Verification PIN resent")
+        now = datetime.now(timezone.utc)
+        if user.email_verification_sent_day != now.date():
+            user.email_verification_sent_day = now.date()
+            user.email_verification_sent_count = 0
+
+        if user.email_verification_sent_count >= settings.EMAIL_VERIFICATION_MAX_DAILY_SENDS:
+            logger.warning(f"Daily resend limit exceeded for {request.email} - rid={request_id}")
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail={
+                    "error_code": "DAILY_LIMIT_EXCEEDED",
+                    "message": f"You can resend the PIN maximum {settings.EMAIL_VERIFICATION_MAX_DAILY_SENDS} times per day. Please try again tomorrow.",
+                    "error_type": "rate_limit"
+                }
+            )
+
+        if user.email_verification_last_sent_at:
+            elapsed = (now - user.email_verification_last_sent_at).total_seconds()
+            if elapsed < settings.EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS:
+                wait_seconds = int(settings.EMAIL_VERIFICATION_RESEND_COOLDOWN_SECONDS - elapsed)
+                logger.info(f"Resend cooldown active for {request.email} - {wait_seconds}s remaining - rid={request_id}")
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail={
+                        "error_code": "RESEND_COOLDOWN",
+                        "message": f"Please wait {wait_seconds} seconds before requesting another PIN.",
+                        "error_type": "rate_limit"
+                    }
+                )
+
+        try:
+            pin = _generate_pin(settings.EMAIL_VERIFICATION_PIN_LENGTH)
+            user.email_verification_pin_hash = auth_service.hash_pin(pin)
+            user.email_verification_expires_at = now + timedelta(
+                minutes=settings.EMAIL_VERIFICATION_PIN_TTL_MINUTES
+            )
+            user.email_verification_last_sent_at = now
+            user.email_verification_sent_day = now.date()
+            user.email_verification_sent_count += 1
+            user.email_verification_attempts = 0
+
+            email_service = EmailService()
+            await email_service.send_email_verification_email(
+                to=user.email,
+                pin=pin,
+                expires_in_minutes=settings.EMAIL_VERIFICATION_PIN_TTL_MINUTES,
+            )
+
+            await db.commit()
+            logger.info(f"Verification PIN resent successfully for {request.email} - rid={request_id}")
+            return MessageResponse(message="Verification PIN resent. Check your email.")
+        except Exception as email_error:
+            await db.rollback()
+            logger.error(
+                f"Email service failed during PIN resend for {request.email} - rid={request_id}: {str(email_error)}"
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "error_code": "EMAIL_SERVICE_FAILED",
+                    "message": "Failed to send verification email. Please try again or contact support.",
+                    "error_type": "server_error",
+                    "request_id": request_id
+                }
+            )
+    except HTTPException:
+        raise
     except Exception as e:
-        await db.rollback()
+        logger.error(
+            f"Unexpected error during resend-verification - {request.email} - rid={request_id}: {str(e)}",
+            exc_info=True
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(e)
+            detail={
+                "error_code": "INTERNAL_ERROR",
+                "message": "An unexpected error occurred. Please try again or contact support.",
+                "error_type": "server_error",
+                "request_id": request_id
+            }
         )
 
 

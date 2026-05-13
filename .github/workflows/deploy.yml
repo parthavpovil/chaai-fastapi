@@ -162,6 +162,15 @@ jobs:
           # Email
           RESEND_API_KEY=${{ secrets.RESEND_API_KEY }}
           RESEND_FROM_EMAIL=${{ secrets.RESEND_FROM_EMAIL }}
+          # SMTP (Brevo)
+          SMTP_SERVER=${{ secrets.SMTP_SERVER }}
+          SMTP_PORT=${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME=${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD=${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM_EMAIL=${{ secrets.SMTP_FROM_EMAIL }}
+          SMTP_USE_TLS=${{ secrets.SMTP_USE_TLS }}
+          # Brevo webhook secret (optional)
+          BREVO_WEBHOOK_SECRET=${{ secrets.BREVO_WEBHOOK_SECRET }}
           
           # Redis URL (constructed from password)
           REDIS_URL=redis://:${{ secrets.REDIS_PASSWORD }}@redis:6379/0

@@ -3,20 +3,29 @@ Email Service using Resend API
 Handles transactional emails for the application
 """
 import httpx
+import aiosmtplib
+from email.message import EmailMessage
 from typing import Optional, List, Dict, Any
 from app.config import settings
 
-# Deployment trigger
-
 
 class EmailService:
-    """Service for sending emails via Resend API"""
-    
+    """Service for sending emails via Resend API or SMTP fallback"""
+
     def __init__(self):
+        # Resend API config
         self.api_key = settings.RESEND_API_KEY
         self.from_email = settings.RESEND_FROM_EMAIL
         self.base_url = "https://api.resend.com"
-    
+
+        # SMTP config (Brevo or other relays)
+        self.smtp_server = settings.SMTP_SERVER
+        self.smtp_port = settings.SMTP_PORT
+        self.smtp_username = settings.SMTP_USERNAME
+        self.smtp_password = settings.SMTP_PASSWORD
+        self.smtp_from_email = settings.SMTP_FROM_EMAIL or self.from_email
+        self.smtp_use_tls = settings.SMTP_USE_TLS
+
     async def send_email(
         self,
         to: str | List[str],
@@ -29,37 +38,66 @@ class EmailService:
         bcc: Optional[List[str]] = None,
         tags: Optional[List[Dict[str, str]]] = None,
     ) -> Dict[str, Any]:
+        """Send an email using the configured provider.
+
+        Prefers Resend API when `RESEND_API_KEY` is configured; otherwise uses SMTP.
         """
-        Send an email via Resend API
-        
-        Args:
-            to: Recipient email address(es)
-            subject: Email subject
-            html: HTML email body
-            text: Plain text email body (optional)
-            from_email: Sender email (defaults to RESEND_FROM_EMAIL)
-            reply_to: Reply-to email address
-            cc: CC recipients
-            bcc: BCC recipients
-            tags: Email tags for tracking
-            
-        Returns:
-            Response from Resend API containing email ID
-            
-        Raises:
-            httpx.HTTPStatusError: If the API request fails
+        # If Resend API key configured, use Resend
+        if self.api_key:
+            return await self._send_via_resend(
+                to=to,
+                subject=subject,
+                html=html,
+                text=text,
+                from_email=from_email,
+                reply_to=reply_to,
+                cc=cc,
+                bcc=bcc,
+                tags=tags,
+            )
+
+        # Otherwise, try SMTP
+        if self.smtp_server and self.smtp_username and self.smtp_password:
+            return await self._send_via_smtp(
+                to=to,
+                subject=subject,
+                html=html,
+                text=text,
+                from_email=from_email,
+                reply_to=reply_to,
+                cc=cc,
+                bcc=bcc,
+                tags=tags,
+            )
+
+        raise ValueError("No email provider configured (RESEND_API_KEY or SMTP credentials required)")
+
+    async def _send_via_resend(
+        self,
+        to: str | List[str],
+        subject: str,
+        html: str,
+        text: Optional[str] = None,
+        from_email: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None,
+        tags: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]:
+        """Send an email via the Resend HTTP API (existing behavior).
+
+        Tests and existing code may patch this method, so keep signature stable.
         """
         if not self.api_key:
             raise ValueError("RESEND_API_KEY not configured")
-        
-        # Prepare payload
+
         payload = {
             "from": from_email or self.from_email,
             "to": [to] if isinstance(to, str) else to,
             "subject": subject,
             "html": html,
         }
-        
+
         if text:
             payload["text"] = text
         if reply_to:
@@ -70,8 +108,7 @@ class EmailService:
             payload["bcc"] = bcc
         if tags:
             payload["tags"] = tags
-        
-        # Send request
+
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 f"{self.base_url}/emails",
@@ -84,6 +121,59 @@ class EmailService:
             )
             response.raise_for_status()
             return response.json()
+
+    async def _send_via_smtp(
+        self,
+        to: str | List[str],
+        subject: str,
+        html: str,
+        text: Optional[str] = None,
+        from_email: Optional[str] = None,
+        reply_to: Optional[str] = None,
+        cc: Optional[List[str]] = None,
+        bcc: Optional[List[str]] = None,
+        tags: Optional[List[Dict[str, str]]] = None,
+    ) -> Dict[str, Any]:
+        """Send an email via SMTP (aiosmtplib).
+
+        Returns a simple dict describing the SMTP send result.
+        """
+        if not (self.smtp_server and self.smtp_username and self.smtp_password):
+            raise ValueError("SMTP credentials not configured")
+
+        to_list = [to] if isinstance(to, str) else to
+
+        msg = EmailMessage()
+        msg["From"] = from_email or self.smtp_from_email
+        msg["To"] = ", ".join(to_list)
+        msg["Subject"] = subject
+        if reply_to:
+            msg["Reply-To"] = reply_to
+        if cc:
+            msg["Cc"] = ", ".join(cc)
+
+        # Plain text fallback
+        if text:
+            msg.set_content(text)
+        else:
+            msg.set_content("This is an HTML email. Please view in an HTML-capable client.")
+
+        # HTML alternative
+        msg.add_alternative(html, subtype="html")
+
+        # Send via aiosmtplib
+        send_result = await aiosmtplib.send(
+            msg,
+            hostname=self.smtp_server,
+            port=int(self.smtp_port),
+            username=self.smtp_username,
+            password=self.smtp_password,
+            start_tls=bool(self.smtp_use_tls),
+            timeout=30.0,
+        )
+
+        # send_result may be (code, response) or similar; return a simple summary
+        return {"smtp_result": str(send_result)}
     
     async def send_password_reset_email(
         self,

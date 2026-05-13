@@ -113,3 +113,16 @@ class AuthMeResponse(BaseModel):
 class MessageResponse(BaseModel):
     """Simple message response schema"""
     message: str
+
+
+class ErrorResponse(BaseModel):
+    """Structured error response schema"""
+    error_code: str = Field(..., description="Machine-readable error code")
+    detail: str = Field(..., description="Human-readable error message")
+    error_type: str = Field(
+        ..., 
+        description="Error classification: 'validation_error', 'business_logic_error', 'server_error', 'rate_limit'",
+        regex="^(validation_error|business_logic_error|server_error|rate_limit)$"
+    )
+    timestamp: Optional[str] = Field(None, description="ISO 8601 timestamp when error occurred")
+    request_id: Optional[str] = Field(None, description="Request tracking ID for debugging")
