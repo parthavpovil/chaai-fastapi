@@ -386,6 +386,52 @@ class EmailService:
         )
 
 
+    async def send_team_invitation_email(
+        self,
+        to: str,
+        invitee_name: str,
+        invited_by_name: str,
+        workspace_name: str,
+        invitation_token: str,
+    ) -> Dict[str, Any]:
+        """Send team invitation email with accept link"""
+        invite_url = f"{settings.APP_URL}/accept-invite?token={invitation_token}"
+
+        html = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #2563eb;">You've been invited to join {workspace_name}</h2>
+                <p>Hi {invitee_name},</p>
+                <p><strong>{invited_by_name}</strong> has invited you to join their team on ChatSaaS.</p>
+                <div style="margin: 30px 0;">
+                    <a href="{invite_url}"
+                       style="background-color: #2563eb; color: white; padding: 12px 24px;
+                              text-decoration: none; border-radius: 6px; display: inline-block;">
+                        Accept Invitation
+                    </a>
+                </div>
+                <p>Or copy and paste this link into your browser:</p>
+                <p style="color: #666; word-break: break-all;">{invite_url}</p>
+                <p style="margin-top: 30px; color: #666; font-size: 14px;">
+                    This invitation expires in 7 days. If you weren't expecting this, you can safely ignore it.
+                </p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 30px 0;">
+                <p style="color: #999; font-size: 12px;">
+                    ChatSaaS - AI-Powered Customer Support Platform
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+
+        return await self.send_email(
+            to=to,
+            subject=f"You're invited to join {workspace_name} on ChatSaaS",
+            html=html,
+            tags=[{"name": "category", "value": "team_invitation"}],
+        )
+
     async def send_escalation_alert(
         self,
         to_email: str,

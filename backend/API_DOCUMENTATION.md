@@ -641,7 +641,7 @@ All endpoints require authentication via Bearer token.
 
 ### POST /invite
 
-Invite an agent to the workspace.
+Invite an agent to the workspace. An invitation email containing an accept link is automatically sent to the invitee's email address. The invitation token is also returned in the response for programmatic use.
 
 **Headers:**
 - `Authorization: Bearer <token>`
@@ -654,7 +654,7 @@ Invite an agent to the workspace.
 }
 ```
 
-**Response (200):**
+**Response (201):**
 ```json
 {
   "id": "uuid",
@@ -666,8 +666,12 @@ Invite an agent to the workspace.
 }
 ```
 
+**Notes:**
+- An invitation email with an accept link (`APP_URL/accept-invite?token=<token>`) is sent to the invitee. Email delivery failure is non-fatal — the invitation record is still created and the token is returned.
+- Invitation tokens expire after 7 days.
+
 **Errors:**
-- 400: Agent already exists
+- 400: Agent already exists or disposable email used
 - 402: Tier limit exceeded
 
 ### POST /accept

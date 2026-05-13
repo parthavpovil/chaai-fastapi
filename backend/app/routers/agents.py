@@ -2,8 +2,11 @@
 Agent Management Router
 Handles agent invitations, acceptance, and management endpoints
 """
+import logging
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
+
+logger = logging.getLogger(__name__)
 from fastapi import APIRouter, Depends, HTTPException, status, Response
 from pydantic import BaseModel, Field, EmailStr
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,6 +19,7 @@ from app.models.workspace import Workspace
 from app.models.agent import Agent
 from app.services.agent_manager import AgentManager, AgentManagementError
 from app.services.tier_manager import TierLimitError
+from app.services.email_service import email_service
 
 
 router = APIRouter(prefix="/api/agents", tags=["agents"])
@@ -109,6 +113,17 @@ async def invite_agent(
             invited_by_user_id=current_user.id
         )
         
+        try:
+            await email_service.send_team_invitation_email(
+                to=agent.email,
+                invitee_name=agent.name,
+                invited_by_name=current_user.email,
+                workspace_name=current_workspace.name,
+                invitation_token=agent.invitation_token,
+            )
+        except Exception as email_error:
+            logger.warning(f"Failed to send invitation email to {agent.email}: {email_error}")
+
         return AgentInvitationResponse(
             id=str(agent.id),
             email=agent.email,
