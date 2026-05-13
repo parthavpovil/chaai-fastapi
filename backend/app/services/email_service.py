@@ -1,5 +1,5 @@
 """
-Email Service using Resend API
+Email Service using Brevo SMTP with optional Resend fallback
 Handles transactional emails for the application
 """
 import httpx
@@ -10,12 +10,12 @@ from app.config import settings
 
 
 class EmailService:
-    """Service for sending emails via Resend API or SMTP fallback"""
+    """Service for sending emails via SMTP first, with Resend fallback"""
 
     def __init__(self):
-        # Resend API config
-        self.api_key = settings.RESEND_API_KEY
-        self.from_email = settings.RESEND_FROM_EMAIL
+        # Email provider config
+        self.resend_api_key = settings.RESEND_API_KEY
+        self.resend_from_email = settings.RESEND_FROM_EMAIL
         self.base_url = "https://api.resend.com"
 
         # SMTP config (Brevo or other relays)
@@ -23,7 +23,7 @@ class EmailService:
         self.smtp_port = settings.SMTP_PORT
         self.smtp_username = settings.SMTP_USERNAME
         self.smtp_password = settings.SMTP_PASSWORD
-        self.smtp_from_email = settings.SMTP_FROM_EMAIL or self.from_email
+        self.smtp_from_email = settings.SMTP_FROM_EMAIL or self.resend_from_email
         self.smtp_use_tls = settings.SMTP_USE_TLS
 
     async def send_email(
@@ -40,23 +40,9 @@ class EmailService:
     ) -> Dict[str, Any]:
         """Send an email using the configured provider.
 
-        Prefers Resend API when `RESEND_API_KEY` is configured; otherwise uses SMTP.
+        Prefers SMTP when Brevo credentials are configured; otherwise falls back to Resend.
         """
-        # If Resend API key configured, use Resend
-        if self.api_key:
-            return await self._send_via_resend(
-                to=to,
-                subject=subject,
-                html=html,
-                text=text,
-                from_email=from_email,
-                reply_to=reply_to,
-                cc=cc,
-                bcc=bcc,
-                tags=tags,
-            )
-
-        # Otherwise, try SMTP
+        # Prefer Brevo/SMTP when configured.
         if self.smtp_server and self.smtp_username and self.smtp_password:
             return await self._send_via_smtp(
                 to=to,
@@ -70,7 +56,21 @@ class EmailService:
                 tags=tags,
             )
 
-        raise ValueError("No email provider configured (RESEND_API_KEY or SMTP credentials required)")
+        # Fallback to Resend if SMTP is not configured.
+        if self.resend_api_key:
+            return await self._send_via_resend(
+                to=to,
+                subject=subject,
+                html=html,
+                text=text,
+                from_email=from_email,
+                reply_to=reply_to,
+                cc=cc,
+                bcc=bcc,
+                tags=tags,
+            )
+
+        raise ValueError("No email provider configured (SMTP credentials or RESEND_API_KEY required)")
 
     async def _send_via_resend(
         self,
@@ -88,11 +88,11 @@ class EmailService:
 
         Tests and existing code may patch this method, so keep signature stable.
         """
-        if not self.api_key:
+        if not self.resend_api_key:
             raise ValueError("RESEND_API_KEY not configured")
 
         payload = {
-            "from": from_email or self.from_email,
+            "from": from_email or self.resend_from_email,
             "to": [to] if isinstance(to, str) else to,
             "subject": subject,
             "html": html,
@@ -113,7 +113,7 @@ class EmailService:
             response = await client.post(
                 f"{self.base_url}/emails",
                 headers={
-                    "Authorization": f"Bearer {self.api_key}",
+                    "Authorization": f"Bearer {self.resend_api_key}",
                     "Content-Type": "application/json",
                 },
                 json=payload,

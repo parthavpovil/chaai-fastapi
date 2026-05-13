@@ -5,7 +5,7 @@ Environment variables and settings management using Pydantic Settings
 import logging
 import os
 from typing import List
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings
 
 _config_logger = logging.getLogger(__name__)
@@ -100,6 +100,20 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = Field(default="", description="SMTP password")
     SMTP_FROM_EMAIL: str = Field(default="", description="Sender email for SMTP delivery")
     SMTP_USE_TLS: bool = Field(default=True, description="Use STARTTLS for SMTP (port 587)")
+
+    @field_validator("SMTP_PORT", mode="before")
+    @classmethod
+    def _default_smtp_port(cls, value):
+        if value in (None, ""):
+            return 587
+        return value
+
+    @field_validator("SMTP_USE_TLS", mode="before")
+    @classmethod
+    def _default_smtp_use_tls(cls, value):
+        if value in (None, ""):
+            return True
+        return value
 
     # Email Verification
     EMAIL_VERIFICATION_PIN_LENGTH: int = Field(default=6, description="Email verification PIN length")
