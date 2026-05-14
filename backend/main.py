@@ -77,10 +77,14 @@ async def lifespan(_app: FastAPI):
     jobs (monitoring, agent-status, reconciliation, metrics) run in the
     dedicated arq worker container — see app/tasks/scheduled_jobs.py.
     """
+    logger.info("LIFESPAN: enter")
     _init_sentry()
+    logger.info("LIFESPAN: sentry inited, calling init_db")
     await init_db()
+    logger.info("LIFESPAN: init_db done")
 
     asyncio.create_task(websocket_webchat.cleanup_stale_customer_connections())
+    logger.info("LIFESPAN: cleanup task scheduled")
 
     from app.services.redis_pubsub import redis_pubsub
     from app.services.websocket_manager import websocket_manager, customer_websocket_manager
@@ -94,9 +98,11 @@ async def lifespan(_app: FastAPI):
             await customer_websocket_manager.deliver_to_local(workspace_id, message)
 
     asyncio.create_task(redis_pubsub.start_listener(_redis_dispatch))
+    logger.info("LIFESPAN: redis pubsub task scheduled, about to yield")
 
     yield
 
+    logger.info("LIFESPAN: post-yield, shutting down")
     await close_db()
 
 
