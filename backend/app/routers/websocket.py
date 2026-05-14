@@ -9,7 +9,7 @@ from typing import Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.database import get_db
+from app.database import get_db, AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 from app.middleware.auth_middleware import get_current_user, get_current_workspace
@@ -32,7 +32,6 @@ _WS_DB_QUERY_TIMEOUT = 5.0  # max time any WS-handler DB query can hang before w
 async def websocket_endpoint(
     websocket: WebSocket,
     workspace_id: str,
-    db: AsyncSession = Depends(get_db)
 ):
     """
     WebSocket endpoint for real-time communication.
@@ -47,6 +46,16 @@ async def websocket_endpoint(
         - {"type": "ping"} - Keep-alive ping
         - {"type": "subscribe", "events": [...]} - Event subscription
         - {"type": "get_stats"} - Request workspace statistics
+
+    DB session lifetime: this endpoint deliberately does NOT take
+    `db: AsyncSession = Depends(get_db)`. FastAPI keeps Depends-injected
+    sessions alive for the entire WebSocket connection, which leaves a
+    Postgres connection pinned in "idle in transaction" state for as long
+    as the agent stays connected. With many concurrent WS clients the
+    pool exhausts and request handlers block waiting for connections,
+    eventually missing gunicorn's heartbeat → SIGKILL. Instead we open
+    a short-lived session for auth, and a fresh session per inbound
+    message — released the moment the handler returns.
     """
     connection: Optional[WebSocketConnection] = None
 
@@ -70,7 +79,10 @@ async def websocket_endpoint(
             await websocket.close(code=4001, reason="Expected {type:auth, token:...}")
             return
 
-        connection = await websocket_manager.connect(websocket, token, db, already_accepted=True)
+        async with AsyncSessionLocal() as auth_db:
+            connection = await websocket_manager.connect(
+                websocket, token, auth_db, already_accepted=True
+            )
 
         if not connection:
             return
@@ -79,16 +91,16 @@ async def websocket_endpoint(
         if connection.workspace_id != workspace_id:
             await websocket.close(code=4003, reason="Workspace ID mismatch")
             return
-        
+
         # Connection established successfully
         logger.info(f"WebSocket connection established: {connection.connection_id}")
-        
+
         # Message handling loop
         while True:
             try:
                 # Wait for incoming message
                 data = await websocket.receive_text()
-                
+
                 # Parse message
                 try:
                     message = json.loads(data)
@@ -98,9 +110,11 @@ async def websocket_endpoint(
                         "message": "Invalid JSON format"
                     })
                     continue
-                
-                # Handle message based on type
-                await handle_websocket_message(connection, message, db)
+
+                # Fresh DB session per message — released as soon as the handler returns,
+                # so no "idle in transaction" leak across the WS lifetime.
+                async with AsyncSessionLocal() as msg_db:
+                    await handle_websocket_message(connection, message, msg_db)
                 
             except WebSocketDisconnect:
                 logger.info(f"WebSocket client disconnected: {connection.connection_id}")

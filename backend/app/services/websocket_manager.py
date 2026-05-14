@@ -686,22 +686,29 @@ class CustomerWebSocketManager:
                 session_token=session_token,
             )
 
+            old_to_close: Optional[CustomerWebSocketConnection] = None
             async with self._lock:
                 is_first_for_workspace = workspace_id not in self.customer_connections
                 if is_first_for_workspace:
                     self.customer_connections[workspace_id] = {}
 
-                # Replace any existing connection for this session_token
-                old = self.customer_connections[workspace_id].get(session_token)
-                if old:
-                    self.connections_by_id.pop(old.connection_id, None)
-                    try:
-                        await old.websocket.close(code=1001, reason="Replaced by new connection")
-                    except Exception:
-                        pass
+                # Capture any existing connection for this session_token — but close
+                # it OUTSIDE the lock (per the _lock invariant — see __init__).
+                # Holding the lock across `websocket.close()` of a possibly-stalled
+                # client would stall every other operation on this manager, which
+                # is what caused widget reconnects to cascade into worker timeouts.
+                old_to_close = self.customer_connections[workspace_id].get(session_token)
+                if old_to_close:
+                    self.connections_by_id.pop(old_to_close.connection_id, None)
 
                 self.customer_connections[workspace_id][session_token] = connection
                 self.connections_by_id[connection_id] = connection
+
+            if old_to_close is not None:
+                try:
+                    await old_to_close.websocket.close(code=1001, reason="Replaced by new connection")
+                except Exception:
+                    pass
 
             # Subscribe to Redis channel for this workspace (idempotent per worker)
             if is_first_for_workspace:

@@ -7,14 +7,13 @@ The widget connects here to receive server-pushed events instead of polling.
 import json
 import asyncio
 import logging
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
 _AUTH_TIMEOUT = 10.0  # seconds
 
 logger = logging.getLogger(__name__)
 
-from app.database import get_db
+from app.database import AsyncSessionLocal
 from app.services.websocket_manager import customer_websocket_manager
 
 router = APIRouter()
@@ -25,7 +24,6 @@ async def webchat_websocket_endpoint(
     websocket: WebSocket,
     workspace_id: str,
     widget_id: str = Query(..., description="Widget ID for the webchat channel"),
-    db: AsyncSession = Depends(get_db),
 ):
     """
     Customer-facing WebSocket endpoint.
@@ -63,9 +61,16 @@ async def webchat_websocket_endpoint(
             await websocket.close(code=4001, reason="Expected {type:auth, session_token:...}")
             return
 
-        connection = await customer_websocket_manager.connect(
-            websocket, widget_id, session_token, db, already_accepted=True
-        )
+        # Use a short-lived DB session JUST for the auth lookup. Using
+        # `db: AsyncSession = Depends(get_db)` on a WebSocket endpoint keeps the
+        # session (and an "idle in transaction" Postgres connection) open for
+        # the entire WS lifetime — with 4 gunicorn workers × many customers, the
+        # pool gets exhausted, request handlers block waiting for connections,
+        # and gunicorn's heartbeat times out → SIGKILL.
+        async with AsyncSessionLocal() as db:
+            connection = await customer_websocket_manager.connect(
+                websocket, widget_id, session_token, db, already_accepted=True
+            )
         if not connection:
             return
 
