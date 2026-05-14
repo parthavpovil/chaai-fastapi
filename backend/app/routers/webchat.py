@@ -334,24 +334,34 @@ async def send_webchat_message(
     It validates the widget_id, enforces rate limits, and processes the message
     through the AI pipeline.
     """
+    import time as _time
+    _t0 = _time.monotonic()
+    def _tick(label: str) -> None:
+        # Compact step-timing log to pinpoint which phase of /api/webchat/send
+        # is slow when nginx returns 504. Remove once the cause is identified.
+        logger.info("[webchat/send] %s @ +%.2fs", label, _time.monotonic() - _t0)
+
+    _tick("enter")
     try:
         # 1. Validate widget_id and get channel
         channel = await get_webchat_channel_by_widget_id(db, request.widget_id)
+        _tick("channel lookup done")
         if not channel:
             raise HTTPException(
                 status_code=404,
                 detail="Widget not found or inactive"
             )
-        
+
         # 2. Generate or use existing session token
         session_token = request.session_token or generate_session_token()
-        
+
         # 3. Check rate limits
         try:
             await check_webchat_rate_limit(
                 session_token=session_token,
                 workspace_id=str(channel.workspace_id)
             )
+            _tick("rate limit done")
         except RateLimitExceededError as e:
             return JSONResponse(
                 status_code=429,
@@ -363,7 +373,7 @@ async def send_webchat_message(
                     "error": str(e)
                 }
             )
-        
+
         # 4. Process message through complete pipeline
         try:
             # Derive message type for media messages
@@ -374,6 +384,7 @@ async def send_webchat_message(
             message_content = request.message or "[User sent a file]"
 
             # Step 1: Process incoming message
+            _tick("calling process_incoming_message")
             processing_result = await process_incoming_message(
                 db=db,
                 workspace_id=str(channel.workspace_id),
@@ -392,6 +403,7 @@ async def send_webchat_message(
                 channel_type="webchat",
             )
 
+            _tick("process_incoming_message done")
             conversation_id = str(processing_result["conversation"].id)
             user_message_id = str(processing_result["message"].id)
 
@@ -404,6 +416,7 @@ async def send_webchat_message(
                 msg_obj.media_size = request.media_size
                 msg_obj.msg_type = msg_type
                 await db.commit()
+                _tick("media commit done")
 
             # Send WebSocket notification for customer message
             await notify_new_message(
@@ -412,6 +425,7 @@ async def send_webchat_message(
                 conversation_id=conversation_id,
                 message_id=user_message_id
             )
+            _tick("notify_new_message done")
 
             # Hand off the AI pipeline to the background worker.
             # The reply will arrive via WebSocket (notify_customer_new_message).
@@ -419,6 +433,7 @@ async def send_webchat_message(
                 select(Workspace.tier).where(Workspace.id == channel.workspace_id)
             )
             workspace_tier = workspace_tier_result.scalar_one_or_none() or "free"
+            _tick("workspace tier lookup done")
 
             from app.tasks.message_tasks import enqueue_message_job
             await enqueue_message_job(
@@ -429,6 +444,7 @@ async def send_webchat_message(
                 channel_id=str(channel.id),
                 tier=workspace_tier,
             )
+            _tick("enqueue done")
             response_content = None
             
         except BlockedContactError:
