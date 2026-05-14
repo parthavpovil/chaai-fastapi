@@ -117,11 +117,14 @@ services:
           memory: 1280m  # ~416 MB per Gunicorn worker across 3 workers
           cpus: "1.0"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      # --max-time 5: fail fast if no worker has picked up the request yet
+      # (gunicorn binds :8000 before workers finish cold-import, so without
+      # this curl blocks the full timeout waiting for a worker to accept).
+      test: ["CMD", "curl", "-f", "--max-time", "5", "http://localhost:8000/health"]
       interval: 10s
       timeout: 10s
       retries: 5
-      start_period: 180s
+      start_period: 240s
     networks:
       - chatsaas-network
 
