@@ -117,8 +117,18 @@ app = FastAPI(
 )
 
 # Prometheus metrics — exposes GET /metrics (Prometheus scrape format)
-from prometheus_fastapi_instrumentator import Instrumentator
-Instrumentator().instrument(app).expose(app, include_in_schema=False)
+# TEMPORARILY DISABLED: diagnosing lifespan hang after yield.
+# from prometheus_fastapi_instrumentator import Instrumentator
+# Instrumentator().instrument(app).expose(app, include_in_schema=False)
+
+
+@app.on_event("startup")
+async def _debug_post_yield_marker() -> None:
+    """If this logs, Starlette's on_event startup handlers run after our lifespan
+    yields, meaning the previous hang was caused by a third-party on_event hook
+    (probably the Prometheus instrumentator). If it does NOT log but our LIFESPAN
+    logs do, the hang is elsewhere in the Starlette/uvicorn handshake."""
+    logger.info("LIFESPAN: on_event startup handler ran (post-yield)")
 
 # Configure CORS
 # /api/webchat/* and /ws/webchat/* are public widget endpoints — any origin is allowed
