@@ -68,16 +68,28 @@ class RedisPubSub:
         callback(channel, message_dict). Launch with asyncio.create_task().
 
         Uses `pubsub.listen()` — an async iterator backed by Redis's blocking
-        read. The coroutine parks the event loop until a message actually
-        arrives, instead of busy-polling at 67 Hz. This is critical: the old
-        polling implementation ran in the same event loop as WebSocket I/O,
-        and any momentary Redis stall would starve the WS handlers and trigger
-        Gunicorn WORKER TIMEOUTs.
+        read. Once subscribed to at least one channel, the coroutine parks
+        the event loop until a message actually arrives, instead of
+        busy-polling at 67 Hz like the old implementation did.
+
+        IMPORTANT: redis-py's `PubSub.listen()` is implemented as
+        `while self.subscribed: ...`. With zero subscriptions it returns
+        immediately, so we must guard the outer reconnect loop with an
+        explicit "wait until something is subscribed" sleep — otherwise we
+        spin a tight CPU loop with no awaits between iterations, starving
+        the event loop and preventing lifespan startup from completing.
         """
         self._callback = callback
         logger.info("Redis pub/sub listener started")
         while True:
             try:
+                # Park until at least one subscription exists. Subscriptions are
+                # added by WebSocket handlers as connections arrive; on a freshly
+                # booted worker with no WS clients yet, this loop is what keeps
+                # the event loop free for the rest of lifespan startup.
+                while not self._subscriptions:
+                    await asyncio.sleep(0.5)
+
                 pubsub = self._get_pubsub()
                 async for msg in pubsub.listen():
                     if msg.get("type") != "message":
