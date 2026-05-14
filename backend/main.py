@@ -6,11 +6,11 @@ import functools
 import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.types import ASGIApp, Receive, Scope, Send
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -28,7 +28,7 @@ from app.routers import ai_agents as ai_agents_router
 from app.routers import websocket_webchat
 from app.routers import permissions as permissions_router
 from app.routers import admin_permissions as admin_permissions_router
-from app.middleware.maintenance_middleware import maintenance_mode_middleware
+from app.middleware.maintenance_middleware import MaintenanceModeMiddleware
 from app.middleware.monitoring_middleware import init_monitoring_middleware, MonitoringMiddleware
 from app.middleware.request_id_middleware import RequestIDMiddleware
 
@@ -77,14 +77,12 @@ async def lifespan(_app: FastAPI):
     jobs (monitoring, agent-status, reconciliation, metrics) run in the
     dedicated arq worker container — see app/tasks/scheduled_jobs.py.
     """
-    logger.info("LIFESPAN: enter")
     _init_sentry()
-    logger.info("LIFESPAN: sentry inited, calling init_db")
     await init_db()
-    logger.info("LIFESPAN: init_db done")
 
-    asyncio.create_task(websocket_webchat.cleanup_stale_customer_connections())
-    logger.info("LIFESPAN: cleanup task scheduled")
+    cleanup_task = asyncio.create_task(
+        websocket_webchat.cleanup_stale_customer_connections()
+    )
 
     from app.services.redis_pubsub import redis_pubsub
     from app.services.websocket_manager import websocket_manager, customer_websocket_manager
@@ -97,12 +95,12 @@ async def lifespan(_app: FastAPI):
             workspace_id = channel[len("ws:customer:"):]
             await customer_websocket_manager.deliver_to_local(workspace_id, message)
 
-    asyncio.create_task(redis_pubsub.start_listener(_redis_dispatch))
-    logger.info("LIFESPAN: redis pubsub task scheduled, about to yield")
+    pubsub_task = asyncio.create_task(redis_pubsub.start_listener(_redis_dispatch))
 
     yield
 
-    logger.info("LIFESPAN: post-yield, shutting down")
+    cleanup_task.cancel()
+    pubsub_task.cancel()
     await close_db()
 
 
@@ -116,19 +114,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Prometheus metrics — exposes GET /metrics (Prometheus scrape format)
-# TEMPORARILY DISABLED: diagnosing lifespan hang after yield.
+# Prometheus metrics — exposes GET /metrics (Prometheus scrape format).
+# Currently disabled while we verify the BaseHTTPMiddleware → pure-ASGI
+# migration below resolves the lifespan-startup hang. Re-enable once the
+# fix is confirmed in production.
 # from prometheus_fastapi_instrumentator import Instrumentator
 # Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
-
-@app.on_event("startup")
-async def _debug_post_yield_marker() -> None:
-    """If this logs, Starlette's on_event startup handlers run after our lifespan
-    yields, meaning the previous hang was caused by a third-party on_event hook
-    (probably the Prometheus instrumentator). If it does NOT log but our LIFESPAN
-    logs do, the hang is elsewhere in the Starlette/uvicorn handshake."""
-    logger.info("LIFESPAN: on_event startup handler ran (post-yield)")
 
 # Configure CORS
 # /api/webchat/* and /ws/webchat/* are public widget endpoints — any origin is allowed
@@ -158,47 +150,81 @@ def _origin_matches_allowed_origin(origin: str, allowed_origin: str) -> bool:
 
     return origin_host == allowed_host or origin_host.endswith(f".{allowed_host}")
 
-class SplitCORSMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: Request, call_next):
-        path = request.url.path
-        is_webchat = any(path.startswith(p) for p in _WEBCHAT_PREFIXES)
-        origin = request.headers.get("origin", "")
+class SplitCORSMiddleware:
+    """Pure-ASGI CORS middleware (not BaseHTTPMiddleware).
 
-        if request.method == "OPTIONS":
-            response = Response(status_code=200)
-        else:
-            try:
-                response = await call_next(request)
-            except Exception:
-                response = Response(status_code=500)
+    BaseHTTPMiddleware in Starlette 0.37.x interacts badly with the
+    lifespan handshake under gunicorn's UvicornWorker — even though it
+    forwards non-HTTP scopes, its construction sets up anyio state that
+    can prevent uvicorn from observing lifespan.startup.complete. Pure
+    ASGI middleware avoids that entirely.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path = scope.get("path", "")
+        is_webchat = any(path.startswith(p) for p in _WEBCHAT_PREFIXES)
+
+        origin = ""
+        for header_name, header_value in scope.get("headers", []):
+            if header_name == b"origin":
+                origin = header_value.decode("latin-1", errors="replace")
+                break
 
         if is_webchat:
-            response.headers["Access-Control-Allow-Origin"] = "*"
-            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        elif any(
+            cors_headers = [
+                (b"access-control-allow-origin", b"*"),
+                (b"access-control-allow-methods", b"GET, POST, OPTIONS"),
+                (b"access-control-allow-headers", b"Content-Type, Authorization"),
+            ]
+        elif origin and any(
             _origin_matches_allowed_origin(origin, allowed_origin)
             for allowed_origin in settings.ALLOWED_ORIGINS
         ):
-            response.headers["Access-Control-Allow-Origin"] = origin
-            response.headers["Access-Control-Allow-Credentials"] = "true"
-            response.headers["Access-Control-Allow-Methods"] = "*"
-            response.headers["Access-Control-Allow-Headers"] = "*"
-            response.headers["Vary"] = "Origin"
+            cors_headers = [
+                (b"access-control-allow-origin", origin.encode("latin-1")),
+                (b"access-control-allow-credentials", b"true"),
+                (b"access-control-allow-methods", b"*"),
+                (b"access-control-allow-headers", b"*"),
+                (b"vary", b"Origin"),
+            ]
+        else:
+            cors_headers = []
 
-        return response
+        if scope.get("method") == "OPTIONS":
+            await send({
+                "type": "http.response.start",
+                "status": 200,
+                "headers": cors_headers,
+            })
+            await send({"type": "http.response.body", "body": b""})
+            return
 
+        async def send_with_cors(message: dict) -> None:
+            if message["type"] == "http.response.start" and cors_headers:
+                headers = list(message.get("headers", []))
+                headers.extend(cors_headers)
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_with_cors)
+
+
+# Middleware stack — last-added wraps all previous, so execution order
+# on a request is: RequestID → Monitoring → Maintenance → SplitCORS → app.
 app.add_middleware(SplitCORSMiddleware)
+app.add_middleware(MaintenanceModeMiddleware)
 
-# Add maintenance mode middleware
-app.middleware("http")(maintenance_mode_middleware)
-
-# Add monitoring middleware
 monitoring_middleware = init_monitoring_middleware(app)
 app.add_middleware(MonitoringMiddleware, max_history=1000)
 
 # Request-ID middleware — outermost so every downstream log line carries the ID.
-# In Starlette, the last add_middleware call wraps all previous layers.
 app.add_middleware(RequestIDMiddleware)
 
 # Mount static files (widget.js, etc.)
