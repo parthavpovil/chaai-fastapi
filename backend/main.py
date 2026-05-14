@@ -312,15 +312,23 @@ async def _run_health_checks() -> dict:
         checks["checks"]["database"] = {"status": "unhealthy", "error": str(e)}
         checks["status"] = "unhealthy"
 
-    # R2 — boto3 is synchronous; run in thread pool so the event loop is free
+    # R2 — boto3 is synchronous (default connect/read timeouts ≈ 60 s each).
+    # Wrap in asyncio.wait_for so a cold/slow R2 connection can't block the
+    # endpoint past the 10 s docker healthcheck timeout. A timed-out R2 check
+    # is recorded as "unhealthy" in the body but the endpoint still returns
+    # 200 within a few seconds — the docker healthcheck only cares that we
+    # respond at all.
     r2_start = time.monotonic()
     try:
         from app.services.r2_storage import _get_r2_client
         r2 = _get_r2_client()
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            functools.partial(r2.head_bucket, Bucket=settings.R2_BUCKET_NAME),
+        await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                functools.partial(r2.head_bucket, Bucket=settings.R2_BUCKET_NAME),
+            ),
+            timeout=3.0,
         )
         checks["checks"]["storage"] = {
             "status": "healthy",
@@ -328,6 +336,13 @@ async def _run_health_checks() -> dict:
             "bucket": settings.R2_BUCKET_NAME,
             "response_time_ms": round((time.monotonic() - r2_start) * 1000, 2),
         }
+    except asyncio.TimeoutError:
+        checks["checks"]["storage"] = {
+            "status": "unhealthy",
+            "backend": "cloudflare-r2",
+            "error": "head_bucket exceeded 3s timeout",
+        }
+        checks["status"] = "unhealthy"
     except Exception as e:
         checks["checks"]["storage"] = {
             "status": "unhealthy",
