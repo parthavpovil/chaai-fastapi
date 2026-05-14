@@ -10,16 +10,9 @@ import logging
 from typing import Optional
 
 import redis.asyncio as aioredis
-from arq import cron
 from arq.connections import RedisSettings
 
 from app.config import settings
-from app.tasks.scheduled_jobs import (
-    run_agent_status_check,
-    run_health_check,
-    run_metrics_collection,
-    run_reconciliation_sweep,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -459,24 +452,8 @@ async def process_message_job(
 class PaidMessageWorkerSettings:
     """Dedicated worker for starter / growth / pro workspaces.
     Run with: arq app.tasks.message_tasks.PaidMessageWorkerSettings
-
-    Also hosts the application-wide cron jobs (agent status, reconciliation,
-    metrics, health) — `unique=True` makes arq lock each cron firing in Redis
-    so the job runs exactly once even if multiple paid workers are scaled out.
     """
-    functions = [
-        process_message_job,
-        run_agent_status_check,
-        run_reconciliation_sweep,
-        run_metrics_collection,
-        run_health_check,
-    ]
-    cron_jobs = [
-        cron(run_agent_status_check,   minute=set(range(0, 60)), unique=True),  # every 1m
-        cron(run_reconciliation_sweep, minute=set(range(0, 60)), unique=True),  # every 1m
-        cron(run_metrics_collection,   minute=set(range(0, 60)), unique=True),  # every 1m
-        cron(run_health_check,         minute=set(range(0, 60, 5)), unique=True),  # every 5m
-    ]
+    functions = [process_message_job]
     queue_name = QUEUE_PAID
     redis_settings = RedisSettings.from_dsn(settings.redis_queue_url)
     max_jobs = 10

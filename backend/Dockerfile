@@ -54,12 +54,9 @@ USER chatsaas
 # Expose port
 EXPOSE 8000
 
-# Health check — start_period must account for cold-import time (~70s on
-# constrained CPU containers) plus first cold R2 connection. --max-time 5
-# makes curl give up fast when gunicorn workers haven't dequeued the
-# connection yet (port is bound by master before workers finish import).
-HEALTHCHECK --interval=10s --timeout=10s --start-period=240s --retries=5 \
-    CMD curl -f --max-time 5 http://localhost:8000/health || exit 1
+# Health check
+HEALTHCHECK --interval=10s --timeout=10s --start-period=20s --retries=5 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Default command
 CMD ["/app/entrypoint.sh"]

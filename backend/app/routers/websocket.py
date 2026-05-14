@@ -23,9 +23,6 @@ router = APIRouter()
 
 
 _AUTH_TIMEOUT = 10.0  # seconds the client has to send the auth message
-_WS_DB_QUERY_TIMEOUT = 5.0  # max time any WS-handler DB query can hang before we abort
-                            # and notify the client — protects the worker's event loop
-                            # from a saturated Postgres or row-level lock.
 
 
 @router.websocket("/ws/{workspace_id}")
@@ -209,17 +206,18 @@ async def handle_stats_request(
     """
     try:
         from app.services.conversation_manager import ConversationManager
-
+        
+        # Get conversation statistics
         conversation_manager = ConversationManager(db)
-        conversation_stats = await asyncio.wait_for(
-            conversation_manager.get_conversation_statistics(connection.workspace_id),
-            timeout=_WS_DB_QUERY_TIMEOUT,
+        conversation_stats = await conversation_manager.get_conversation_statistics(
+            connection.workspace_id
         )
-
+        
+        # Get WebSocket connection stats
         ws_connections = await websocket_manager.get_workspace_connections(
             connection.workspace_id
         )
-
+        
         stats = {
             "conversations": conversation_stats,
             "websocket_connections": len(ws_connections),
@@ -231,21 +229,12 @@ async def handle_stats_request(
                 for conn in ws_connections
             ]
         }
-
+        
         await connection.send_message({
             "type": "workspace_stats",
             "stats": stats
         })
-
-    except asyncio.TimeoutError:
-        logger.warning(
-            "WS stats query timed out for workspace %s", connection.workspace_id
-        )
-        await connection.send_message({
-            "type": "error",
-            "code": "query_timeout",
-            "message": "Stats query timed out — try again shortly"
-        })
+        
     except Exception as e:
         await connection.send_message({
             "type": "error",
@@ -275,16 +264,13 @@ async def handle_conversations_request(
         offset = message.get("offset", 0)
         
         conversation_manager = ConversationManager(db)
-        conversations = await asyncio.wait_for(
-            conversation_manager.get_workspace_conversations(
-                workspace_id=connection.workspace_id,
-                status=status,
-                limit=limit,
-                offset=offset,
-            ),
-            timeout=_WS_DB_QUERY_TIMEOUT,
+        conversations = await conversation_manager.get_workspace_conversations(
+            workspace_id=connection.workspace_id,
+            status=status,
+            limit=limit,
+            offset=offset
         )
-
+        
         # Format conversation data for WebSocket response
         conversation_data = []
         for conv in conversations:
@@ -297,7 +283,7 @@ async def handle_conversations_request(
                 "created_at": conv.created_at.isoformat(),
                 "updated_at": conv.updated_at.isoformat()
             })
-
+        
         await connection.send_message({
             "type": "conversations_list",
             "conversations": conversation_data,
@@ -308,16 +294,7 @@ async def handle_conversations_request(
                 "offset": offset
             }
         })
-
-    except asyncio.TimeoutError:
-        logger.warning(
-            "WS conversations query timed out for workspace %s", connection.workspace_id
-        )
-        await connection.send_message({
-            "type": "error",
-            "code": "query_timeout",
-            "message": "Conversations query timed out — try again shortly"
-        })
+        
     except Exception as e:
         await connection.send_message({
             "type": "error",
@@ -339,14 +316,12 @@ async def handle_agents_request(
     try:
         from sqlalchemy import select
         from app.models.agent import Agent
-
-        result = await asyncio.wait_for(
-            db.execute(
-                select(Agent)
-                .where(Agent.workspace_id == connection.workspace_id)
-                .order_by(Agent.created_at)
-            ),
-            timeout=_WS_DB_QUERY_TIMEOUT,
+        
+        # Get workspace agents
+        result = await db.execute(
+            select(Agent)
+            .where(Agent.workspace_id == connection.workspace_id)
+            .order_by(Agent.created_at)
         )
         agents = result.scalars().all()
         
@@ -366,16 +341,7 @@ async def handle_agents_request(
             "agents": agent_data,
             "total_count": len(agent_data)
         })
-
-    except asyncio.TimeoutError:
-        logger.warning(
-            "WS agents query timed out for workspace %s", connection.workspace_id
-        )
-        await connection.send_message({
-            "type": "error",
-            "code": "query_timeout",
-            "message": "Agents query timed out — try again shortly"
-        })
+        
     except Exception as e:
         await connection.send_message({
             "type": "error",

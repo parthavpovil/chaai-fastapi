@@ -6,11 +6,11 @@ import functools
 import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.middleware.base import BaseHTTPMiddleware
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -28,7 +28,7 @@ from app.routers import ai_agents as ai_agents_router
 from app.routers import websocket_webchat
 from app.routers import permissions as permissions_router
 from app.routers import admin_permissions as admin_permissions_router
-from app.middleware.maintenance_middleware import MaintenanceModeMiddleware
+from app.middleware.maintenance_middleware import maintenance_mode_middleware
 from app.middleware.monitoring_middleware import init_monitoring_middleware, MonitoringMiddleware
 from app.middleware.request_id_middleware import RequestIDMiddleware
 
@@ -69,21 +69,30 @@ def _init_sentry() -> None:
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
-    """Application lifespan manager.
-
-    Web workers run ONLY per-worker tasks (stale-WS cleanup, Redis pub/sub
-    listener — both operate on local in-memory state). Recurring singleton
-    jobs (monitoring, agent-status, reconciliation, metrics) run in the
-    dedicated arq worker container — see app/tasks/scheduled_jobs.py.
-    """
+async def lifespan(app: FastAPI):
+    """Application lifespan manager"""
+    # Startup
     _init_sentry()
     await init_db()
+    
+    # Start monitoring tasks in production
+    if not settings.DEBUG:
+        from app.tasks.monitoring_tasks import start_monitoring_tasks
+        await start_monitoring_tasks()
 
-    cleanup_task = asyncio.create_task(
-        websocket_webchat.cleanup_stale_customer_connections()
-    )
+    # Start agent status heartbeat check
+    from app.tasks.agent_status_tasks import start_agent_status_tasks
+    await start_agent_status_tasks()
 
+    # Start reconciliation sweeper — re-enqueues orphaned webchat messages
+    from app.tasks.reconciliation import start_reconciliation_sweeper
+    await start_reconciliation_sweeper()
+
+    # Start customer WebSocket stale-connection cleanup
+    import asyncio
+    asyncio.create_task(websocket_webchat.cleanup_stale_customer_connections())
+
+    # Start Redis pub/sub listener — forwards cross-worker broadcasts to local WS connections
     from app.services.redis_pubsub import redis_pubsub
     from app.services.websocket_manager import websocket_manager, customer_websocket_manager
 
@@ -95,12 +104,21 @@ async def lifespan(_app: FastAPI):
             workspace_id = channel[len("ws:customer:"):]
             await customer_websocket_manager.deliver_to_local(workspace_id, message)
 
-    pubsub_task = asyncio.create_task(redis_pubsub.start_listener(_redis_dispatch))
+    asyncio.create_task(redis_pubsub.start_listener(_redis_dispatch))
 
     yield
+    
+    # Shutdown
+    if not settings.DEBUG:
+        from app.tasks.monitoring_tasks import stop_monitoring_tasks
+        await stop_monitoring_tasks()
 
-    cleanup_task.cancel()
-    pubsub_task.cancel()
+    from app.tasks.agent_status_tasks import stop_agent_status_tasks
+    await stop_agent_status_tasks()
+
+    from app.tasks.reconciliation import stop_reconciliation_sweeper
+    await stop_reconciliation_sweeper()
+
     await close_db()
 
 
@@ -114,13 +132,9 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Prometheus metrics — exposes GET /metrics (Prometheus scrape format).
-# Currently disabled while we verify the BaseHTTPMiddleware → pure-ASGI
-# migration below resolves the lifespan-startup hang. Re-enable once the
-# fix is confirmed in production.
-# from prometheus_fastapi_instrumentator import Instrumentator
-# Instrumentator().instrument(app).expose(app, include_in_schema=False)
-
+# Prometheus metrics — exposes GET /metrics (Prometheus scrape format)
+from prometheus_fastapi_instrumentator import Instrumentator
+Instrumentator().instrument(app).expose(app, include_in_schema=False)
 
 # Configure CORS
 # /api/webchat/* and /ws/webchat/* are public widget endpoints — any origin is allowed
@@ -150,81 +164,44 @@ def _origin_matches_allowed_origin(origin: str, allowed_origin: str) -> bool:
 
     return origin_host == allowed_host or origin_host.endswith(f".{allowed_host}")
 
-class SplitCORSMiddleware:
-    """Pure-ASGI CORS middleware (not BaseHTTPMiddleware).
-
-    BaseHTTPMiddleware in Starlette 0.37.x interacts badly with the
-    lifespan handshake under gunicorn's UvicornWorker — even though it
-    forwards non-HTTP scopes, its construction sets up anyio state that
-    can prevent uvicorn from observing lifespan.startup.complete. Pure
-    ASGI middleware avoids that entirely.
-    """
-
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
-
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        path = scope.get("path", "")
+class SplitCORSMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        path = request.url.path
         is_webchat = any(path.startswith(p) for p in _WEBCHAT_PREFIXES)
+        origin = request.headers.get("origin", "")
 
-        origin = ""
-        for header_name, header_value in scope.get("headers", []):
-            if header_name == b"origin":
-                origin = header_value.decode("latin-1", errors="replace")
-                break
+        if request.method == "OPTIONS":
+            response = Response(status_code=200)
+        else:
+            response = await call_next(request)
 
         if is_webchat:
-            cors_headers = [
-                (b"access-control-allow-origin", b"*"),
-                (b"access-control-allow-methods", b"GET, POST, OPTIONS"),
-                (b"access-control-allow-headers", b"Content-Type, Authorization"),
-            ]
-        elif origin and any(
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
+        elif any(
             _origin_matches_allowed_origin(origin, allowed_origin)
             for allowed_origin in settings.ALLOWED_ORIGINS
         ):
-            cors_headers = [
-                (b"access-control-allow-origin", origin.encode("latin-1")),
-                (b"access-control-allow-credentials", b"true"),
-                (b"access-control-allow-methods", b"*"),
-                (b"access-control-allow-headers", b"*"),
-                (b"vary", b"Origin"),
-            ]
-        else:
-            cors_headers = []
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Methods"] = "*"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+            response.headers["Vary"] = "Origin"
 
-        if scope.get("method") == "OPTIONS":
-            await send({
-                "type": "http.response.start",
-                "status": 200,
-                "headers": cors_headers,
-            })
-            await send({"type": "http.response.body", "body": b""})
-            return
+        return response
 
-        async def send_with_cors(message: dict) -> None:
-            if message["type"] == "http.response.start" and cors_headers:
-                headers = list(message.get("headers", []))
-                headers.extend(cors_headers)
-                message = {**message, "headers": headers}
-            await send(message)
-
-        await self.app(scope, receive, send_with_cors)
-
-
-# Middleware stack — last-added wraps all previous, so execution order
-# on a request is: RequestID → Monitoring → Maintenance → SplitCORS → app.
 app.add_middleware(SplitCORSMiddleware)
-app.add_middleware(MaintenanceModeMiddleware)
 
+# Add maintenance mode middleware
+app.middleware("http")(maintenance_mode_middleware)
+
+# Add monitoring middleware
 monitoring_middleware = init_monitoring_middleware(app)
 app.add_middleware(MonitoringMiddleware, max_history=1000)
 
 # Request-ID middleware — outermost so every downstream log line carries the ID.
+# In Starlette, the last add_middleware call wraps all previous layers.
 app.add_middleware(RequestIDMiddleware)
 
 # Mount static files (widget.js, etc.)
@@ -354,23 +331,15 @@ async def _run_health_checks() -> dict:
         checks["checks"]["database"] = {"status": "unhealthy", "error": str(e)}
         checks["status"] = "unhealthy"
 
-    # R2 — boto3 is synchronous (default connect/read timeouts ≈ 60 s each).
-    # Wrap in asyncio.wait_for so a cold/slow R2 connection can't block the
-    # endpoint past the 10 s docker healthcheck timeout. A timed-out R2 check
-    # is recorded as "unhealthy" in the body but the endpoint still returns
-    # 200 within a few seconds — the docker healthcheck only cares that we
-    # respond at all.
+    # R2 — boto3 is synchronous; run in thread pool so the event loop is free
     r2_start = time.monotonic()
     try:
         from app.services.r2_storage import _get_r2_client
         r2 = _get_r2_client()
         loop = asyncio.get_event_loop()
-        await asyncio.wait_for(
-            loop.run_in_executor(
-                None,
-                functools.partial(r2.head_bucket, Bucket=settings.R2_BUCKET_NAME),
-            ),
-            timeout=3.0,
+        await loop.run_in_executor(
+            None,
+            functools.partial(r2.head_bucket, Bucket=settings.R2_BUCKET_NAME),
         )
         checks["checks"]["storage"] = {
             "status": "healthy",
@@ -378,13 +347,6 @@ async def _run_health_checks() -> dict:
             "bucket": settings.R2_BUCKET_NAME,
             "response_time_ms": round((time.monotonic() - r2_start) * 1000, 2),
         }
-    except asyncio.TimeoutError:
-        checks["checks"]["storage"] = {
-            "status": "unhealthy",
-            "backend": "cloudflare-r2",
-            "error": "head_bucket exceeded 3s timeout",
-        }
-        checks["status"] = "unhealthy"
     except Exception as e:
         checks["checks"]["storage"] = {
             "status": "unhealthy",

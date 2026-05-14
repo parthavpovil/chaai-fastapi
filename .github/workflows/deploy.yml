@@ -90,9 +90,6 @@ jobs:
         run: |
           sshpass -p "${{ secrets.VPS_PASSWORD }}" scp \
             -o StrictHostKeyChecking=no \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=20 \
-            -o TCPKeepAlive=yes \
             /tmp/docker-image.tar.gz \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
 
@@ -100,9 +97,6 @@ jobs:
         run: |
           sshpass -p "${{ secrets.VPS_PASSWORD }}" scp \
             -o StrictHostKeyChecking=no \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=20 \
-            -o TCPKeepAlive=yes \
             backend/docker-compose.prod.yml \
             backend/chatsaas-backend.service \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
@@ -239,18 +233,18 @@ jobs:
 
           # Wait for backend container to be healthy
           echo "Waiting for container to be healthy..."
-          for i in {1..90}; do
+          for i in {1..45}; do
             HEALTH=$(docker inspect chatsaas-backend --format='{{.State.Health.Status}}' 2>/dev/null || echo "unknown")
             if [ "$HEALTH" = "healthy" ]; then
               echo "Container is healthy!"
               break
             fi
-            if [ $i -eq 90 ]; then
+            if [ $i -eq 45 ]; then
               echo "Container failed to become healthy. Rolling back..."
               docker compose -f docker-compose.prod.yml stop backend
               exit 1
             fi
-            echo "Waiting... ($i/90) [status: $HEALTH]"
+            echo "Waiting... ($i/45) [status: $HEALTH]"
             sleep 4
           done
           
@@ -300,17 +294,11 @@ jobs:
         run: |
           sshpass -p "${{ secrets.VPS_PASSWORD }}" scp \
             -o StrictHostKeyChecking=no \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=20 \
-            -o TCPKeepAlive=yes \
             /tmp/deploy.sh \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}:/tmp/
-
+          
           sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh \
             -o StrictHostKeyChecking=no \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=20 \
-            -o TCPKeepAlive=yes \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             'bash /tmp/deploy.sh'
 
@@ -320,9 +308,6 @@ jobs:
 
           sshpass -p "${{ secrets.VPS_PASSWORD }}" ssh \
             -o StrictHostKeyChecking=no \
-            -o ServerAliveInterval=30 \
-            -o ServerAliveCountMax=20 \
-            -o TCPKeepAlive=yes \
             ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             'for i in {1..5}; do
               if curl -f http://localhost:8000/health > /dev/null 2>&1; then

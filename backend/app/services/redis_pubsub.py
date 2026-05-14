@@ -66,33 +66,26 @@ class RedisPubSub:
         """
         Background loop that reads messages from subscribed channels and calls
         callback(channel, message_dict). Launch with asyncio.create_task().
-
-        Uses `pubsub.listen()` — an async iterator backed by Redis's blocking
-        read. The coroutine parks the event loop until a message actually
-        arrives, instead of busy-polling at 67 Hz. This is critical: the old
-        polling implementation ran in the same event loop as WebSocket I/O,
-        and any momentary Redis stall would starve the WS handlers and trigger
-        Gunicorn WORKER TIMEOUTs.
         """
         self._callback = callback
         logger.info("Redis pub/sub listener started")
         while True:
             try:
-                pubsub = self._get_pubsub()
-                async for msg in pubsub.listen():
-                    if msg.get("type") != "message":
-                        continue
-                    try:
-                        channel: str = msg["channel"]
-                        data: dict = json.loads(msg["data"])
-                        if self._callback:
-                            await self._callback(channel, data)
-                    except Exception as e:
-                        logger.error(f"Redis pub/sub callback error: {e}", exc_info=True)
-            except asyncio.CancelledError:
-                raise
+                if not self._subscriptions:
+                    await asyncio.sleep(0.1)
+                    continue
+                msg = await self._pubsub.get_message(
+                    ignore_subscribe_messages=True, timeout=0.01
+                )
+                if msg and msg["type"] == "message":
+                    channel: str = msg["channel"]
+                    data: dict = json.loads(msg["data"])
+                    if self._callback:
+                        await self._callback(channel, data)
+                else:
+                    await asyncio.sleep(0.005)
             except Exception as e:
-                logger.error(f"Redis listener error, reconnecting in 1s: {e}", exc_info=True)
+                logger.error(f"Redis listener error: {e}", exc_info=True)
                 await asyncio.sleep(1)
 
 

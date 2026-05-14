@@ -27,19 +27,11 @@ services:
     networks:
       - chatsaas-network
 
-  # Redis — arq job queue, pub/sub, and cache. Used by every service.
+  # Redis for caching (optional)
   redis:
     image: redis:7-alpine
     container_name: chatsaas-redis
-    # `maxmemory` is set ~80MB below the container limit so Redis evicts/fails
-    # before the kernel OOM-kills it. `noeviction` makes writes fail loudly
-    # rather than silently dropping queued jobs or pub/sub data.
-    command: >
-      redis-server
-      --appendonly yes
-      --requirepass ${REDIS_PASSWORD}
-      --maxmemory 432mb
-      --maxmemory-policy noeviction
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     ports:
@@ -48,7 +40,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: 512m
+          memory: 256m
           cpus: "0.5"
     healthcheck:
       test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
@@ -114,17 +106,14 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1280m  # ~416 MB per Gunicorn worker across 3 workers
+          memory: 1g
           cpus: "1.0"
     healthcheck:
-      # --max-time 5: fail fast if no worker has picked up the request yet
-      # (gunicorn binds :8000 before workers finish cold-import, so without
-      # this curl blocks the full timeout waiting for a worker to accept).
-      test: ["CMD", "curl", "-f", "--max-time", "5", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 10s
       timeout: 10s
       retries: 5
-      start_period: 240s
+      start_period: 20s
     networks:
       - chatsaas-network
 

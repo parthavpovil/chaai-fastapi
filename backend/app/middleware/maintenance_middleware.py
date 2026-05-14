@@ -10,7 +10,6 @@ from fastapi import Request, Response, HTTPException, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from starlette.types import ASGIApp, Receive, Scope, Send
 
 logger = logging.getLogger(__name__)
 
@@ -176,59 +175,41 @@ class MaintenanceMode:
 maintenance_mode = MaintenanceMode()
 
 
-class MaintenanceModeMiddleware:
-    """Pure-ASGI maintenance mode middleware.
-
-    Implemented as pure ASGI (not via @app.middleware("http")) because that
-    decorator wraps the dispatch function in BaseHTTPMiddleware, which sits in
-    front of the lifespan protocol. On Starlette 0.37.x + uvicorn 0.29 + the
-    gunicorn UvicornWorker, that combination can prevent
-    "lifespan.startup.complete" from being delivered to uvicorn, leaving the
-    worker stuck "Waiting for application startup." forever.
+async def maintenance_mode_middleware(request: Request, call_next: Callable) -> Response:
     """
+    Middleware to check maintenance mode and block non-admin requests
+    
+    Args:
+        request: FastAPI request
+        call_next: Next middleware/endpoint
+    
+    Returns:
+        Response or maintenance mode error
+    """
+    try:
+        # Skip maintenance check for allowed endpoints
+        if maintenance_mode.is_allowed_endpoint(request.url.path):
+            return await call_next(request)
 
-    def __init__(self, app: ASGIApp) -> None:
-        self.app = app
+        is_maintenance, maintenance_message = await maintenance_mode.is_maintenance_mode()
 
-    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-
-        request = Request(scope, receive)
-
-        try:
-            if maintenance_mode.is_allowed_endpoint(request.url.path):
-                await self.app(scope, receive, send)
-                return
-
-            is_maintenance, maintenance_message = await maintenance_mode.is_maintenance_mode()
-
-            if not is_maintenance:
-                await self.app(scope, receive, send)
-                return
-
+        if is_maintenance:
             if not maintenance_mode.is_admin_user(request):
-                response = await maintenance_mode.create_maintenance_response(
+                return await maintenance_mode.create_maintenance_response(
                     maintenance_message,
-                    request.url.path,
+                    request.url.path
                 )
-                await response(scope, receive, send)
-                return
 
-            async def send_with_admin_headers(message: dict) -> None:
-                if message["type"] == "http.response.start":
-                    headers = list(message.get("headers", []))
-                    headers.append((b"x-maintenance-mode", b"true"))
-                    headers.append((b"x-admin-access", b"true"))
-                    message = {**message, "headers": headers}
-                await send(message)
+            response = await call_next(request)
+            response.headers["X-Maintenance-Mode"] = "true"
+            response.headers["X-Admin-Access"] = "true"
+            return response
 
-            await self.app(scope, receive, send_with_admin_headers)
+        return await call_next(request)
 
-        except Exception as e:
-            logger.error(f"Maintenance middleware error: {e}", exc_info=True)
-            await self.app(scope, receive, send)
+    except Exception as e:
+        logger.error(f"Maintenance middleware error: {e}", exc_info=True)
+        return await call_next(request)
 
 
 # ─── Maintenance Mode Management Functions ────────────────────────────────────
