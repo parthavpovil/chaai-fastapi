@@ -98,7 +98,13 @@ class WebSocketManager:
         # Format: {connection_id: WebSocketConnection}
         self.connections: Dict[str, WebSocketConnection] = {}
         
-        # Lock for thread-safe operations
+        # Lock for thread-safe operations.
+        # INVARIANT: never hold `_lock` across a network/await call (Redis
+        # subscribe/unsubscribe, websocket.send, websocket.close). If a slow
+        # client or stalled Redis can block the awaited call, the lock would
+        # freeze every other WS operation on this worker — historically a
+        # contributor to Gunicorn WORKER TIMEOUTs. Mutate the in-memory
+        # dicts inside the lock; release before any I/O.
         self._lock = asyncio.Lock()
         
         # Log instance creation
@@ -306,19 +312,18 @@ class WebSocketManager:
 
             logger.info(f"📊 After disconnect: {len(self.connections)} total connections, {len(self.workspace_connections)} workspaces")
 
-        # Unsubscribe from Redis channel when no more local connections for this workspace
+        # Network ops below run OUTSIDE the lock (see `_lock` invariant note).
         if workspace_empty:
             from app.services.redis_pubsub import redis_pubsub
             await redis_pubsub.unsubscribe(f"ws:agent:{workspace_id}")
-            
-            # Close WebSocket if still open
+
             try:
                 await connection.websocket.close()
-            except:
+            except Exception:
                 pass
-            
-            logger.info(f"WebSocket disconnected: {connection_id}")
-            return True
+
+        logger.info(f"WebSocket disconnected: {connection_id}")
+        return True
     
     async def broadcast_to_workspace(
         self,
@@ -616,6 +621,8 @@ class CustomerWebSocketManager:
         self.customer_connections: Dict[str, Dict[str, CustomerWebSocketConnection]] = {}
         # connection_id → CustomerWebSocketConnection  (fast disconnect/ping lookup)
         self.connections_by_id: Dict[str, CustomerWebSocketConnection] = {}
+        # INVARIANT: never hold `_lock` across a network/await call. See note
+        # on the agent-side `_lock` for the full rationale.
         self._lock = asyncio.Lock()
 
     async def authenticate_customer(
@@ -723,6 +730,7 @@ class CustomerWebSocketManager:
         """Remove connection from both pools and close the WebSocket."""
         workspace_empty = False
         workspace_id = None
+        connection = None
         async with self._lock:
             connection = self.connections_by_id.get(connection_id)
             if not connection:
@@ -742,12 +750,15 @@ class CustomerWebSocketManager:
 
             self.connections_by_id.pop(connection_id, None)
 
-            try:
-                await connection.websocket.close()
-            except Exception:
-                pass
+        # Network ops below run OUTSIDE the lock (see `_lock` invariant note).
+        # Holding the lock across `websocket.close()` previously meant a slow or
+        # unresponsive client could stall all other WS operations on this worker.
+        try:
+            await connection.websocket.close()
+        except Exception:
+            pass
 
-            logger.info(f"Customer WS disconnected: {connection_id}")
+        logger.info(f"Customer WS disconnected: {connection_id}")
 
         if workspace_empty and workspace_id:
             from app.services.redis_pubsub import redis_pubsub
