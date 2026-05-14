@@ -69,30 +69,19 @@ def _init_sentry() -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-    """Application lifespan manager"""
-    # Startup
+async def lifespan(_app: FastAPI):
+    """Application lifespan manager.
+
+    Web workers run ONLY per-worker tasks (stale-WS cleanup, Redis pub/sub
+    listener — both operate on local in-memory state). Recurring singleton
+    jobs (monitoring, agent-status, reconciliation, metrics) run in the
+    dedicated arq worker container — see app/tasks/scheduled_jobs.py.
+    """
     _init_sentry()
     await init_db()
-    
-    # Start monitoring tasks in production
-    if not settings.DEBUG:
-        from app.tasks.monitoring_tasks import start_monitoring_tasks
-        await start_monitoring_tasks()
 
-    # Start agent status heartbeat check
-    from app.tasks.agent_status_tasks import start_agent_status_tasks
-    await start_agent_status_tasks()
-
-    # Start reconciliation sweeper — re-enqueues orphaned webchat messages
-    from app.tasks.reconciliation import start_reconciliation_sweeper
-    await start_reconciliation_sweeper()
-
-    # Start customer WebSocket stale-connection cleanup
-    import asyncio
     asyncio.create_task(websocket_webchat.cleanup_stale_customer_connections())
 
-    # Start Redis pub/sub listener — forwards cross-worker broadcasts to local WS connections
     from app.services.redis_pubsub import redis_pubsub
     from app.services.websocket_manager import websocket_manager, customer_websocket_manager
 
@@ -107,17 +96,6 @@ async def lifespan(app: FastAPI):
     asyncio.create_task(redis_pubsub.start_listener(_redis_dispatch))
 
     yield
-    
-    # Shutdown
-    if not settings.DEBUG:
-        from app.tasks.monitoring_tasks import stop_monitoring_tasks
-        await stop_monitoring_tasks()
-
-    from app.tasks.agent_status_tasks import stop_agent_status_tasks
-    await stop_agent_status_tasks()
-
-    from app.tasks.reconciliation import stop_reconciliation_sweeper
-    await stop_reconciliation_sweeper()
 
     await close_db()
 
@@ -173,7 +151,10 @@ class SplitCORSMiddleware(BaseHTTPMiddleware):
         if request.method == "OPTIONS":
             response = Response(status_code=200)
         else:
-            response = await call_next(request)
+            try:
+                response = await call_next(request)
+            except Exception:
+                response = Response(status_code=500)
 
         if is_webchat:
             response.headers["Access-Control-Allow-Origin"] = "*"
