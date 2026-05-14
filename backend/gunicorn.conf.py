@@ -8,8 +8,12 @@ import os
 bind = "0.0.0.0:8000"
 backlog = 2048
 
-# Worker processes - keep low to avoid DB connection exhaustion
-workers = min(multiprocessing.cpu_count() * 2 + 1, 4)
+# Worker processes — capped at 2 because the container is limited to
+# cpus: "1.0" in docker-compose.prod.yml. More workers just contend for
+# the single CPU during cold import (each worker re-imports the full
+# FastAPI app, ~45s on this VPS) and inflate startup past the healthcheck
+# start_period.
+workers = min(multiprocessing.cpu_count() * 2 + 1, 2)
 worker_class = "uvicorn.workers.UvicornWorker"
 worker_connections = 1000
 max_requests = 1000
