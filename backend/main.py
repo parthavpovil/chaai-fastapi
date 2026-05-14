@@ -3,9 +3,12 @@ ChatSaaS Backend - FastAPI Application Entry Point
 """
 import asyncio
 import functools
+import os
+import socket
 import time
 from contextlib import asynccontextmanager
 from urllib.parse import urlparse
+import redis.asyncio as aioredis
 from fastapi import FastAPI, Request, Response
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -68,31 +71,91 @@ def _init_sentry() -> None:
     logger.info("Sentry initialised (traces_sample_rate=%.2f)", settings.SENTRY_TRACES_SAMPLE_RATE)
 
 
+_LEADER_KEY = "bg:task:leader"
+_LEADER_TTL = 30      # seconds before an unrenewed lock expires
+_LEADER_POLL = 12     # how often every worker checks/renews (must be < TTL/2)
+
+
+async def _leader_loop() -> None:
+    """
+    Distributed leader election via Redis.
+
+    Every worker runs this loop. Only one holds the lock at a time and runs the
+    singleton background tasks (monitoring, agent-status, reconciliation). If the
+    leader worker dies its lock expires within _LEADER_TTL seconds and a follower
+    automatically promotes itself.
+
+    The Redis pub/sub listener and stale-WS cleanup are per-worker (they operate
+    on local connections) and are started unconditionally in lifespan.
+    """
+    worker_id = f"{socket.gethostname()}:{os.getpid()}"
+    client = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+    singleton_started = False
+
+    async def _start_singletons() -> None:
+        nonlocal singleton_started
+        if singleton_started:
+            return
+        if not settings.DEBUG:
+            from app.tasks.monitoring_tasks import start_monitoring_tasks
+            await start_monitoring_tasks()
+        from app.tasks.agent_status_tasks import start_agent_status_tasks
+        await start_agent_status_tasks()
+        from app.tasks.reconciliation import start_reconciliation_sweeper
+        await start_reconciliation_sweeper()
+        singleton_started = True
+        logger.info("bg-tasks: singleton tasks started (leader=%s)", worker_id)
+
+    async def _stop_singletons() -> None:
+        nonlocal singleton_started
+        if not singleton_started:
+            return
+        if not settings.DEBUG:
+            from app.tasks.monitoring_tasks import stop_monitoring_tasks
+            await stop_monitoring_tasks()
+        from app.tasks.agent_status_tasks import stop_agent_status_tasks
+        await stop_agent_status_tasks()
+        from app.tasks.reconciliation import stop_reconciliation_sweeper
+        await stop_reconciliation_sweeper()
+        singleton_started = False
+
+    try:
+        while True:
+            current_holder = await client.get(_LEADER_KEY)
+            if current_holder == worker_id:
+                # We hold the lock — renew it
+                await client.expire(_LEADER_KEY, _LEADER_TTL)
+                await _start_singletons()
+            elif current_holder is None:
+                # Lock is free — race to acquire it
+                acquired = await client.set(_LEADER_KEY, worker_id, nx=True, ex=_LEADER_TTL)
+                if acquired:
+                    logger.info("bg-tasks: worker %s became leader", worker_id)
+                    await _start_singletons()
+                # else: another worker won the race; we're a follower this round
+            # else: another worker holds it; nothing to do
+            await asyncio.sleep(_LEADER_POLL)
+    except asyncio.CancelledError:
+        if singleton_started:
+            # Release lock immediately so a follower can take over without waiting TTL
+            current = await client.get(_LEADER_KEY)
+            if current == worker_id:
+                await client.delete(_LEADER_KEY)
+            await _stop_singletons()
+        raise
+    finally:
+        await client.aclose()
+
+
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     """Application lifespan manager"""
-    # Startup
     _init_sentry()
     await init_db()
-    
-    # Start monitoring tasks in production
-    if not settings.DEBUG:
-        from app.tasks.monitoring_tasks import start_monitoring_tasks
-        await start_monitoring_tasks()
 
-    # Start agent status heartbeat check
-    from app.tasks.agent_status_tasks import start_agent_status_tasks
-    await start_agent_status_tasks()
-
-    # Start reconciliation sweeper — re-enqueues orphaned webchat messages
-    from app.tasks.reconciliation import start_reconciliation_sweeper
-    await start_reconciliation_sweeper()
-
-    # Start customer WebSocket stale-connection cleanup
-    import asyncio
+    # Per-worker tasks — must run in every worker (operate on local WS connections)
     asyncio.create_task(websocket_webchat.cleanup_stale_customer_connections())
 
-    # Start Redis pub/sub listener — forwards cross-worker broadcasts to local WS connections
     from app.services.redis_pubsub import redis_pubsub
     from app.services.websocket_manager import websocket_manager, customer_websocket_manager
 
@@ -106,18 +169,16 @@ async def lifespan(app: FastAPI):
 
     asyncio.create_task(redis_pubsub.start_listener(_redis_dispatch))
 
+    # Singleton background tasks — exactly one worker runs these at any time
+    leader_task = asyncio.create_task(_leader_loop())
+
     yield
-    
-    # Shutdown
-    if not settings.DEBUG:
-        from app.tasks.monitoring_tasks import stop_monitoring_tasks
-        await stop_monitoring_tasks()
 
-    from app.tasks.agent_status_tasks import stop_agent_status_tasks
-    await stop_agent_status_tasks()
-
-    from app.tasks.reconciliation import stop_reconciliation_sweeper
-    await stop_reconciliation_sweeper()
+    leader_task.cancel()
+    try:
+        await leader_task
+    except asyncio.CancelledError:
+        pass
 
     await close_db()
 

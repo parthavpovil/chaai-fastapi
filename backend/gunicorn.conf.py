@@ -41,7 +41,9 @@ keyfile = os.environ.get("SSL_KEYFILE")
 certfile = os.environ.get("SSL_CERTFILE")
 
 # Worker process settings
-preload_app = True
+# preload_app must stay False with UvicornWorker: forking after the event loop
+# starts corrupts asyncio/asyncpg/Redis state in child processes.
+preload_app = False
 worker_tmp_dir = "/dev/shm"
 
 # Security
@@ -60,14 +62,6 @@ def worker_int(worker):
 def pre_fork(server, worker):
     """Called just before a worker is forked."""
     server.log.info("Worker spawned (pid: %s)", worker.pid)
-
-def post_fork(server, worker):
-    """Called just after a worker has been forked."""
-    server.log.info("Worker spawned (pid: %s)", worker.pid)
-    # asyncpg / SQLAlchemy async pools are not fork-safe.
-    # Dispose the inherited pool so each worker reconnects with its own event loop.
-    from app.database import engine
-    engine.sync_engine.pool.dispose()
 
 def worker_abort(worker):
     """Called when a worker receives the SIGABRT signal."""
