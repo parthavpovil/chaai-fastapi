@@ -110,59 +110,83 @@ class WebChatConfigResponse(WidgetConfig):
 
 # ─── Helper Functions ─────────────────────────────────────────────────────────
 
-# In-process cache for widget_id → channel_id mapping.
-# widget_id is stored inside an encrypted JSONB blob (`channels.config`), so the
-# only way to find a channel by widget_id is to fetch ALL webchat channels and
-# decrypt each one's config. With even ~25 channels and Fernet's per-decrypt
-# cost, every /api/webchat/send call was spending 10–47 seconds in this function
-# — visible in pg_stat_user_tables as 285k seq_scans on `channels`.
+# widget_id lookup — four-layer cache stack:
+#   L1: in-process dict in widget_cache.py    ~ns hit, per-worker, 60s TTL
+#   L2: Redis "widget:{id}" key               ~1ms hit, shared, 300s TTL
+#   L3: indexed SELECT WHERE widget_id=$1     ~1ms (partial unique index
+#                                              from migration 033)
+#   L4: legacy scan+decrypt (defensive)       10–50s, logs WARNING. Only
+#                                              fires for deploy-race orphans
+#                                              (column NULL but widget_id in
+#                                              encrypted config). Removed once
+#                                              L4 firings = 0 for a week.
 #
-# The mapping is stable (widget_id is created once when a channel is configured
-# and never changes), so caching for 60s is safe. New widgets become usable
-# within 60s of creation. If a channel is deactivated mid-cache the fast-path
-# `is_active == True` filter returns None and we fall through to a rescan,
-# which also refreshes the cache.
-import time as _time
-_WIDGET_CACHE_TTL = 60.0  # seconds
-# widget_id -> (channel_id, expires_at)
-_widget_id_to_channel_id: Dict[str, tuple] = {}
+# L1+L2 are owned by app.services.widget_cache. Invalidation of L1+L2 is via
+# widget_cache.invalidate_widget_cache(widget_id), called from channel
+# update/delete endpoints. The is_active = True filter on every fetch makes
+# deactivations consistent within one L1 TTL even without explicit invalidation.
+
+
+async def _fetch_channel_by_id_if_active(
+    db: AsyncSession, channel_id: str
+) -> Optional[Channel]:
+    """Indexed PK lookup, gated on is_active=True. Used by L1/L2 hits."""
+    result = await db.execute(
+        select(Channel)
+        .where(Channel.id == channel_id)
+        .where(Channel.is_active == True)
+    )
+    return result.scalar_one_or_none()
 
 
 async def get_webchat_channel_by_widget_id(
     db: AsyncSession,
     widget_id: str,
 ) -> Optional[Channel]:
-    """
-    Get WebChat channel by widget_id and validate it's active.
+    """Get WebChat channel by widget_id and validate it's active.
 
-    Fast path (cache hit): one indexed SELECT by primary key (~1 ms).
-    Slow path (cache miss): scan all webchat channels and decrypt their
-    configs (10–47 s under load on this VPS).
+    Typical request hits L1 (~ns) once the worker is warm. First request on
+    a cold worker hits L2 (~1ms). L2 miss falls through to L3 (~1ms indexed
+    SELECT). L4 is defensive only and intentionally noisy.
     """
-    now = _time.monotonic()
-    cached = _widget_id_to_channel_id.get(widget_id)
-    if cached and cached[1] > now:
-        channel_id = cached[0]
-        result = await db.execute(
-            select(Channel)
-            .where(Channel.id == channel_id)
-            .where(Channel.is_active == True)
-        )
-        channel = result.scalar_one_or_none()
+    from app.services.widget_cache import (
+        get_cached_channel_id,
+        set_cached_channel_id,
+    )
+
+    # L1 + L2: get_cached_channel_id checks L1 first then L2, and
+    # transparently fills L1 from L2 on hit.
+    cached_channel_id = await get_cached_channel_id(widget_id)
+    if cached_channel_id:
+        channel = await _fetch_channel_by_id_if_active(db, cached_channel_id)
         if channel:
             return channel
-        # Cache entry stale (channel deactivated or deleted) — fall through.
-        _widget_id_to_channel_id.pop(widget_id, None)
+        # Stale cache (channel deactivated between cache fill and now).
+        # Fall through; the L3 SELECT will return None and we won't
+        # re-cache.
 
-    # Slow path: scan + decrypt every webchat channel's config.
+    # L3: indexed SELECT against the widget_id column (migration 033).
+    result = await db.execute(
+        select(Channel)
+        .where(Channel.widget_id == widget_id)
+        .where(Channel.is_active == True)
+    )
+    channel = result.scalar_one_or_none()
+    if channel:
+        await set_cached_channel_id(widget_id, str(channel.id))
+        return channel
+
+    # L4: defensive fallback. Only fires when a webchat channel exists
+    # with widget_id in encrypted config but NULL in the column — a
+    # deploy-race orphan. Logs loud WARNING so an operator can backfill.
     result = await db.execute(
         select(Channel)
         .where(Channel.type == "webchat")
         .where(Channel.is_active == True)
+        .where(Channel.widget_id.is_(None))
     )
-    channels = result.scalars().all()
-
-    for channel in channels:
+    orphan_channels = result.scalars().all()
+    for channel in orphan_channels:
         if not channel.config:
             continue
         try:
@@ -175,17 +199,12 @@ async def get_webchat_channel_by_widget_id(
                         decrypted_config[key] = value
                 else:
                     decrypted_config[key] = value
-
-            channel_widget_id = decrypted_config.get("widget_id")
-            if channel_widget_id:
-                # Warm the cache for every channel we decrypt, not just the
-                # matching one — concurrent requests for sibling widgets will
-                # now hit the cache too.
-                _widget_id_to_channel_id[channel_widget_id] = (
-                    str(channel.id),
-                    now + _WIDGET_CACHE_TTL,
+            if decrypted_config.get("widget_id") == widget_id:
+                logger.warning(
+                    "L4 fallback fired for channel %s — widget_id found in "
+                    "encrypted config but NULL in column. Run a backfill.",
+                    channel.id,
                 )
-            if channel_widget_id == widget_id:
                 return channel
         except Exception:
             continue
@@ -333,7 +352,11 @@ async def get_webchat_config(
                 detail=f"Failed to load WebChat configuration: {str(e)}"
             )
 
-        if "widget_id" not in config:
+        # widget_id is the indexed plaintext column (migration 033). For
+        # transition rows where the column is still NULL, fall back to the
+        # decrypted config value so old data doesn't 500.
+        widget_id_val = channel.widget_id or config.get("widget_id")
+        if not widget_id_val:
             raise HTTPException(
                 status_code=500,
                 detail="WebChat configuration missing widget_id"
@@ -344,7 +367,7 @@ async def get_webchat_config(
         widget_cfg = WidgetConfig(**config_fields)
 
         return WebChatConfigResponse(
-            widget_id=config["widget_id"],
+            widget_id=widget_id_val,
             workspace_id=str(channel.workspace_id),
             **widget_cfg.model_dump(),
         )
@@ -370,18 +393,9 @@ async def send_webchat_message(
     It validates the widget_id, enforces rate limits, and processes the message
     through the AI pipeline.
     """
-    import time as _time
-    _t0 = _time.monotonic()
-    def _tick(label: str) -> None:
-        # Compact step-timing log to pinpoint which phase of /api/webchat/send
-        # is slow when nginx returns 504. Remove once the cause is identified.
-        logger.info("[webchat/send] %s @ +%.2fs", label, _time.monotonic() - _t0)
-
-    _tick("enter")
     try:
         # 1. Validate widget_id and get channel
         channel = await get_webchat_channel_by_widget_id(db, request.widget_id)
-        _tick("channel lookup done")
         if not channel:
             raise HTTPException(
                 status_code=404,
@@ -397,7 +411,6 @@ async def send_webchat_message(
                 session_token=session_token,
                 workspace_id=str(channel.workspace_id)
             )
-            _tick("rate limit done")
         except RateLimitExceededError as e:
             return JSONResponse(
                 status_code=429,
@@ -420,7 +433,6 @@ async def send_webchat_message(
             message_content = request.message or "[User sent a file]"
 
             # Step 1: Process incoming message
-            _tick("calling process_incoming_message")
             processing_result = await process_incoming_message(
                 db=db,
                 workspace_id=str(channel.workspace_id),
@@ -439,7 +451,6 @@ async def send_webchat_message(
                 channel_type="webchat",
             )
 
-            _tick("process_incoming_message done")
             conversation_id = str(processing_result["conversation"].id)
             user_message_id = str(processing_result["message"].id)
 
@@ -452,7 +463,6 @@ async def send_webchat_message(
                 msg_obj.media_size = request.media_size
                 msg_obj.msg_type = msg_type
                 await db.commit()
-                _tick("media commit done")
 
             # Send WebSocket notification for customer message
             await notify_new_message(
@@ -461,7 +471,6 @@ async def send_webchat_message(
                 conversation_id=conversation_id,
                 message_id=user_message_id
             )
-            _tick("notify_new_message done")
 
             # Hand off the AI pipeline to the background worker.
             # The reply will arrive via WebSocket (notify_customer_new_message).
@@ -469,7 +478,6 @@ async def send_webchat_message(
                 select(Workspace.tier).where(Workspace.id == channel.workspace_id)
             )
             workspace_tier = workspace_tier_result.scalar_one_or_none() or "free"
-            _tick("workspace tier lookup done")
 
             from app.tasks.message_tasks import enqueue_message_job
             await enqueue_message_job(
@@ -480,7 +488,6 @@ async def send_webchat_message(
                 channel_id=str(channel.id),
                 tier=workspace_tier,
             )
-            _tick("enqueue done")
             response_content = None
             
         except BlockedContactError:

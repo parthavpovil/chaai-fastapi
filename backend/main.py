@@ -68,6 +68,37 @@ def _init_sentry() -> None:
     logger.info("Sentry initialised (traces_sample_rate=%.2f)", settings.SENTRY_TRACES_SAMPLE_RATE)
 
 
+async def _prewarm_widget_cache() -> None:
+    """Hydrate L1 + L2 widget caches with every active webchat channel.
+
+    Called once per worker boot from inside the lifespan. Worst case the
+    DB is slow and the asyncio.wait_for around this call gives up after
+    3s — every layer below falls through to lazy warming and the worker
+    still serves traffic correctly, just one round-trip slower per
+    distinct widget on cold workers.
+    """
+    from sqlalchemy import select as _select
+    from app.database import AsyncSessionLocal as _AsyncSessionLocal
+    from app.models.channel import Channel as _Channel
+    from app.services.widget_cache import bulk_set_cached_channel_ids
+
+    mapping: dict[str, str] = {}
+    async with _AsyncSessionLocal() as db:
+        result = await db.execute(
+            _select(_Channel.id, _Channel.widget_id)
+            .where(_Channel.type == "webchat")
+            .where(_Channel.is_active == True)
+            .where(_Channel.widget_id.isnot(None))
+        )
+        for channel_id, widget_id in result.all():
+            mapping[widget_id] = str(channel_id)
+
+    # bulk_set_cached_channel_ids fills BOTH L1 (in-process dict inside
+    # widget_cache) and L2 (Redis pipeline).
+    await bulk_set_cached_channel_ids(mapping)
+    logger.info("widget cache pre-warmed with %d webchat channels", len(mapping))
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Application lifespan manager.
@@ -79,6 +110,17 @@ async def lifespan(_app: FastAPI):
     """
     _init_sentry()
     await init_db()
+
+    # Pre-warm the widget_id → channel_id cache (L1 in-process + L2 Redis)
+    # so the very first /api/webchat/send on this worker doesn't pay a
+    # round-trip. Bounded by a short timeout so a slow Postgres can't
+    # block the worker from reporting "Application startup complete".
+    try:
+        await asyncio.wait_for(_prewarm_widget_cache(), timeout=3.0)
+    except asyncio.TimeoutError:
+        logger.warning("widget cache pre-warm exceeded 3s — workers will warm lazily")
+    except Exception as exc:
+        logger.warning("widget cache pre-warm failed: %s — workers will warm lazily", exc)
 
     asyncio.create_task(websocket_webchat.cleanup_stale_customer_connections())
 
