@@ -110,50 +110,86 @@ class WebChatConfigResponse(WidgetConfig):
 
 # ─── Helper Functions ─────────────────────────────────────────────────────────
 
+# In-process cache for widget_id → channel_id mapping.
+# widget_id is stored inside an encrypted JSONB blob (`channels.config`), so the
+# only way to find a channel by widget_id is to fetch ALL webchat channels and
+# decrypt each one's config. With even ~25 channels and Fernet's per-decrypt
+# cost, every /api/webchat/send call was spending 10–47 seconds in this function
+# — visible in pg_stat_user_tables as 285k seq_scans on `channels`.
+#
+# The mapping is stable (widget_id is created once when a channel is configured
+# and never changes), so caching for 60s is safe. New widgets become usable
+# within 60s of creation. If a channel is deactivated mid-cache the fast-path
+# `is_active == True` filter returns None and we fall through to a rescan,
+# which also refreshes the cache.
+import time as _time
+_WIDGET_CACHE_TTL = 60.0  # seconds
+# widget_id -> (channel_id, expires_at)
+_widget_id_to_channel_id: Dict[str, tuple] = {}
+
+
 async def get_webchat_channel_by_widget_id(
-    db: AsyncSession, 
-    widget_id: str
+    db: AsyncSession,
+    widget_id: str,
 ) -> Optional[Channel]:
     """
-    Get WebChat channel by widget_id and validate it's active
-    
-    Args:
-        db: Database session
-        widget_id: Widget ID to lookup
-        
-    Returns:
-        Channel instance or None if not found/inactive
+    Get WebChat channel by widget_id and validate it's active.
+
+    Fast path (cache hit): one indexed SELECT by primary key (~1 ms).
+    Slow path (cache miss): scan all webchat channels and decrypt their
+    configs (10–47 s under load on this VPS).
     """
+    now = _time.monotonic()
+    cached = _widget_id_to_channel_id.get(widget_id)
+    if cached and cached[1] > now:
+        channel_id = cached[0]
+        result = await db.execute(
+            select(Channel)
+            .where(Channel.id == channel_id)
+            .where(Channel.is_active == True)
+        )
+        channel = result.scalar_one_or_none()
+        if channel:
+            return channel
+        # Cache entry stale (channel deactivated or deleted) — fall through.
+        _widget_id_to_channel_id.pop(widget_id, None)
+
+    # Slow path: scan + decrypt every webchat channel's config.
     result = await db.execute(
         select(Channel)
         .where(Channel.type == "webchat")
         .where(Channel.is_active == True)
     )
-    
     channels = result.scalars().all()
-    
-    # Check each channel's config for matching widget_id
+
     for channel in channels:
-        if channel.config:
-            try:
-                # Decrypt config - each field is encrypted separately
-                decrypted_config = {}
-                for key, value in channel.config.items():
-                    if isinstance(value, str) and value:
-                        try:
-                            decrypted_config[key] = decrypt_credential(value)
-                        except Exception:
-                            # If decryption fails, use value as-is
-                            decrypted_config[key] = value
-                    else:
+        if not channel.config:
+            continue
+        try:
+            decrypted_config = {}
+            for key, value in channel.config.items():
+                if isinstance(value, str) and value:
+                    try:
+                        decrypted_config[key] = decrypt_credential(value)
+                    except Exception:
                         decrypted_config[key] = value
-                
-                if decrypted_config.get("widget_id") == widget_id:
-                    return channel
-            except Exception:
-                # Skip channels with invalid config
-                continue
-    
+                else:
+                    decrypted_config[key] = value
+
+            channel_widget_id = decrypted_config.get("widget_id")
+            if channel_widget_id:
+                # Warm the cache for every channel we decrypt, not just the
+                # matching one — concurrent requests for sibling widgets will
+                # now hit the cache too.
+                _widget_id_to_channel_id[channel_widget_id] = (
+                    str(channel.id),
+                    now + _WIDGET_CACHE_TTL,
+                )
+            if channel_widget_id == widget_id:
+                return channel
+        except Exception:
+            continue
+
     return None
 
 
