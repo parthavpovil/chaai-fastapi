@@ -112,12 +112,47 @@ jobs:
           DOCKER_IMAGE="${{ env.DOCKER_IMAGE_NAME }}"
           COMMIT_SHA="${{ inputs.commit_sha || github.sha }}"
           SHORT_SHA="${COMMIT_SHA:0:7}"
+          DISCORD_WEBHOOK="${{ secrets.DISCORD_WEBHOOK }}"
+          DEPLOY_STATUS="failed"
+
+          notify_discord() {
+            local message="$1"
+
+            if [ -z "${DISCORD_WEBHOOK}" ]; then
+              return 0
+            fi
+
+            local payload
+            payload=$(DISCORD_MESSAGE="$message" python3 - <<'PY'
+import json
+import os
+
+print(json.dumps({"content": os.environ["DISCORD_MESSAGE"]}))
+PY
+            ) || return 0
+
+            curl -fsS \
+              -H "Content-Type: application/json" \
+              -d "$payload" \
+              "$DISCORD_WEBHOOK" >/dev/null 2>&1 || true
+          }
+
+          on_exit() {
+            if [ "$DEPLOY_STATUS" = "success" ]; then
+              notify_discord "✅ Deployment succeeded for commit ${SHORT_SHA} at $(date)"
+            else
+              notify_discord "❌ Deployment failed for commit ${SHORT_SHA} at $(date)"
+            fi
+          }
+
+          trap on_exit EXIT
           
           echo "=========================================="
           echo "ChatSaaS Backend Deployment"
           echo "Commit: ${COMMIT_SHA}"
           echo "Time: $(date)"
           echo "=========================================="
+          notify_discord "🚀 Deployment started for commit ${SHORT_SHA} at $(date)"
           
           # Create deployment directory if it doesn't exist
           sudo mkdir -p ${DEPLOY_PATH}
@@ -286,6 +321,7 @@ jobs:
           echo "Commit: ${COMMIT_SHA}"
           echo "Time: $(date)"
           echo "=========================================="
+          DEPLOY_STATUS="success"
           DEPLOY_SCRIPT
           
           chmod +x /tmp/deploy.sh
