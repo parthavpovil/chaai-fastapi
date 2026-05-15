@@ -124,11 +124,11 @@ jobs:
 
             local payload
             payload=$(DISCORD_MESSAGE="$message" python3 - <<'PY'
-import json
-import os
+          import json
+          import os
 
-print(json.dumps({"content": os.environ["DISCORD_MESSAGE"]}))
-PY
+          print(json.dumps({"content": os.environ["DISCORD_MESSAGE"]}))
+          PY
             ) || return 0
 
             curl -fsS \
