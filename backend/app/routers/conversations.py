@@ -174,19 +174,27 @@ async def list_conversations(
         if assigned_to_me and agent_id:
             conversations = [c for c in conversations if c.assigned_agent_id == agent_id]
         
-        # Convert to response format
+        # Batched last-message lookup: one DISTINCT ON query for all conversations
+        # in this page, instead of one SELECT per conversation. Combined with the
+        # denormalized conversations.message_count (migration 034) this turns the
+        # endpoint's per-request query count from 1 + 2*limit (101 at limit=50)
+        # down to 2.
+        from sqlalchemy import select
+        from app.models.message import Message
+        conv_ids = [c.id for c in conversations]
+        last_msg_by_conv: dict = {}
+        if conv_ids:
+            last_msg_rows = await db.execute(
+                select(Message)
+                .where(Message.conversation_id.in_(conv_ids))
+                .order_by(Message.conversation_id, Message.created_at.desc())
+                .distinct(Message.conversation_id)
+            )
+            last_msg_by_conv = {m.conversation_id: m for m in last_msg_rows.scalars().all()}
+
         conversation_responses = []
         for conv in conversations:
-            # Get last message and count via queries (avoid lazy-loading in async)
-            from sqlalchemy import select, func
-            from app.models.message import Message
-            last_msg_result = await db.execute(
-                select(Message)
-                .where(Message.conversation_id == conv.id)
-                .order_by(Message.created_at.desc())
-                .limit(1)
-            )
-            last_msg_row = last_msg_result.scalar_one_or_none()
+            last_msg_row = last_msg_by_conv.get(conv.id)
             last_message = None
             if last_msg_row:
                 last_message = MessageResponse(
@@ -198,11 +206,6 @@ async def list_conversations(
                     metadata=last_msg_row.extra_data
                 )
 
-            msg_count_result = await db.execute(
-                select(func.count(Message.id)).where(Message.conversation_id == conv.id)
-            )
-            message_count = msg_count_result.scalar() or 0
-            
             conversation_responses.append(ConversationResponse(
                 id=str(conv.id),
                 status=conv.status,
@@ -216,7 +219,7 @@ async def list_conversations(
                 assigned_agent_id=str(conv.assigned_agent_id) if conv.assigned_agent_id else None,
                 assigned_agent_name=conv.assigned_agent.name if conv.assigned_agent else None,
                 escalation_reason=conv.escalation_reason,
-                message_count=message_count,
+                message_count=conv.message_count or 0,
                 last_message=last_message,
                 created_at=conv.created_at.isoformat(),
                 updated_at=conv.updated_at.isoformat()

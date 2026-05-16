@@ -4,7 +4,7 @@ Customer conversation threading and status management
 """
 from uuid import UUID, uuid4
 from datetime import datetime
-from sqlalchemy import Column, Index, String, DateTime, func, ForeignKey
+from sqlalchemy import Column, Index, Integer, String, DateTime, func, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID as PostgresUUID, JSONB
 from sqlalchemy.orm import relationship
 
@@ -20,6 +20,9 @@ class Conversation(Base):
         # Covers equality-filter queries (e.g. WHERE status = 'escalated').
         # Created in migration 0001; declared here for documentation.
         Index("ix_conversations_workspace_status", "workspace_id", "status"),
+        # Recency list using denormalized last_message_at (added in migration
+        # 034). Declared here for documentation only.
+        Index("ix_conversations_workspace_lastmsg", "workspace_id", "last_message_at"),
     )
 
     id = Column(PostgresUUID(as_uuid=True), primary_key=True, default=uuid4)
@@ -32,6 +35,12 @@ class Conversation(Base):
     meta = Column("metadata", JSONB, default=dict, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    # Denormalized counters maintained at every Message INSERT site (see
+    # message_processor.create_message, escalation_router, conversation_manager).
+    # Backfill of pre-existing rows happens in migration 034.
+    last_message_at = Column(DateTime(timezone=True), nullable=True)
+    message_count = Column(Integer, nullable=False, server_default="0", default=0)
 
     resolved_at = Column(DateTime(timezone=True), nullable=True)
 
