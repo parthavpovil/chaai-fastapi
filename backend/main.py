@@ -127,13 +127,36 @@ async def lifespan(_app: FastAPI):
     from app.services.redis_pubsub import redis_pubsub
     from app.services.websocket_manager import websocket_manager, customer_websocket_manager
 
+    # Cap on outstanding fanout tasks per worker. Above this, drop with a logged
+    # error rather than risk unbounded memory growth under a pub/sub storm. The
+    # per-fanout work is bounded internally by _FANOUT_CONCURRENCY=64; this cap
+    # bounds the count of *concurrent fanouts* sharing the worker.
+    _MAX_INFLIGHT_FANOUT = 2000
+    _inflight_fanout = 0
+
+    async def _fanout(target, workspace_id: str, message: dict) -> None:
+        nonlocal _inflight_fanout
+        try:
+            await target(workspace_id, message)
+        finally:
+            _inflight_fanout -= 1
+
     async def _redis_dispatch(channel: str, message: dict) -> None:
+        nonlocal _inflight_fanout
+        if _inflight_fanout >= _MAX_INFLIGHT_FANOUT:
+            logger.error(
+                "ws fanout inflight cap hit (%d) — dropping channel=%s",
+                _inflight_fanout, channel,
+            )
+            return
         if channel.startswith("ws:agent:"):
             workspace_id = channel[len("ws:agent:"):]
-            await websocket_manager.deliver_to_local(workspace_id, message)
+            _inflight_fanout += 1
+            asyncio.create_task(_fanout(websocket_manager.deliver_to_local, workspace_id, message))
         elif channel.startswith("ws:customer:"):
             workspace_id = channel[len("ws:customer:"):]
-            await customer_websocket_manager.deliver_to_local(workspace_id, message)
+            _inflight_fanout += 1
+            asyncio.create_task(_fanout(customer_websocket_manager.deliver_to_local, workspace_id, message))
 
     asyncio.create_task(redis_pubsub.start_listener(_redis_dispatch))
 
