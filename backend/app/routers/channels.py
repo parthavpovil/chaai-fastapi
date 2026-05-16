@@ -109,9 +109,14 @@ def _build_webchat_platform_info(channel: Channel) -> tuple:
     """
     Return (widget_id, platform_info_dict) for a webchat channel.
     platform_info contains all 36 WidgetConfig fields with defaults for missing ones.
+
+    widget_id is now read from the indexed `channel.widget_id` column
+    (migration 033). The rest of WidgetConfig still lives in encrypted
+    `channel.config` and is decrypted here. For transition rows where the
+    column is NULL we fall back to the decrypted config value.
     """
     decrypted = _decrypt_channel_config(channel)
-    widget_id = decrypted.get("widget_id")
+    widget_id = channel.widget_id or decrypted.get("widget_id")
     config_fields = {k: v for k, v in decrypted.items() if k != "widget_id"}
     platform_info = WidgetConfig(**config_fields).model_dump()
     return widget_id, platform_info
@@ -175,12 +180,17 @@ async def create_channel(
             else:
                 encrypted_credentials[key] = value
         
-        # Create channel record
+        # Create channel record. For webchat channels we ALSO write widget_id
+        # to the new indexed column on `channels`. We intentionally still keep
+        # the encrypted widget_id inside `config` for one deploy cycle of
+        # backward compat — a follow-up cleanup PR removes it from config
+        # once we've confirmed no old-code worker is reading from there.
         channel = Channel(
             workspace_id=current_workspace.id,
             type=request.channel_type,
             is_active=request.is_active,
-            config=encrypted_credentials
+            config=encrypted_credentials,
+            widget_id=credentials_to_store.get("widget_id") if request.channel_type == "webchat" else None,
         )
         
         db.add(channel)
@@ -435,6 +445,13 @@ async def update_channel(
         await db.commit()
         await db.refresh(channel)
 
+        # Invalidate the widget cache (L1 + L2) on every webchat update —
+        # deactivation, config change, or a future widget_id change all
+        # need other workers to refetch. Cheap if a no-op.
+        if channel.type == "webchat" and channel.widget_id:
+            from app.services.widget_cache import invalidate_widget_cache
+            await invalidate_widget_cache(channel.widget_id)
+
         if channel.type == "webchat":
             widget_id_val, platform_info = _build_webchat_platform_info(channel)
         else:
@@ -451,7 +468,7 @@ async def update_channel(
             created_at=channel.created_at.isoformat(),
             updated_at=channel.created_at.isoformat()
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -496,10 +513,17 @@ async def delete_channel(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Channel not found"
             )
-        
+
+        # Capture widget_id before delete so we can invalidate caches after commit.
+        deleted_widget_id = channel.widget_id if channel.type == "webchat" else None
+
         await db.delete(channel)
         await db.commit()
-        
+
+        if deleted_widget_id:
+            from app.services.widget_cache import invalidate_widget_cache
+            await invalidate_widget_cache(deleted_widget_id)
+
         return Response(status_code=204)
         
     except HTTPException:

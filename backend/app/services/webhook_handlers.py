@@ -54,11 +54,14 @@ class WebhookHandlers:
             Channel instance or None
         """
         if channel_type == "webchat":
-            # For WebChat, identifier is widget_id stored inside config JSONB
+            # widget_id is the indexed plaintext column (migration 033).
+            # Previously this query used `Channel.config["widget_id"].astext`
+            # which never matched because the JSONB value was ciphertext —
+            # the migration fixes that latent bug as a side effect.
             result = await self.db.execute(
                 select(Channel)
                 .where(Channel.type == "webchat")
-                .where(Channel.config["widget_id"].astext == identifier)
+                .where(Channel.widget_id == identifier)
                 .where(Channel.is_active == True)
             )
         else:

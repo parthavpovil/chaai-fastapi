@@ -20,6 +20,11 @@ class Channel(Base):
     type = Column(String, nullable=False)  # telegram | whatsapp | instagram | webchat
     is_active = Column(Boolean, default=True, nullable=False)
     config = Column(JSONB, default=dict)  # encrypted credentials stored here
+    # widget_id: plaintext public identifier for webchat channels. NULL for other
+    # channel types. Promoted out of the encrypted `config` JSONB so it can be
+    # indexed — lookup-by-widget_id was an O(N)-scan-with-decrypt before
+    # migration 033 and was the cause of the May 2026 worker-timeout cascade.
+    widget_id = Column(String(36), nullable=True, unique=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
     # Relationships

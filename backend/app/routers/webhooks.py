@@ -344,14 +344,14 @@ async def razorpay_webhook(
     event_data = event.get("payload", {})
 
     # ── Idempotency gate ──────────────────────────────────────────────────────
-    import redis.asyncio as _aioredis
+    from app.services.redis_client import get_redis
 
     idempotency_key = f"rzp_event:{event_id}" if event_id else None
     redis_client = None
 
     if idempotency_key:
         try:
-            redis_client = _aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+            redis_client = get_redis()
             acquired = await redis_client.set(idempotency_key, "1", nx=True, ex=_RZP_EVENT_TTL)
             if not acquired:
                 logger.info("Razorpay event %s already processed — skipping", event_id)
@@ -376,12 +376,6 @@ async def razorpay_webhook(
             except Exception:
                 pass
         raise HTTPException(status_code=500, detail="Event processing failed")
-    finally:
-        if redis_client:
-            try:
-                await redis_client.aclose()
-            except Exception:
-                pass
 
     return {"status": "ok"}
 
@@ -404,14 +398,11 @@ async def _claim_inbound_message(provider: str, external_message_id: str) -> boo
     dropped.  The external_message_id unique DB constraint acts as a second guard.
     """
     try:
-        import redis.asyncio as _aioredis
+        from app.services.redis_client import get_redis
         key = f"inbound:{provider}:{external_message_id}"
-        r = _aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-        try:
-            acquired = await r.set(key, "1", nx=True, ex=_INBOUND_MSG_TTL)
-            return bool(acquired)
-        finally:
-            await r.aclose()
+        r = get_redis()
+        acquired = await r.set(key, "1", nx=True, ex=_INBOUND_MSG_TTL)
+        return bool(acquired)
     except Exception as e:
         logger.warning("Inbound idempotency Redis error for %s/%s (fail-open): %s",
                        provider, external_message_id, e)

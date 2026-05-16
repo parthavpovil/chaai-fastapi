@@ -20,11 +20,10 @@ def _key(jti: str) -> str:
     return f"{_KEY_PREFIX}{jti}"
 
 
-async def _get_redis():
-    """Return a Redis client using the app's REDIS_URL setting."""
-    import redis.asyncio as aioredis
-    from app.config import settings
-    return aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+def _get_redis():
+    """Return the process-wide pooled Redis client."""
+    from app.services.redis_client import get_redis
+    return get_redis()
 
 
 async def block_token(jti: str, exp: int) -> None:
@@ -41,9 +40,8 @@ async def block_token(jti: str, exp: int) -> None:
         if ttl_seconds <= 0:
             # Token already expired — no need to store
             return
-        redis = await _get_redis()
+        redis = _get_redis()
         await redis.set(_key(jti), "1", ex=ttl_seconds)
-        await redis.aclose()
     except Exception:
         logger.warning("Failed to add token to blocklist (jti=%s)", jti, exc_info=True)
 
@@ -57,9 +55,8 @@ async def is_blocked(jti: str) -> bool:
     due to a transient Redis outage.
     """
     try:
-        redis = await _get_redis()
+        redis = _get_redis()
         result = await redis.exists(_key(jti))
-        await redis.aclose()
         return bool(result)
     except Exception:
         logger.warning("Token blocklist check failed (jti=%s) — allowing request", jti, exc_info=True)

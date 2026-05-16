@@ -41,28 +41,24 @@ async def check_webchat_rate_limit(
     Raises RateLimitExceededError if the limit is exceeded.
     Silently passes on Redis errors to avoid blocking users during outages.
     """
-    import redis.asyncio as aioredis
-    from app.config import settings
+    from app.services.redis_client import get_redis
 
     key = f"webchat_rl:{workspace_id}:{session_token}"
     try:
-        r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-        try:
-            count = int(await r.eval(_INCR_LUA, 1, key, _WEBCHAT_WINDOW))
-            if count > _WEBCHAT_MAX:
-                ttl = await r.ttl(key)
-                retry_after = max(ttl, 1)
-                raise RateLimitExceededError(
-                    f"Rate limit exceeded: {_WEBCHAT_MAX} messages per minute. "
-                    f"Try again in {retry_after} seconds."
-                )
-            return {
-                "allowed": True,
-                "limit": _WEBCHAT_MAX,
-                "remaining": max(_WEBCHAT_MAX - count, 0),
-            }
-        finally:
-            await r.aclose()
+        r = get_redis()
+        count = int(await r.eval(_INCR_LUA, 1, key, _WEBCHAT_WINDOW))
+        if count > _WEBCHAT_MAX:
+            ttl = await r.ttl(key)
+            retry_after = max(ttl, 1)
+            raise RateLimitExceededError(
+                f"Rate limit exceeded: {_WEBCHAT_MAX} messages per minute. "
+                f"Try again in {retry_after} seconds."
+            )
+        return {
+            "allowed": True,
+            "limit": _WEBCHAT_MAX,
+            "remaining": max(_WEBCHAT_MAX - count, 0),
+        }
     except RateLimitExceededError:
         raise
     except Exception:

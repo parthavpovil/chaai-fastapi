@@ -430,26 +430,17 @@ class MessageProcessor:
             BlockedContactError: If contact is blocked
             OutsideBusinessHoursError: If outside hours with inform_and_pause behavior
         """
-        import time as _time
-        _pp_t0 = _time.monotonic()
-        def _ptick(label: str) -> None:
-            logger.info("[preprocess_message] %s @ +%.2fs", label, _time.monotonic() - _pp_t0)
-
-        _ptick("enter")
         # 1. Check maintenance mode (highest priority)
         is_maintenance, maintenance_message = await self.is_maintenance_mode()
-        _ptick("maintenance check done")
         if is_maintenance:
             raise MaintenanceModeError(maintenance_message)
 
         # 2. Check for duplicate messages
         if await self.check_message_duplicate(workspace_id, external_message_id):
             raise DuplicateMessageError(f"Message {external_message_id} already processed")
-        _ptick("duplicate check done")
 
         # 3. Validate processing limits
         await self.validate_processing_limits(workspace_id)
-        _ptick("validate limits done")
 
         # Resolve channel_type if not provided
         if channel_type is None:
@@ -457,7 +448,6 @@ class MessageProcessor:
                 select(Channel.type).where(Channel.id == channel_id)
             )
             channel_type = ch_result.scalar_one_or_none() or "unknown"
-        _ptick("channel_type resolved")
 
         # 4. Get or create contact
         contact = await self.get_or_create_contact(
@@ -468,7 +458,6 @@ class MessageProcessor:
             contact_data=contact_data,
             channel_type=channel_type,
         )
-        _ptick("get_or_create_contact done")
 
         # 4.5 Block check — create audit message + auto-reply, then halt
         if contact.is_blocked:
@@ -517,13 +506,11 @@ class MessageProcessor:
             channel_id=channel_id,
             channel_type=channel_type,
         )
-        _ptick("get_or_create_conversation done")
 
         # 5.5 Business hours check
         try:
             from app.services.business_hours_service import is_within_business_hours, get_outside_hours_behavior
             is_open, outside_msg = await is_within_business_hours(workspace_id, self.db)
-            _ptick("business hours check done")
             if not is_open and outside_msg:
                 behavior = await get_outside_hours_behavior(workspace_id, self.db)
                 # Always persist customer message for audit trail
@@ -598,7 +585,6 @@ class MessageProcessor:
                 logger.warning("WhatsApp media download failed — storing message without media URL", exc_info=True)
 
         # 7. Create message
-        _ptick("about to create_message")
         message = await self.create_message(
             conversation_id=str(conversation.id),
             content=content,
@@ -615,7 +601,6 @@ class MessageProcessor:
             location_lng=location_lng,
             location_name=location_name,
         )
-        _ptick("create_message done — returning")
 
         return {
             "contact": contact,
