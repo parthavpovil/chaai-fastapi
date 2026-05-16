@@ -244,7 +244,7 @@ class EmbeddingService:
                 if r2_url:
                     try:
                         from app.services.r2_storage import delete_r2_object
-                        delete_r2_object(r2_url)
+                        await delete_r2_object(r2_url)
                     except Exception:
                         pass
 
@@ -334,7 +334,7 @@ class EmbeddingService:
             if file_url:
                 try:
                     from app.services.r2_storage import delete_r2_object
-                    delete_r2_object(file_url)
+                    await delete_r2_object(file_url)
                 except Exception as e:
                     logger.warning(f"Failed to delete R2 object {file_url}: {e}")
 

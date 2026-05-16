@@ -1,7 +1,15 @@
 """
 Cloudflare R2 Storage Service
 S3-compatible object storage for WhatsApp media files
+
+boto3 is a synchronous client — every put_object / delete_object call blocks
+the event loop for the duration of the round-trip (typically 100–500 ms). All
+public functions here are async and route the blocking calls through
+asyncio.to_thread so the event loop stays responsive. Matches the existing
+to_thread pattern used by /health for head_bucket in main.py.
 """
+import asyncio
+import functools
 import uuid
 import mimetypes
 from botocore.config import Config
@@ -66,16 +74,19 @@ async def download_and_store_whatsapp_media(
         file_resp.raise_for_status()
         file_bytes = file_resp.content
 
-    # Step 3: Upload to R2
+    # Step 3: Upload to R2 (off-loaded to worker thread — boto3 is sync)
     ext = mimetypes.guess_extension(mime_type) or ""
     key = f"media/{workspace_id}/{uuid.uuid4()}{ext}"
 
     r2 = _get_r2_client()
-    r2.put_object(
-        Bucket=settings.R2_BUCKET_NAME,
-        Key=key,
-        Body=file_bytes,
-        ContentType=mime_type,
+    await asyncio.to_thread(
+        functools.partial(
+            r2.put_object,
+            Bucket=settings.R2_BUCKET_NAME,
+            Key=key,
+            Body=file_bytes,
+            ContentType=mime_type,
+        )
     )
 
     public_url = f"https://{settings.R2_PUBLIC_DOMAIN}/{key}"
@@ -102,11 +113,14 @@ async def upload_agent_media(
     key = f"media/{workspace_id}/{uuid.uuid4()}{ext}"
 
     r2 = _get_r2_client()
-    r2.put_object(
-        Bucket=settings.R2_BUCKET_NAME,
-        Key=key,
-        Body=file_bytes,
-        ContentType=mime_type,
+    await asyncio.to_thread(
+        functools.partial(
+            r2.put_object,
+            Bucket=settings.R2_BUCKET_NAME,
+            Key=key,
+            Body=file_bytes,
+            ContentType=mime_type,
+        )
     )
 
     return {
@@ -162,11 +176,14 @@ async def upload_rag_document(
     key = f"documents/{workspace_id}/{uuid.uuid4()}{ext}"
 
     r2 = _get_r2_client()
-    r2.put_object(
-        Bucket=settings.R2_BUCKET_NAME,
-        Key=key,
-        Body=file_bytes,
-        ContentType=mime_type,
+    await asyncio.to_thread(
+        functools.partial(
+            r2.put_object,
+            Bucket=settings.R2_BUCKET_NAME,
+            Key=key,
+            Body=file_bytes,
+            ContentType=mime_type,
+        )
     )
 
     return {
@@ -177,15 +194,18 @@ async def upload_rag_document(
     }
 
 
-def delete_r2_object(file_url: str) -> bool:
+async def delete_r2_object(file_url: str) -> bool:
     """
     Delete an R2 object by its public URL.
     Returns True on success, False if the URL doesn't belong to this R2 domain.
+    boto3.delete_object is sync; runs off the event loop via to_thread.
     """
     prefix = f"https://{settings.R2_PUBLIC_DOMAIN}/"
     if not file_url.startswith(prefix):
         return False  # not our R2 URL, skip silently
     key = file_url[len(prefix):]
     r2 = _get_r2_client()
-    r2.delete_object(Bucket=settings.R2_BUCKET_NAME, Key=key)
+    await asyncio.to_thread(
+        functools.partial(r2.delete_object, Bucket=settings.R2_BUCKET_NAME, Key=key)
+    )
     return True
