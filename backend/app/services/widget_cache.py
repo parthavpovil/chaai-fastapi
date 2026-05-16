@@ -60,11 +60,10 @@ def _widget_key(widget_id: str) -> str:
     return f"widget:{widget_id}"
 
 
-async def _redis():
-    """Short-lived Redis client. Mirrors app/services/workspace_cache.py."""
-    import redis.asyncio as aioredis
-    from app.config import settings
-    return aioredis.from_url(settings.REDIS_URL, decode_responses=True)
+def _redis():
+    """Process-wide pooled Redis client. Never aclose() per call."""
+    from app.services.redis_client import get_redis
+    return get_redis()
 
 
 async def get_cached_channel_id(widget_id: str) -> Optional[str]:
@@ -77,11 +76,8 @@ async def get_cached_channel_id(widget_id: str) -> Optional[str]:
     if cached:
         return cached
     try:
-        r = await _redis()
-        try:
-            channel_id = await r.get(_widget_key(widget_id))
-        finally:
-            await r.aclose()
+        r = _redis()
+        channel_id = await r.get(_widget_key(widget_id))
         if channel_id:
             _l1_set(widget_id, channel_id)
         return channel_id
@@ -94,11 +90,8 @@ async def set_cached_channel_id(widget_id: str, channel_id: str) -> None:
     """Populate both L1 and L2 with widget_id → channel_id."""
     _l1_set(widget_id, channel_id)
     try:
-        r = await _redis()
-        try:
-            await r.set(_widget_key(widget_id), str(channel_id), ex=_TTL)
-        finally:
-            await r.aclose()
+        r = _redis()
+        await r.set(_widget_key(widget_id), str(channel_id), ex=_TTL)
     except Exception as exc:
         logger.debug("widget cache write error (widget_id=%s): %s", widget_id, exc)
 
@@ -115,11 +108,8 @@ async def invalidate_widget_cache(widget_id: Optional[str]) -> None:
         return
     _l1_invalidate(widget_id)
     try:
-        r = await _redis()
-        try:
-            await r.delete(_widget_key(widget_id))
-        finally:
-            await r.aclose()
+        r = _redis()
+        await r.delete(_widget_key(widget_id))
     except Exception as exc:
         logger.debug("widget cache invalidation error (widget_id=%s): %s", widget_id, exc)
 
@@ -140,13 +130,10 @@ async def bulk_set_cached_channel_ids(mapping: dict) -> None:
         _l1_set(widget_id, channel_id)
     # L2 — Redis pipeline.
     try:
-        r = await _redis()
-        try:
-            async with r.pipeline(transaction=False) as pipe:
-                for widget_id, channel_id in mapping.items():
-                    pipe.set(_widget_key(widget_id), str(channel_id), ex=_TTL)
-                await pipe.execute()
-        finally:
-            await r.aclose()
+        r = _redis()
+        async with r.pipeline(transaction=False) as pipe:
+            for widget_id, channel_id in mapping.items():
+                pipe.set(_widget_key(widget_id), str(channel_id), ex=_TTL)
+            await pipe.execute()
     except Exception as exc:
         logger.debug("widget cache bulk write error (count=%d): %s", len(mapping), exc)

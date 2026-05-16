@@ -31,26 +31,22 @@ async def check_auth_rate_limit(request: Request, email: str, endpoint: str) -> 
     Raise HTTP 429 if email+IP has exceeded 10 auth attempts in 5 minutes.
     Silently passes on Redis errors to avoid blocking logins during an outage.
     """
-    import redis.asyncio as aioredis
-    from app.config import settings
+    from app.services.redis_client import get_redis
 
     ip = _client_ip(request)
     key = f"auth_rl:{endpoint}:{email.lower()}:{ip}"
 
     try:
-        r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-        try:
-            count = int(await r.eval(_INCR_LUA, 1, key, _WINDOW_SECONDS))
-            if count > _MAX_ATTEMPTS:
-                ttl = await r.ttl(key)
-                retry_after = str(max(ttl, 1))
-                raise HTTPException(
-                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail=f"Too many attempts. Try again in {retry_after} seconds.",
-                    headers={"Retry-After": retry_after},
-                )
-        finally:
-            await r.aclose()
+        r = get_redis()
+        count = int(await r.eval(_INCR_LUA, 1, key, _WINDOW_SECONDS))
+        if count > _MAX_ATTEMPTS:
+            ttl = await r.ttl(key)
+            retry_after = str(max(ttl, 1))
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Too many attempts. Try again in {retry_after} seconds.",
+                headers={"Retry-After": retry_after},
+            )
     except HTTPException:
         raise
     except Exception:

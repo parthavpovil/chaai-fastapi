@@ -418,15 +418,11 @@ async def list_dlq_entries(
     error, and failed_at.  Returns at most `limit` entries (newest first).
     """
     import json
-    import redis.asyncio as aioredis
-    from app.config import settings
+    from app.services.redis_client import get_redis
 
-    r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-    try:
-        raw_entries = await r.lrange("dlq:messages", 0, limit - 1)
-        length = await r.llen("dlq:messages")
-    finally:
-        await r.aclose()
+    r = get_redis()
+    raw_entries = await r.lrange("dlq:messages", 0, limit - 1)
+    length = await r.llen("dlq:messages")
 
     entries = []
     for raw in raw_entries:
@@ -446,15 +442,11 @@ async def clear_dlq(
 
     Use after investigating and resolving the root cause of failures.
     """
-    import redis.asyncio as aioredis
-    from app.config import settings
+    from app.services.redis_client import get_redis
 
-    r = aioredis.from_url(settings.REDIS_URL, decode_responses=True)
-    try:
-        deleted = await r.llen("dlq:messages")
-        await r.delete("dlq:messages")
-    finally:
-        await r.aclose()
+    r = get_redis()
+    deleted = await r.llen("dlq:messages")
+    await r.delete("dlq:messages")
 
     return {"cleared": deleted}
 

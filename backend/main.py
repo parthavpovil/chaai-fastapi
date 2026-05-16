@@ -139,6 +139,8 @@ async def lifespan(_app: FastAPI):
 
     yield
 
+    from app.services.redis_client import close_redis
+    await close_redis()
     await close_db()
 
 
