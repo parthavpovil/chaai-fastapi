@@ -17,6 +17,15 @@ from app.models.workspace import Workspace
 logger = logging.getLogger(__name__)
 
 
+# Per-send timeout and per-workspace fanout concurrency cap.
+# WebSocket.send_text() awaits TCP write — without a timeout it would park
+# indefinitely on a stalled client (suspended mobile tab, dead Wi-Fi). Without
+# the semaphore an unbounded gather() could spawn a coroutine per connection
+# per message under broadcast storms.
+_SEND_TIMEOUT = 3.0
+_FANOUT_CONCURRENCY = 64
+
+
 class WebSocketConnectionError(Exception):
     """Base exception for WebSocket connection errors"""
     pass
@@ -474,18 +483,36 @@ class WebSocketManager:
         """
         Deliver a Redis pub/sub message to local WebSocket connections for this workspace.
         Called by the Redis listener background task for every worker.
+
+        Sends fan out in bounded parallel (Semaphore=_FANOUT_CONCURRENCY) with a
+        per-send timeout (_SEND_TIMEOUT). One slow client cannot stall the rest:
+        Starlette's WebSocket.send_text() awaits TCP write and would otherwise
+        park indefinitely if the client's receive buffer is full. Disconnects
+        for failed sends are detached so cleanup never blocks the fanout path.
         """
         exclude_id = message.pop("_exclude", None)
         connections = self.workspace_connections.get(workspace_id, {}).copy()
-        failed = []
-        for conn_id, conn in connections.items():
-            if conn_id == exclude_id:
-                continue
-            ok = await conn.send_message(message)
-            if not ok:
-                failed.append(conn_id)
-        for conn_id in failed:
-            await self.disconnect(conn_id)
+        targets = [c for cid, c in connections.items() if cid != exclude_id]
+        if not targets:
+            return
+
+        sem = asyncio.Semaphore(_FANOUT_CONCURRENCY)
+
+        async def _send(conn: "WebSocketConnection") -> Optional[str]:
+            async with sem:
+                try:
+                    await asyncio.wait_for(
+                        conn.send_message(message),
+                        timeout=_SEND_TIMEOUT,
+                    )
+                    return None
+                except (asyncio.TimeoutError, Exception):
+                    return conn.connection_id
+
+        failed = await asyncio.gather(*(_send(c) for c in targets))
+        for cid in filter(None, failed):
+            # Detach disconnect cleanup so it never blocks the fanout path.
+            asyncio.create_task(self.disconnect(cid))
 
 
 # ─── Global WebSocket Manager Instance ────────────────────────────────────────
@@ -797,6 +824,11 @@ class CustomerWebSocketManager:
         """
         Deliver a Redis pub/sub message to the local customer connection for this workspace.
         Called by the Redis listener background task on every worker.
+
+        Customer fanout is 1-to-1 (one session per workspace pool key) so no
+        gather() is needed — but the same per-send timeout applies because a
+        suspended mobile widget tab will otherwise park send_text indefinitely.
+        Disconnect on failure is detached so cleanup never blocks the listener.
         """
         session_token = message.pop("_session", None)
         if not session_token:
@@ -813,13 +845,20 @@ class CustomerWebSocketManager:
         )
         if not connection:
             return
-        ok = await connection.send_message(message)
+        try:
+            await asyncio.wait_for(
+                connection.send_message(message),
+                timeout=_SEND_TIMEOUT,
+            )
+            ok = True
+        except (asyncio.TimeoutError, Exception):
+            ok = False
         logger.info(
             "📨 [DEBUG] customer deliver_to_local: send_message returned %s for message_id=%s",
             ok, message.get("message_id"),
         )
         if not ok:
-            await self.disconnect(connection.connection_id)
+            asyncio.create_task(self.disconnect(connection.connection_id))
 
     async def handle_ping(self, connection_id: str) -> bool:
         """Update last_ping and send pong."""
