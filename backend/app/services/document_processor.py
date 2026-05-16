@@ -3,6 +3,7 @@ Document Processing Pipeline
 Handles document upload, validation, text extraction, and chunking.
 All files are stored in Cloudflare R2 — no local filesystem writes.
 """
+import asyncio
 import io
 import logging
 from typing import List, Dict, Any, Optional
@@ -70,7 +71,13 @@ class DocumentProcessor:
         return True
 
     def extract_text_from_pdf(self, file_bytes: bytes) -> str:
-        """Extract text from PDF bytes in memory."""
+        """Extract text from PDF bytes in memory.
+
+        SYNCHRONOUS — PyPDF2 is CPU-bound. A 200-page PDF can take 5–15s and
+        would freeze the entire event loop if called directly from async code.
+        Async callers must wrap this in asyncio.to_thread (see process_document
+        and reprocess_document).
+        """
         try:
             text_content = []
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
@@ -91,7 +98,11 @@ class DocumentProcessor:
             raise TextExtractionError(f"PDF text extraction failed: {str(e)}")
 
     def extract_text_from_txt(self, file_bytes: bytes) -> str:
-        """Extract text from TXT bytes in memory, trying multiple encodings."""
+        """Extract text from TXT bytes in memory, trying multiple encodings.
+
+        Synchronous because the work is just .decode() over an in-memory buffer
+        — microseconds even on multi-MB files, faster than to_thread overhead.
+        """
         encodings = ['utf-8', 'utf-8-sig', 'latin-1', 'cp1252']
         for encoding in encodings:
             try:
@@ -103,7 +114,11 @@ class DocumentProcessor:
         raise TextExtractionError("Could not decode text file with any supported encoding")
 
     def extract_text(self, file_bytes: bytes, file_type: str) -> str:
-        """Dispatch text extraction based on file type."""
+        """Synchronous dispatch of text extraction based on file type.
+
+        SYNCHRONOUS — see extract_text_from_pdf docstring. Async callers must
+        wrap this in asyncio.to_thread when file_type can be '.pdf'.
+        """
         if file_type == '.pdf':
             return self.extract_text_from_pdf(file_bytes)
         elif file_type == '.txt':
@@ -194,7 +209,9 @@ class DocumentProcessor:
         self.validate_file(filename, file_size, content_type)
 
         file_ext = Path(filename).suffix.lower()
-        text_content = self.extract_text(file_content, file_ext)
+        # PDF parsing is CPU-bound — run off the event loop so concurrent
+        # requests don't stall during a large-document upload.
+        text_content = await asyncio.to_thread(self.extract_text, file_content, file_ext)
         chunks = self.chunk_text(text_content)
 
         mime = content_type or ('application/pdf' if file_ext == '.pdf' else 'text/plain')
@@ -274,7 +291,7 @@ class DocumentProcessor:
         # Delete R2 object best-effort (after successful DB cleanup)
         if file_url:
             try:
-                delete_r2_object(file_url)
+                await delete_r2_object(file_url)
             except Exception as e:
                 logger.warning(f"Failed to delete R2 object {file_url}: {e}")
 
@@ -305,9 +322,9 @@ class DocumentProcessor:
             resp.raise_for_status()
             file_bytes = resp.content
 
-        # Re-extract and re-chunk in memory
+        # Re-extract and re-chunk in memory (PDF parsing off-loaded to worker thread).
         file_ext = Path(doc.name).suffix.lower()
-        text_content = self.extract_text(file_bytes, file_ext)
+        text_content = await asyncio.to_thread(self.extract_text, file_bytes, file_ext)
         chunks = self.chunk_text(text_content)
 
         # Delete old chunks and regenerate
