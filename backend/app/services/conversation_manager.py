@@ -586,8 +586,11 @@ class ConversationManager:
 
         self.db.add(message)
 
-        # Update conversation timestamp
-        conversation.updated_at = datetime.now(timezone.utc)
+        # Update conversation timestamp + denormalized counters (see migration 034).
+        _now = datetime.now(timezone.utc)
+        conversation.updated_at = _now
+        conversation.last_message_at = _now
+        conversation.message_count = (conversation.message_count or 0) + 1
 
         await self.db.commit()
         await self.db.refresh(message)
@@ -621,7 +624,11 @@ class ConversationManager:
         )
 
         self.db.add(message)
-        conversation.updated_at = datetime.now(timezone.utc)
+        # Update conversation timestamp + denormalized counters (see migration 034).
+        _now = datetime.now(timezone.utc)
+        conversation.updated_at = _now
+        conversation.last_message_at = _now
+        conversation.message_count = (conversation.message_count or 0) + 1
 
         await self.db.commit()
         await self.db.refresh(message)

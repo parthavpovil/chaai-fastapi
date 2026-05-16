@@ -6,7 +6,7 @@ import logging
 from typing import Optional, Dict, Any, Tuple
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 logger = logging.getLogger(__name__)
 
@@ -339,6 +339,22 @@ class MessageProcessor:
         )
 
         self.db.add(message)
+
+        # Bump denormalized counters on the parent conversation. Read by
+        # /conversations list to eliminate the per-row last-message + count
+        # subqueries. See migration 034.
+        from sqlalchemy import update as _sa_update
+        from app.models.conversation import Conversation as _Conversation
+        await self.db.execute(
+            _sa_update(_Conversation)
+            .where(_Conversation.id == conversation_id)
+            .values(
+                last_message_at=func.now(),
+                message_count=_Conversation.message_count + 1,
+                updated_at=func.now(),
+            )
+        )
+
         await self.db.commit()
         await self.db.refresh(message)
 

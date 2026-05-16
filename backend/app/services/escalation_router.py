@@ -6,7 +6,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, update as _sa_update, func as _sa_func
 
 logger = logging.getLogger(__name__)
 
@@ -106,13 +106,24 @@ class EscalationRouter:
                 "escalated_at": datetime.now(timezone.utc).isoformat()
             }
         )
-        
+
         self.db.add(message)
+        # Bump denormalized counters on the parent conversation (see migration 034).
+        from app.models.conversation import Conversation as _Conversation
+        await self.db.execute(
+            _sa_update(_Conversation)
+            .where(_Conversation.id == conversation_id)
+            .values(
+                last_message_at=_sa_func.now(),
+                message_count=_Conversation.message_count + 1,
+                updated_at=_sa_func.now(),
+            )
+        )
         await self.db.commit()
         await self.db.refresh(message)
-        
+
         return message
-    
+
     async def send_customer_acknowledgment(
         self,
         conversation_id: str,
@@ -168,8 +179,19 @@ class EscalationRouter:
                 "has_agents": has_agents
             }
         )
-        
+
         self.db.add(message)
+        # Bump denormalized counters on the parent conversation (see migration 034).
+        from app.models.conversation import Conversation as _Conversation
+        await self.db.execute(
+            _sa_update(_Conversation)
+            .where(_Conversation.id == conversation_id)
+            .values(
+                last_message_at=_sa_func.now(),
+                message_count=_Conversation.message_count + 1,
+                updated_at=_sa_func.now(),
+            )
+        )
         await self.db.commit()
         await self.db.refresh(message)
         
