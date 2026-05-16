@@ -124,8 +124,22 @@ async def lifespan(_app: FastAPI):
 
     asyncio.create_task(websocket_webchat.cleanup_stale_customer_connections())
 
+    # Agent-side stale-connection sweeper. Mirrors the customer sweeper above.
+    # Previously defined-but-never-started, which leaked agent connections that
+    # closed without a WS close frame (laptop lid / killed browser) until the
+    # OS TCP socket timed out — hours on some kernels.
+    from app.routers.websocket import cleanup_stale_connections as cleanup_stale_agent_connections
+    asyncio.create_task(cleanup_stale_agent_connections())
+
     from app.services.redis_pubsub import redis_pubsub
     from app.services.websocket_manager import websocket_manager, customer_websocket_manager
+
+    # Server-initiated WS heartbeats. Without server pings, cloud LBs silently
+    # drop idle WS at 60–600 s and the connection persists half-open on the
+    # server side; the heartbeat loop disconnects unresponsive clients within
+    # _HEARTBEAT_INTERVAL + _HEARTBEAT_TIMEOUT seconds.
+    asyncio.create_task(websocket_manager.heartbeat_loop())
+    asyncio.create_task(customer_websocket_manager.heartbeat_loop())
 
     # Cap on outstanding fanout tasks per worker. Above this, drop with a logged
     # error rather than risk unbounded memory growth under a pub/sub storm. The

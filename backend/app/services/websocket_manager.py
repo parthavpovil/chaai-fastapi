@@ -25,6 +25,13 @@ logger = logging.getLogger(__name__)
 _SEND_TIMEOUT = 3.0
 _FANOUT_CONCURRENCY = 64
 
+# Server-initiated heartbeat. Cloud LBs (ALB, nginx) silently drop idle WS
+# connections at 60–600 s; without server pings a half-open connection persists
+# server-side until OS TCP timeout (hours). 30 s ping with a 10 s pong timeout
+# stays well inside the typical 60 s LB idle window.
+_HEARTBEAT_INTERVAL = 30
+_HEARTBEAT_TIMEOUT = 10
+
 
 class WebSocketConnectionError(Exception):
     """Base exception for WebSocket connection errors"""
@@ -514,6 +521,32 @@ class WebSocketManager:
             # Detach disconnect cleanup so it never blocks the fanout path.
             asyncio.create_task(self.disconnect(cid))
 
+    async def heartbeat_loop(self) -> None:
+        """Server-initiated WS heartbeat. Pings every connection every
+        _HEARTBEAT_INTERVAL seconds; disconnects on pong timeout.
+
+        Independent of the stale-connection sweeper, which catches the case
+        where the client *responds* to pings but the connection has otherwise
+        gone unused. The heartbeat catches half-open sockets (LB silently
+        dropped, client crashed without close frame).
+
+        Detaches each per-connection ping into its own task so one stalled
+        client cannot stall the whole loop.
+        """
+        while True:
+            try:
+                await asyncio.sleep(_HEARTBEAT_INTERVAL)
+                for conn in list(self.connections.values()):
+                    asyncio.create_task(self._ping_or_drop(conn))
+            except Exception as e:
+                logger.error(f"agent heartbeat loop error: {e}", exc_info=True)
+
+    async def _ping_or_drop(self, conn: "WebSocketConnection") -> None:
+        try:
+            await asyncio.wait_for(conn.send_ping(), timeout=_HEARTBEAT_TIMEOUT)
+        except Exception:
+            await self.disconnect(conn.connection_id)
+
 
 # ─── Global WebSocket Manager Instance ────────────────────────────────────────
 
@@ -630,6 +663,16 @@ class CustomerWebSocketConnection:
             return True
         except Exception as e:
             logger.warning(f"Failed to send customer WS message to {self.connection_id}: {e}")
+            return False
+
+    async def send_ping(self) -> bool:
+        """Server-initiated ping. Mirrors WebSocketConnection.send_ping."""
+        try:
+            return await self.send_message({
+                "type": "ping",
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            })
+        except Exception:
             return False
 
     def update_last_ping(self):
@@ -885,6 +928,24 @@ class CustomerWebSocketManager:
             if await self.disconnect(cid):
                 count += 1
         return count
+
+    async def heartbeat_loop(self) -> None:
+        """Server-initiated WS heartbeat for customer connections. See
+        WebSocketManager.heartbeat_loop for rationale.
+        """
+        while True:
+            try:
+                await asyncio.sleep(_HEARTBEAT_INTERVAL)
+                for conn in list(self.connections_by_id.values()):
+                    asyncio.create_task(self._ping_or_drop(conn))
+            except Exception as e:
+                logger.error(f"customer heartbeat loop error: {e}", exc_info=True)
+
+    async def _ping_or_drop(self, conn: "CustomerWebSocketConnection") -> None:
+        try:
+            await asyncio.wait_for(conn.send_ping(), timeout=_HEARTBEAT_TIMEOUT)
+        except Exception:
+            await self.disconnect(conn.connection_id)
 
 
 # ─── Global Customer WebSocket Manager Instance ───────────────────────────────
