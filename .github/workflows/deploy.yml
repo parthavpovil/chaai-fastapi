@@ -215,6 +215,11 @@ jobs:
           WHATSAPP_APP_SECRET=${{ secrets.WHATSAPP_APP_SECRET }}
           INSTAGRAM_APP_SECRET=${{ secrets.INSTAGRAM_APP_SECRET }}
           META_VERIFY_TOKEN=${{ secrets.META_VERIFY_TOKEN }}
+
+          # Unofficial WhatsApp (Baileys gateway)
+          WHATSAPP_GATEWAY_URL=${{ secrets.WHATSAPP_GATEWAY_URL }}
+          WHATSAPP_GATEWAY_API_KEY=${{ secrets.WHATSAPP_GATEWAY_API_KEY }}
+          WHATSAPP_WEBHOOK_SECRET=${{ secrets.WHATSAPP_WEBHOOK_SECRET }}
           
           # Storage
           STORAGE_PATH=/var/chatsaas/storage
